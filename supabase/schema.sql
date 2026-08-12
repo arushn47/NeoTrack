@@ -205,15 +205,52 @@ CREATE TABLE IF NOT EXISTS status_history (
 CREATE TABLE IF NOT EXISTS notifications (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  company_id UUID REFERENCES companies(id) ON DELETE SET NULL,
+  application_id UUID REFERENCES applications(id) ON DELETE SET NULL,
+  event_id UUID REFERENCES events(id) ON DELETE SET NULL,
   type TEXT NOT NULL CHECK (type IN (
     'new_company', 'shortlist_match', 'test_scheduled', 'interview_scheduled',
-    'deadline_approaching', 'status_change', 'sync_complete', 'general'
+    'ppt_scheduled', 'deadline_approaching', 'status_change', 'sync_complete', 'general'
   )),
   title TEXT NOT NULL,
   message TEXT,
-  company_id UUID REFERENCES companies(id) ON DELETE SET NULL,
+  body TEXT,
+  link TEXT,
+  dedupe_key TEXT UNIQUE,
   is_read BOOLEAN DEFAULT FALSE,
   created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- ============================================
+-- 12. push_subscriptions
+-- ============================================
+CREATE TABLE IF NOT EXISTS push_subscriptions (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  endpoint TEXT NOT NULL UNIQUE,
+  p256dh TEXT NOT NULL,
+  auth TEXT NOT NULL,
+  user_agent TEXT,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- ============================================
+-- 13. notification_preferences
+-- ============================================
+CREATE TABLE IF NOT EXISTS notification_preferences (
+  user_id UUID PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+  browser_push_enabled BOOLEAN DEFAULT TRUE,
+  in_app_enabled BOOLEAN DEFAULT TRUE,
+  notify_status_change BOOLEAN DEFAULT TRUE,
+  notify_shortlist BOOLEAN DEFAULT TRUE,
+  notify_tests BOOLEAN DEFAULT TRUE,
+  notify_interviews BOOLEAN DEFAULT TRUE,
+  notify_ppt BOOLEAN DEFAULT TRUE,
+  notify_new_jds BOOLEAN DEFAULT TRUE,
+  notify_reminders BOOLEAN DEFAULT TRUE,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
 -- ============================================

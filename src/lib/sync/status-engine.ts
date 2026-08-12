@@ -49,6 +49,7 @@ export async function processEmailForEventsAndStatus(
   userEmail: string,
   gmail?: import('googleapis').gmail_v1.Gmail
 ) {
+  const subjLower = email.subject.toLowerCase();
   const fullText = `${email.subject}\n${email.bodyPlain || email.bodySnippet}`;
 
   // 1. Check for Neo ID match in email body / subject
@@ -56,8 +57,25 @@ export async function processEmailForEventsAndStatus(
   let matchDetail: string | null = null;
   let matchType = 'email_body';
 
-  // 2. If attachments exist and gmail client is available, scan Excel attachments!
-  if (!isNeoMatched && gmail && email.hasAttachments && email.attachments.length > 0) {
+  // 2. If attachments exist and gmail client is available, scan Excel attachments ONLY if relevant!
+  const isAttachmentRelevant =
+    /shortlist|selection|eligible|candidate|student|list|test|assessment|interview|ppt|schedule|result|round|score/i.test(
+      subjLower
+    ) ||
+    /shortlist|selection list|eligible candidates|attendance/i.test(fullText) ||
+    email.attachments.some((a) =>
+      /shortlist|selection|eligible|candidate|student|list|test|assessment|interview|schedule|result/i.test(
+        a.filename
+      )
+    );
+
+  if (
+    !isNeoMatched &&
+    gmail &&
+    email.hasAttachments &&
+    email.attachments.length > 0 &&
+    isAttachmentRelevant
+  ) {
     const { scanExcelAttachmentsForNeoId } = await import('@/lib/sync/excel-parser');
     const excelMatch = await scanExcelAttachmentsForNeoId(
       gmail,
@@ -175,18 +193,37 @@ export async function processEmailForEventsAndStatus(
         const cleanTitle = email.subject.replace(/^(?:fwd|re|fw)\s*:\s*/i, '').slice(0, 60);
 
         // Insert new unique event into DB
-        await supabase.from('events').insert({
-          user_id: userId,
-          company_id: companyId,
-          source_email_id: emailDbId,
-          event_type: event.eventType,
-          title: `${cleanTitle} - ${event.title}`,
-          start_time: startTimeIso,
-          end_time: event.endTime ? event.endTime.toISOString() : null,
-          venue: event.venue,
-          mode: event.mode,
-          confidence: event.confidence,
-        });
+        const { data: insertedEvt } = await supabase
+          .from('events')
+          .insert({
+            user_id: userId,
+            company_id: companyId,
+            source_email_id: emailDbId,
+            event_type: event.eventType,
+            title: `${cleanTitle} - ${event.title}`,
+            start_time: startTimeIso,
+            end_time: event.endTime ? event.endTime.toISOString() : null,
+            venue: event.venue,
+            mode: event.mode,
+            confidence: event.confidence,
+          })
+          .select('id')
+          .single();
+
+        // Trigger Event Scheduled Notification (Web Push + In-App)
+        if (insertedEvt) {
+          const { notifyEventScheduled } = await import('@/lib/notifications/service');
+          const { data: comp } = await supabase.from('companies').select('name').eq('id', companyId).single();
+          await notifyEventScheduled({
+            userId,
+            companyId,
+            companyName: comp?.name || 'Drive',
+            eventType: event.eventType,
+            startTime: event.startTime,
+            venue: event.venue,
+            eventId: insertedEvt.id,
+          });
+        }
       }
     }
   }
@@ -196,7 +233,6 @@ export async function processEmailForEventsAndStatus(
 
   // 5. Compute updated application status
   let newStatus: string | null = null;
-  const subjLower = email.subject.toLowerCase();
 
   if (existingApp?.manual_override) {
     // User has manually set their status — preserve it
@@ -246,15 +282,32 @@ export async function processEmailForEventsAndStatus(
     appUpdate.status_source = matchType === 'excel_attachment' ? 'excel_attachment' : 'sync_engine';
     appUpdate.status_confidence = 'high';
 
-    // Insert real-time notification
-    await supabase.from('notifications').insert({
-      user_id: userId,
-      company_id: companyId,
-      type: newStatus === 'shortlisted' ? 'shortlist_match' : 'status_change',
-      title: newStatus === 'shortlisted' ? '🎉 Shortlist Match!' : 'Status Update',
-      message: `${email.subject.slice(0, 60)} marked status as ${newStatus.toUpperCase()}`,
-      is_read: false,
-    });
+    // Only notify if canonical status actually changed!
+    if (newStatus !== existingApp?.status) {
+      const { notifyStatusChange, notifyShortlistMatch } = await import('@/lib/notifications/service');
+      const { data: comp } = await supabase.from('companies').select('name').eq('id', companyId).single();
+      const companyName = comp?.name || 'Company';
+
+      if (isNeoMatched && (matchType === 'excel_attachment' || newStatus === 'shortlisted')) {
+        await notifyShortlistMatch({
+          userId,
+          companyId,
+          companyName,
+          neoId: userNeoId || userEmail,
+          emailSubject: email.subject,
+          sourceEmailId: emailDbId,
+        });
+      }
+
+      await notifyStatusChange({
+        userId,
+        companyId,
+        companyName,
+        oldStatus: existingApp?.status || null,
+        newStatus,
+        sourceEmailId: emailDbId,
+      });
+    }
   }
 
   // Upsert application

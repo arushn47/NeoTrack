@@ -15,7 +15,9 @@ export default async function DashboardPage() {
   const [
     { count: totalCompanies },
     { count: activeApplications },
+    { count: appliedCount },
     { count: shortlisted },
+    { count: notShortlisted },
     { count: rejected },
     { count: withdrawn },
     { count: selected },
@@ -36,12 +38,22 @@ export default async function DashboardPage() {
       .from('applications')
       .select('*', { count: 'exact', head: true })
       .eq('user_id', session.userId)
+      .eq('status', 'applied'),
+    supabase
+      .from('applications')
+      .select('*', { count: 'exact', head: true })
+      .eq('user_id', session.userId)
       .eq('status', 'shortlisted'),
     supabase
       .from('applications')
       .select('*', { count: 'exact', head: true })
       .eq('user_id', session.userId)
-      .in('status', ['rejected', 'not_shortlisted']),
+      .eq('status', 'not_shortlisted'),
+    supabase
+      .from('applications')
+      .select('*', { count: 'exact', head: true })
+      .eq('user_id', session.userId)
+      .eq('status', 'rejected'),
     supabase
       .from('applications')
       .select('*', { count: 'exact', head: true })
@@ -73,7 +85,9 @@ export default async function DashboardPage() {
   const stats = {
     total_companies: totalCompanies || 0,
     active_applications: activeApplications || 0,
+    applied: appliedCount || 0,
     shortlisted: shortlisted || 0,
+    not_shortlisted: notShortlisted || 0,
     upcoming_tests: 0,
     upcoming_interviews: 0,
     rejected: rejected || 0,

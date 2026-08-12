@@ -163,6 +163,19 @@ export async function GET(request: Request) {
 
     if (gmailError) {
       console.error('Failed to store Gmail account:', gmailError);
+    } else if (process.env.GOOGLE_PUBSUB_TOPIC) {
+      // Automatically register mailbox with Google Cloud Pub/Sub for push notifications
+      const { setupGmailWatch } = await import('@/lib/gmail/watch');
+      const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
+      const watchResult = await setupGmailWatch(gmail, process.env.GOOGLE_PUBSUB_TOPIC);
+      if (watchResult) {
+        await supabase
+          .from('gmail_accounts')
+          .update({ last_history_id: watchResult.historyId })
+          .eq('user_id', userId)
+          .eq('email', userInfo.email);
+        console.log(`[Pub/Sub] Registered Gmail watch for ${userInfo.email} at historyId ${watchResult.historyId}`);
+      }
     }
 
     // 3. Create or refresh the session JWT

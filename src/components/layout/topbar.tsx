@@ -5,6 +5,7 @@ import { useState, useCallback, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { cn } from '@/lib/utils';
 import { timeAgo } from '@/lib/utils';
+import NotificationBell from '@/components/notifications/notification-bell';
 
 interface TopbarProps {
   userName: string | null;
@@ -208,72 +209,56 @@ export default function Topbar({ userName, userAvatar, lastSyncAt }: TopbarProps
 
         {/* Right: Actions */}
         <div className="flex items-center gap-2">
-          {/* Sync status */}
-          <div className="hidden sm:flex items-center gap-2 mr-2 text-xs text-text-tertiary">
-            <div className={cn('w-1.5 h-1.5 rounded-full', syncFreshness)} />
-            <span>{lastSyncAt ? timeAgo(lastSyncAt) : 'Never synced'}</span>
-          </div>
-
-          {/* Sync button */}
-          <button
-            onClick={() => handleSync(false)}
-            disabled={isSyncing}
-            className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm text-text-secondary hover:text-text-primary hover:bg-bg-surface-hover transition-all disabled:opacity-50"
-            aria-label="Sync emails"
-          >
-            <RefreshCw
-              className={cn('w-4 h-4', isSyncing && 'animate-spin-slow')}
-            />
-            <span className="hidden sm:inline">
-              {isSyncing ? 'Syncing…' : 'Sync'}
-            </span>
-          </button>
-
-          {/* Notifications */}
-          <div className="relative">
+          {/* Live Sync Status & Action Button */}
+          <div className="flex items-center gap-2">
             <button
-              onClick={() => {
-                setShowNotifications(!showNotifications);
-                setShowUserMenu(false);
-              }}
-              className="relative p-2 rounded-lg text-text-secondary hover:text-text-primary hover:bg-bg-surface-hover transition-all"
-              aria-label="Notifications"
+              onClick={() => handleSync(false)}
+              disabled={isSyncing}
+              className={cn(
+                'flex items-center gap-2 px-3 py-1.5 rounded-xl text-xs font-medium border transition-all disabled:opacity-70',
+                isSyncing
+                  ? 'bg-accent/10 border-accent/30 text-accent'
+                  : syncResult?.success
+                  ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'
+                  : 'bg-white/[0.03] border-white/10 text-zinc-300 hover:text-white hover:bg-white/[0.06]'
+              )}
+              aria-label="Sync emails"
             >
-              <Bell className="w-4 h-4" />
-              {unreadNotificationsCount > 0 && (
-                <span className="absolute top-1 right-1 w-2 h-2 bg-accent rounded-full animate-pulse" />
+              {isSyncing ? (
+                <>
+                  <RefreshCw className="w-3.5 h-3.5 animate-spin-slow text-accent" />
+                  <span>
+                    Syncing…{' '}
+                    {syncProgress && syncProgress.totalMessages > 0
+                      ? `${syncProgress.processedMessages}/${syncProgress.totalMessages}`
+                      : ''}
+                  </span>
+                </>
+              ) : syncResult?.success ? (
+                <>
+                  <CheckCircle className="w-3.5 h-3.5 text-emerald-400" />
+                  <span>Synced just now</span>
+                </>
+              ) : (
+                <>
+                  <div
+                    className={cn(
+                      'w-2 h-2 rounded-full',
+                      lastSyncAt && Date.now() - new Date(lastSyncAt).getTime() < 3600000
+                        ? 'bg-emerald-400 shadow-sm shadow-emerald-400/50'
+                        : 'bg-amber-400'
+                    )}
+                  />
+                  <span>
+                    {lastSyncAt ? `Synced ${timeAgo(lastSyncAt)}` : 'Sync now'}
+                  </span>
+                </>
               )}
             </button>
-
-            {/* Notifications dropdown menu */}
-            {showNotifications && (
-              <>
-                <div
-                  className="fixed inset-0 z-40"
-                  onClick={() => setShowNotifications(false)}
-                />
-                <div className="absolute right-0 top-full mt-2 w-80 bg-bg-elevated border border-border-default rounded-2xl shadow-2xl z-50 p-3 animate-fade-in space-y-2">
-                  <div className="flex items-center justify-between px-1 pb-2 border-b border-border-default">
-                    <span className="text-xs font-bold text-text-primary uppercase tracking-wider">
-                      Notifications
-                    </span>
-                    <span className="text-[10px] text-text-tertiary">Real-time updates</span>
-                  </div>
-
-                  <div className="space-y-1.5 max-h-72 overflow-y-auto">
-                    <div className="p-2.5 rounded-xl bg-bg-surface border border-border-default/60 text-xs space-y-1">
-                      <div className="flex items-center justify-between">
-                        <span className="font-semibold text-accent">Drive Sync</span>
-                        <span className="text-[10px] text-text-tertiary">Active</span>
-                      </div>
-                      <p className="text-text-primary font-medium">Placement engine is monitoring your Gmail</p>
-                      <p className="text-[10px] text-text-tertiary">Personal and college emails are synchronized.</p>
-                    </div>
-                  </div>
-                </div>
-              </>
-            )}
           </div>
+
+          {/* Real Notification Bell Component */}
+          <NotificationBell />
 
           {/* User avatar */}
           <div className="relative">

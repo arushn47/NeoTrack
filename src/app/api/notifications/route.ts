@@ -4,55 +4,64 @@ import { createAdminClient } from '@/lib/supabase/admin';
 
 /**
  * GET /api/notifications
- * Fetches recent notifications for the authenticated user.
+ * Returns recent in-app notifications and unread count for the authenticated user.
  */
 export async function GET() {
   const session = await getSession();
   if (!session) {
-    return NextResponse.json(
-      { error: { message: 'Unauthorized', code: 'unauthorized' } },
-      { status: 401 }
-    );
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
   const supabase = createAdminClient();
 
+  // Fetch recent notifications
   const { data: notifications, error } = await supabase
     .from('notifications')
-    .select('id, type, title, message, company_id, is_read, created_at')
+    .select('id, type, title, message, body, link, company_id, is_read, created_at')
     .eq('user_id', session.userId)
     .order('created_at', { ascending: false })
-    .limit(20);
+    .limit(30);
 
   if (error) {
-    return NextResponse.json(
-      { error: { message: error.message, code: 'db_error' } },
-      { status: 500 }
-    );
+    console.error('[API Notifications] Fetch error:', error);
+    return NextResponse.json({ error: 'Failed to fetch notifications' }, { status: 500 });
   }
 
-  return NextResponse.json({ data: notifications || [], error: null });
+  // Count unread
+  const { count: unreadCount } = await supabase
+    .from('notifications')
+    .select('id', { count: 'exact', head: true })
+    .eq('user_id', session.userId)
+    .eq('is_read', false);
+
+  return NextResponse.json({
+    notifications: notifications || [],
+    unreadCount: unreadCount || 0,
+  });
 }
 
 /**
- * PATCH /api/notifications
- * Marks all notifications as read for the user.
+ * POST /api/notifications
+ * Marks all notifications as read for the authenticated user.
  */
-export async function PATCH() {
+export async function POST() {
   const session = await getSession();
   if (!session) {
-    return NextResponse.json(
-      { error: { message: 'Unauthorized', code: 'unauthorized' } },
-      { status: 401 }
-    );
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
   const supabase = createAdminClient();
 
-  await supabase
+  const { error } = await supabase
     .from('notifications')
     .update({ is_read: true })
-    .eq('user_id', session.userId);
+    .eq('user_id', session.userId)
+    .eq('is_read', false);
+
+  if (error) {
+    console.error('[API Notifications] Mark all read error:', error);
+    return NextResponse.json({ error: 'Failed to mark all as read' }, { status: 500 });
+  }
 
   return NextResponse.json({ success: true });
 }

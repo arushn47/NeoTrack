@@ -79,6 +79,7 @@ const ALL_STATUSES = [
   { value: 'rejected', label: 'Rejected' },
   { value: 'declined', label: 'Declined / Opted Out' },
   { value: 'withdrawn', label: 'Withdrawn' },
+  { value: 'not_shortlisted', label: 'Not Shortlisted' },
   { value: 'not_applied', label: 'Not Applied' },
 ];
 

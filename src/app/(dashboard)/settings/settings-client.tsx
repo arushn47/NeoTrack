@@ -13,6 +13,7 @@ import {
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { timeAgo } from '@/lib/utils';
+import NotificationSettings from '@/components/notifications/notification-settings';
 
 interface Account {
   id: string;
@@ -191,6 +192,9 @@ export default function SettingsClient({ accounts, neoId: initialNeoId, userEmai
           </div>
         </div>
       </section>
+
+      {/* Notification Preferences Section */}
+      <NotificationSettings />
     </div>
   );
 }

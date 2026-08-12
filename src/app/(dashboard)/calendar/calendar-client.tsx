@@ -88,10 +88,30 @@ export default function CalendarClient({ events }: CalendarClientProps) {
     return days;
   }, [year, month]);
 
+  const [selectedEventType, setSelectedEventType] = useState<'all' | 'test' | 'interview' | 'ppt' | 'deadline'>('all');
+
+  // Filter events by selected category
+  const filteredEvents = useMemo(() => {
+    if (selectedEventType === 'all') return events;
+    if (selectedEventType === 'test') {
+      return events.filter((e) => ['online_test', 'coding_test'].includes(e.eventType));
+    }
+    if (selectedEventType === 'interview') {
+      return events.filter((e) => ['technical_interview', 'hr_interview', 'final_interview'].includes(e.eventType));
+    }
+    if (selectedEventType === 'ppt') {
+      return events.filter((e) => e.eventType === 'ppt');
+    }
+    if (selectedEventType === 'deadline') {
+      return events.filter((e) => e.eventType === 'registration_deadline');
+    }
+    return events;
+  }, [events, selectedEventType]);
+
   // Events map by YYYY-MM-DD
   const eventsByDate = useMemo(() => {
     const map = new Map<string, CalendarEvent[]>();
-    for (const evt of events) {
+    for (const evt of filteredEvents) {
       if (evt.startTime) {
         const d = new Date(evt.startTime);
         const yyyy = d.getFullYear();
@@ -103,7 +123,7 @@ export default function CalendarClient({ events }: CalendarClientProps) {
       }
     }
     return map;
-  }, [events]);
+  }, [filteredEvents]);
 
   const monthNames = [
     'January', 'February', 'March', 'April', 'May', 'June',
@@ -184,25 +204,49 @@ export default function CalendarClient({ events }: CalendarClientProps) {
         </div>
       </div>
 
-      {/* Event Legend */}
-      <div className="flex flex-wrap items-center gap-3 text-xs">
-        <span className="text-text-tertiary font-medium">Legend:</span>
-        <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-blue-500/10 text-blue-400 border border-blue-500/20">
-          <span className="w-1.5 h-1.5 rounded-full bg-blue-400" />
-          Pre-Placement Talk (PPT)
-        </span>
-        <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-amber-500/10 text-amber-400 border border-amber-500/20">
-          <span className="w-1.5 h-1.5 rounded-full bg-amber-400" />
-          Online / Coding Test
-        </span>
-        <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-          <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
-          Interview
-        </span>
-        <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-rose-500/10 text-rose-400 border border-rose-500/20">
-          <span className="w-1.5 h-1.5 rounded-full bg-rose-400" />
-          Deadline
-        </span>
+      {/* Filter Tabs & Event Legend */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-1">
+        <div className="flex items-center gap-1.5 overflow-x-auto pb-1 sm:pb-0">
+          {[
+            { id: 'all' as const, label: 'All Events' },
+            { id: 'test' as const, label: 'Online Tests' },
+            { id: 'interview' as const, label: 'Interviews' },
+            { id: 'ppt' as const, label: 'PPTs' },
+            { id: 'deadline' as const, label: 'Deadlines' },
+          ].map((tab) => {
+            const isSelected = selectedEventType === tab.id;
+            return (
+              <button
+                key={tab.id}
+                onClick={() => setSelectedEventType(tab.id)}
+                className={cn(
+                  'px-3 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition-all',
+                  isSelected
+                    ? 'bg-accent text-white shadow-sm shadow-accent/20'
+                    : 'bg-bg-surface hover:bg-bg-surface-hover text-text-secondary hover:text-text-primary border border-border-default'
+                )}
+              >
+                {tab.label}
+              </button>
+            );
+          })}
+        </div>
+
+        {/* Legend dots */}
+        <div className="flex flex-wrap items-center gap-3 text-xs">
+          <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-blue-500/10 text-blue-400 border border-blue-500/20">
+            <span className="w-1.5 h-1.5 rounded-full bg-blue-400" />
+            PPT
+          </span>
+          <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-amber-500/10 text-amber-400 border border-amber-500/20">
+            <span className="w-1.5 h-1.5 rounded-full bg-amber-400" />
+            Test
+          </span>
+          <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
+            Interview
+          </span>
+        </div>
       </div>
 
       {/* Calendar Grid Container */}

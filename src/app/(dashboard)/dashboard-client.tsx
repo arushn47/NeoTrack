@@ -14,6 +14,7 @@ import {
   ArrowRight,
   Fingerprint,
   Calendar,
+  ChevronRight,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { formatDateTime } from '@/lib/utils';
@@ -40,12 +41,54 @@ interface DashboardClientProps {
 }
 
 const statCards = [
-  { key: 'total_companies', label: 'Total Companies', icon: Building2, color: 'text-blue-400', bgColor: 'bg-blue-500/10' },
-  { key: 'active_applications', label: 'Active', icon: Briefcase, color: 'text-emerald-400', bgColor: 'bg-emerald-500/10' },
-  { key: 'shortlisted', label: 'Shortlisted', icon: CheckCircle2, color: 'text-cyan-400', bgColor: 'bg-cyan-500/10' },
-  { key: 'upcoming_tests', label: 'Tests', icon: FileCode, color: 'text-amber-400', bgColor: 'bg-amber-500/10' },
-  { key: 'upcoming_interviews', label: 'Interviews', icon: MessageSquare, color: 'text-green-400', bgColor: 'bg-green-500/10' },
-  { key: 'rejected', label: 'Rejected', icon: XCircle, color: 'text-red-400', bgColor: 'bg-red-500/10' },
+  {
+    key: 'total_companies',
+    label: 'Total Companies',
+    href: '/companies',
+    icon: Building2,
+    color: 'text-blue-400',
+    bgColor: 'bg-blue-500/10',
+  },
+  {
+    key: 'active_applications',
+    label: 'Active Opportunities',
+    href: '/companies',
+    icon: Briefcase,
+    color: 'text-emerald-400',
+    bgColor: 'bg-emerald-500/10',
+  },
+  {
+    key: 'shortlisted',
+    label: 'Shortlisted',
+    href: '/companies',
+    icon: CheckCircle2,
+    color: 'text-cyan-400',
+    bgColor: 'bg-cyan-500/10',
+  },
+  {
+    key: 'upcoming_tests',
+    label: 'Upcoming Tests',
+    href: '/calendar',
+    icon: FileCode,
+    color: 'text-amber-400',
+    bgColor: 'bg-amber-500/10',
+  },
+  {
+    key: 'upcoming_interviews',
+    label: 'Interviews',
+    href: '/calendar',
+    icon: MessageSquare,
+    color: 'text-green-400',
+    bgColor: 'bg-green-500/10',
+  },
+  {
+    key: 'not_shortlisted',
+    label: 'Not Shortlisted',
+    href: '/companies',
+    icon: XCircle,
+    color: 'text-red-400',
+    bgColor: 'bg-red-500/10',
+  },
 ] as const;
 
 export default function DashboardClient({
@@ -104,32 +147,64 @@ export default function DashboardClient({
         </div>
       )}
 
-      {/* Neo ID display */}
-      {neoId && (
-        <div className="flex items-center gap-2 text-xs text-text-tertiary">
-          <Fingerprint className="w-3.5 h-3.5" />
-          <span>Neo ID:</span>
-          <span className="font-mono tracking-wider text-text-secondary font-medium">{neoId}</span>
+      {/* Neo ID display & Active Breakdown Summary */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-bg-surface p-4 rounded-xl border border-border-default">
+        <div className="flex flex-wrap items-center gap-3 text-xs">
+          <span className="font-semibold text-text-primary uppercase tracking-wider text-[11px]">
+            Active Pipeline:
+          </span>
+          <span className="inline-flex items-center gap-1.5 px-2 py-1 rounded-lg bg-amber-500/10 text-amber-400 font-medium">
+            <span className="w-1.5 h-1.5 rounded-full bg-amber-400" />
+            Applied ({stats.applied})
+          </span>
+          <span className="inline-flex items-center gap-1.5 px-2 py-1 rounded-lg bg-cyan-500/10 text-cyan-400 font-medium">
+            <span className="w-1.5 h-1.5 rounded-full bg-cyan-400" />
+            Shortlisted ({stats.shortlisted})
+          </span>
+          <span className="inline-flex items-center gap-1.5 px-2 py-1 rounded-lg bg-emerald-500/10 text-emerald-400 font-medium">
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
+            Upcoming Tests ({stats.upcoming_tests})
+          </span>
+          {stats.withdrawn > 0 && (
+            <span className="inline-flex items-center gap-1.5 px-2 py-1 rounded-lg bg-zinc-800 text-zinc-400 font-medium">
+              <span className="w-1.5 h-1.5 rounded-full bg-zinc-500" />
+              Withdrawn ({stats.withdrawn})
+            </span>
+          )}
         </div>
-      )}
 
-      {/* Stats cards */}
+        {neoId && (
+          <div className="flex items-center gap-2 text-xs text-text-tertiary self-start sm:self-center">
+            <Fingerprint className="w-3.5 h-3.5 text-violet-400" />
+            <span>Neo ID:</span>
+            <span className="font-mono tracking-wider text-text-secondary font-semibold bg-bg-elevated px-2 py-0.5 rounded border border-border-default">
+              {neoId}
+            </span>
+          </div>
+        )}
+      </div>
+
+      {/* Stats cards (Clickable) */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 stagger-children">
         {statCards.map((card) => {
           const value = stats[card.key as keyof DashboardStats];
           return (
-            <div
+            <Link
               key={card.key}
-              className="p-4 rounded-xl bg-bg-surface border border-border-default hover:border-accent/20 hover:bg-bg-surface-hover transition-all group cursor-default"
+              href={card.href}
+              className="p-4 rounded-xl bg-bg-surface border border-border-default hover:border-accent/40 hover:bg-bg-surface-hover transition-all group hover:-translate-y-0.5 hover:shadow-lg hover:shadow-accent/5 block"
             >
-              <div className={cn('w-8 h-8 rounded-lg flex items-center justify-center mb-3', card.bgColor)}>
+              <div className={cn('w-8 h-8 rounded-lg flex items-center justify-center mb-3 group-hover:scale-105 transition-transform', card.bgColor)}>
                 <card.icon className={cn('w-4 h-4', card.color)} />
               </div>
               <p className="text-2xl font-bold text-text-primary animate-count-up">
                 {value}
               </p>
-              <p className="text-xs text-text-secondary mt-0.5">{card.label}</p>
-            </div>
+              <div className="flex items-center justify-between text-xs text-text-secondary mt-0.5">
+                <span>{card.label}</span>
+                <ChevronRight className="w-3 h-3 text-text-tertiary opacity-0 group-hover:opacity-100 group-hover:translate-x-0.5 transition-all" />
+              </div>
+            </Link>
           );
         })}
       </div>
