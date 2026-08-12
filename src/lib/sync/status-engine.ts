@@ -1,0 +1,264 @@
+import type { ParsedEmail } from '@/lib/gmail/client';
+import { extractEvents, extractJobDetails } from '@/lib/sync/events';
+import { createAdminClient } from '@/lib/supabase/admin';
+
+/**
+ * Checks if the user's Neo ID or identity is mentioned in an email.
+ */
+export function checkNeoIdMatch(
+  text: string,
+  userNeoId: string | null,
+  userEmail: string
+): boolean {
+  if (!text) return false;
+
+  const upperText = text.toUpperCase();
+
+  // 1. Check user's explicitly set Neo ID (e.g. "I4W0P0K8" or "A6S2A7G9")
+  if (userNeoId && userNeoId.length >= 4) {
+    if (upperText.includes(userNeoId.toUpperCase())) return true;
+  }
+
+  // 2. Check registration number pattern (e.g. "23BCE10472" or "23bce10472")
+  const regMatch = userEmail.match(/([0-9]{2}[a-z]{3}[0-9]{4,5})/i);
+  if (regMatch && regMatch[1]) {
+    if (upperText.includes(regMatch[1].toUpperCase())) return true;
+  }
+
+  return false;
+}
+
+/**
+ * Processes an email to extract events, job details, and update application status.
+ *
+ * @param supabase Admin client
+ * @param userId User UUID
+ * @param companyId Company UUID
+ * @param email Parsed email
+ * @param emailDbId DB UUID of the inserted email
+ * @param userNeoId User's configured Neo ID
+ * @param userEmail User's email
+ */
+export async function processEmailForEventsAndStatus(
+  supabase: ReturnType<typeof createAdminClient>,
+  userId: string,
+  companyId: string,
+  email: ParsedEmail,
+  emailDbId: string,
+  userNeoId: string | null,
+  userEmail: string,
+  gmail?: import('googleapis').gmail_v1.Gmail
+) {
+  const fullText = `${email.subject}\n${email.bodyPlain || email.bodySnippet}`;
+
+  // 1. Check for Neo ID match in email body / subject
+  let isNeoMatched = checkNeoIdMatch(fullText, userNeoId, userEmail);
+  let matchDetail: string | null = null;
+  let matchType = 'email_body';
+
+  // 2. If attachments exist and gmail client is available, scan Excel attachments!
+  if (!isNeoMatched && gmail && email.hasAttachments && email.attachments.length > 0) {
+    const { scanExcelAttachmentsForNeoId } = await import('@/lib/sync/excel-parser');
+    const excelMatch = await scanExcelAttachmentsForNeoId(
+      gmail,
+      email.gmailMessageId,
+      email.attachments,
+      userNeoId,
+      userEmail
+    );
+
+    if (excelMatch && excelMatch.matched) {
+      isNeoMatched = true;
+      matchType = 'excel_attachment';
+      matchDetail = excelMatch.details;
+    }
+  }
+
+  const { classifyEmail } = await import('@/lib/sync/classifier');
+  const emailClass = classifyEmail(email).classification;
+
+  // Check existing application status from DB
+  const { data: existingApp } = await supabase
+    .from('applications')
+    .select('status, manual_override')
+    .eq('user_id', userId)
+    .eq('company_id', companyId)
+    .single();
+
+  if (isNeoMatched) {
+    // Record candidate match in DB
+    await supabase.from('candidate_matches').insert({
+      user_id: userId,
+      email_id: emailDbId,
+      neo_id: userNeoId || userEmail,
+      match_type: matchType,
+      matched_value: matchDetail || email.subject.slice(0, 100),
+      confidence: 'high',
+    });
+  }
+
+  // 3. Extract Events (PPT, Test, Interview) with Deduplication
+  // Check if candidate is withdrawn or opted out
+  const isWithdrawn =
+    existingApp?.status === 'withdrawn' ||
+    existingApp?.status === 'declined' ||
+    emailClass === 'withdrawal' ||
+    emailClass === 'decline' ||
+    /registration.*(?:has\s+been\s+)?withdrawn|opted\s+out|declined\s+drive/i.test(fullText);
+
+  if (isWithdrawn) {
+    // Delete any previously inserted events for this company if user has withdrawn
+    await supabase.from('events').delete().eq('user_id', userId).eq('company_id', companyId);
+  } else {
+    const extractedEvents = extractEvents(email);
+
+    for (const event of extractedEvents) {
+      // RULE: For tests and interviews, ONLY add to user's schedule if candidate is shortlisted!
+      const isTestOrInterview = ['online_test', 'coding_test', 'technical_interview', 'hr_interview', 'final_interview'].includes(event.eventType);
+      if (isTestOrInterview && !isNeoMatched && matchType !== 'excel_attachment') {
+        // User was not shortlisted for this test — do not add to personal schedule
+        continue;
+      }
+
+      // Check if duplicate event exists for this company + event_type on the same calendar day
+      const startTimeIso = event.startTime ? event.startTime.toISOString() : null;
+      const startOfDay = event.startTime
+        ? new Date(
+            event.startTime.getFullYear(),
+            event.startTime.getMonth(),
+            event.startTime.getDate()
+          ).toISOString()
+        : null;
+      const endOfDay = event.startTime
+        ? new Date(
+            event.startTime.getFullYear(),
+            event.startTime.getMonth(),
+            event.startTime.getDate(),
+            23,
+            59,
+            59,
+            999
+          ).toISOString()
+        : null;
+
+      let eventQuery = supabase
+        .from('events')
+        .select('id, start_time, venue, mode')
+        .eq('user_id', userId)
+        .eq('company_id', companyId)
+        .eq('event_type', event.eventType);
+
+      if (startOfDay && endOfDay) {
+        eventQuery = eventQuery.gte('start_time', startOfDay).lte('start_time', endOfDay);
+      } else if (startTimeIso) {
+        eventQuery = eventQuery.eq('start_time', startTimeIso);
+      }
+
+      const { data: existingEvents } = await eventQuery.limit(1);
+
+      if (existingEvents && existingEvents.length > 0) {
+        // Event for this day/test already exists — refine details
+        const updatePayload: Record<string, unknown> = {};
+        if (startTimeIso) updatePayload.start_time = startTimeIso;
+        if (event.endTime) updatePayload.end_time = event.endTime.toISOString();
+        if (event.venue) updatePayload.venue = event.venue;
+        if (event.mode) updatePayload.mode = event.mode;
+
+        if (Object.keys(updatePayload).length > 0) {
+          await supabase
+            .from('events')
+            .update(updatePayload)
+            .eq('id', existingEvents[0].id);
+        }
+      } else {
+        // Clean up title (remove "Re: ", "Fwd: ")
+        const cleanTitle = email.subject.replace(/^(?:fwd|re|fw)\s*:\s*/i, '').slice(0, 60);
+
+        // Insert new unique event into DB
+        await supabase.from('events').insert({
+          user_id: userId,
+          company_id: companyId,
+          source_email_id: emailDbId,
+          event_type: event.eventType,
+          title: `${cleanTitle} - ${event.title}`,
+          start_time: startTimeIso,
+          end_time: event.endTime ? event.endTime.toISOString() : null,
+          venue: event.venue,
+          mode: event.mode,
+          confidence: event.confidence,
+        });
+      }
+    }
+  }
+
+  // 4. Extract Job Details (Role, CTC, Stipend, Location)
+  const jobDetails = extractJobDetails(fullText);
+
+  // 5. Compute updated application status
+  let newStatus: string | null = null;
+  const subjLower = email.subject.toLowerCase();
+
+  if (existingApp?.manual_override) {
+    // User has manually set their status — preserve it
+    newStatus = null;
+  } else if (isWithdrawn) {
+    // A. Check for Withdrawal / Opt-Out (Highest priority from NeoPAT)
+    newStatus = 'withdrawn';
+  } else if (existingApp?.status === 'withdrawn' || existingApp?.status === 'declined') {
+    // Already withdrawn — general broadcast emails must NEVER overwrite withdrawal
+    newStatus = existingApp.status;
+  } else if (isNeoMatched || matchType === 'excel_attachment') {
+    // B. Candidate explicitly shortlisted in Excel attachment or personal shortlist email
+    if (/interview/i.test(subjLower)) {
+      newStatus = 'interview_scheduled';
+    } else if (/(?:test|assessment|shortlist)/i.test(subjLower) || matchType === 'excel_attachment') {
+      newStatus = 'shortlisted';
+    } else if (/(?:selected|congratulations|offer)/i.test(subjLower)) {
+      newStatus = 'selected';
+    }
+  } else if (
+    /shortlist|selection\s+list|shortlisted|online\s+test|assessment|physical\s+selection|ppt\s+is\s+scheduled|test\s+is\s+scheduled|round\s+of\s+selection|gd\s+is\s+today/i.test(
+      subjLower
+    ) ||
+    /shortlist|shortlisted candidates|initial shortlist|selection list/i.test(fullText) ||
+    (email.hasAttachments && email.attachments.some((a) => /shortlist|selection|eligible|test/i.test(a.filename)))
+  ) {
+    // C. Shortlist, selection list, or test round was officially released for this company, but candidate was NOT in it
+    if (!existingApp || existingApp.status === 'applied' || existingApp.status === 'ppt_scheduled') {
+      newStatus = 'not_shortlisted';
+    }
+  }
+
+  // Build application update payload
+  const appUpdate: Record<string, unknown> = {
+    user_id: userId,
+    company_id: companyId,
+    last_updated: new Date().toISOString(),
+  };
+
+  if (jobDetails.role) appUpdate.role = jobDetails.role;
+  if (jobDetails.ctc) appUpdate.ctc = jobDetails.ctc;
+  if (jobDetails.stipend) appUpdate.stipend = jobDetails.stipend;
+  if (jobDetails.location) appUpdate.location = jobDetails.location;
+
+  if (newStatus) {
+    appUpdate.status = newStatus;
+    appUpdate.status_source = matchType === 'excel_attachment' ? 'excel_attachment' : 'sync_engine';
+    appUpdate.status_confidence = 'high';
+
+    // Insert real-time notification
+    await supabase.from('notifications').insert({
+      user_id: userId,
+      company_id: companyId,
+      type: newStatus === 'shortlisted' ? 'shortlist_match' : 'status_change',
+      title: newStatus === 'shortlisted' ? '🎉 Shortlist Match!' : 'Status Update',
+      message: `${email.subject.slice(0, 60)} marked status as ${newStatus.toUpperCase()}`,
+      is_read: false,
+    });
+  }
+
+  // Upsert application
+  await supabase
+    .from('applications')
+    .upsert(appUpdate, { onConflict: 'user_id,company_id' });
+}

@@ -1,0 +1,200 @@
+import { google } from 'googleapis';
+import { NextResponse } from 'next/server';
+import { cookies } from 'next/headers';
+import { encrypt } from '@/lib/crypto/tokens';
+import { createAdminClient } from '@/lib/supabase/admin';
+import * as jose from 'jose';
+
+/**
+ * GET /api/auth/callback
+ * 
+ * Handles the OAuth callback from Google.
+ * Exchanges the authorization code for tokens, creates/updates the user,
+ * stores encrypted tokens, and sets a session cookie.
+ */
+export async function GET(request: Request) {
+  const { searchParams } = new URL(request.url);
+  const code = searchParams.get('code');
+  const stateStr = searchParams.get('state');
+  const error = searchParams.get('error');
+
+  if (error) {
+    return NextResponse.redirect(
+      `${process.env.NEXT_PUBLIC_APP_URL}/login?error=${encodeURIComponent(error)}`
+    );
+  }
+
+  if (!code) {
+    return NextResponse.redirect(
+      `${process.env.NEXT_PUBLIC_APP_URL}/login?error=no_code`
+    );
+  }
+
+  let accountType = 'personal';
+  if (stateStr) {
+    try {
+      const state = JSON.parse(stateStr);
+      accountType = state.account_type || 'personal';
+    } catch {
+      // Invalid state — default to personal
+    }
+  }
+
+  try {
+    // Exchange code for tokens
+    const oauth2Client = new google.auth.OAuth2(
+      process.env.GOOGLE_CLIENT_ID,
+      process.env.GOOGLE_CLIENT_SECRET,
+      process.env.GOOGLE_REDIRECT_URI
+    );
+
+    const { tokens } = await oauth2Client.getToken(code);
+    oauth2Client.setCredentials(tokens);
+
+    // Get user info
+    const oauth2 = google.oauth2({ version: 'v2', auth: oauth2Client });
+    const { data: userInfo } = await oauth2.userinfo.get();
+
+    if (!userInfo.email || !userInfo.id) {
+      return NextResponse.redirect(
+        `${process.env.NEXT_PUBLIC_APP_URL}/login?error=no_email`
+      );
+    }
+
+    const supabase = createAdminClient();
+
+    // 1. Check if user is already logged in (linking a secondary account)
+    const cookieStore = await cookies();
+    const token = cookieStore.get('session')?.value;
+    
+    let existingUserId: string | null = null;
+    let sessionName = userInfo.name || null;
+    let sessionEmail = userInfo.email;
+    let sessionAvatar = userInfo.picture || null;
+
+    if (token) {
+      try {
+        const secret = new TextEncoder().encode(process.env.TOKEN_ENCRYPTION_KEY);
+        const { payload } = await jose.jwtVerify(token, secret);
+        existingUserId = payload.userId as string;
+        sessionName = (payload.name as string) || null;
+        sessionEmail = payload.email as string;
+        sessionAvatar = (payload.avatar as string) || null;
+      } catch {
+        // Invalid session, proceed as new login
+      }
+    }
+
+    let userId: string;
+
+    if (existingUserId) {
+      // User is already logged in, link this new Gmail to their existing account
+      userId = existingUserId;
+    } else {
+      // No active session — check if they are logging in with a previously linked secondary account
+      const { data: existingSecondary } = await supabase
+        .from('gmail_accounts')
+        .select('user_id')
+        .eq('google_account_id', userInfo.id)
+        .single();
+
+      if (existingSecondary) {
+        // Logging in with a secondary connected account
+        userId = existingSecondary.user_id;
+        // Fetch primary user info for the session
+        const { data: primaryUser } = await supabase
+          .from('users')
+          .select('email, name, avatar_url')
+          .eq('id', userId)
+          .single();
+        
+        if (primaryUser) {
+          sessionEmail = primaryUser.email;
+          sessionName = primaryUser.name;
+          sessionAvatar = primaryUser.avatar_url;
+        }
+      } else {
+        // Check if primary account exists or create a new user
+        const { data: user, error: userError } = await supabase
+          .from('users')
+          .upsert(
+            {
+              google_id: userInfo.id,
+              email: userInfo.email,
+              name: userInfo.name || null,
+              avatar_url: userInfo.picture || null,
+            },
+            { onConflict: 'google_id' }
+          )
+          .select('id')
+          .single();
+
+        if (userError || !user) {
+          console.error('Failed to upsert user:', userError);
+          return NextResponse.redirect(
+            `${process.env.NEXT_PUBLIC_APP_URL}/login?error=db_error`
+          );
+        }
+        userId = user.id;
+      }
+    }
+
+    // 2. Encrypt and store Gmail tokens for THIS specific account
+    const encryptedAccess = tokens.access_token ? encrypt(tokens.access_token) : null;
+    const encryptedRefresh = tokens.refresh_token ? encrypt(tokens.refresh_token) : null;
+
+    const { error: gmailError } = await supabase
+      .from('gmail_accounts')
+      .upsert(
+        {
+          user_id: userId,
+          email: userInfo.email,
+          account_type: accountType,
+          google_account_id: userInfo.id,
+          access_token_encrypted: encryptedAccess,
+          refresh_token_encrypted: encryptedRefresh,
+          token_expiry: tokens.expiry_date
+            ? new Date(tokens.expiry_date).toISOString()
+            : null,
+          is_connected: true,
+        },
+        { onConflict: 'user_id,email' }
+      );
+
+    if (gmailError) {
+      console.error('Failed to store Gmail account:', gmailError);
+    }
+
+    // 3. Create or refresh the session JWT
+    if (!existingUserId) {
+      const secret = new TextEncoder().encode(process.env.TOKEN_ENCRYPTION_KEY);
+      const sessionToken = await new jose.SignJWT({
+        userId,
+        email: sessionEmail,
+        name: sessionName,
+        avatar: sessionAvatar,
+      })
+        .setProtectedHeader({ alg: 'HS256' })
+        .setIssuedAt()
+        .setExpirationTime('7d')
+        .sign(secret);
+
+      cookieStore.set('session', sessionToken, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: 'lax',
+        maxAge: 60 * 60 * 24 * 7, // 7 days
+        path: '/',
+      });
+    }
+
+    // Redirect to dashboard
+    return NextResponse.redirect(`${process.env.NEXT_PUBLIC_APP_URL}/`);
+
+  } catch (err) {
+    console.error('OAuth callback error:', err);
+    return NextResponse.redirect(
+      `${process.env.NEXT_PUBLIC_APP_URL}/login?error=auth_failed`
+    );
+  }
+}
