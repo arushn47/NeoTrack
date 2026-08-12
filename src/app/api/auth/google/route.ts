@@ -11,10 +11,16 @@ export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const accountType = searchParams.get('type') || 'personal';
 
+  const url = new URL(request.url);
+  const host = request.headers.get('x-forwarded-host') || url.host;
+  const proto = request.headers.get('x-forwarded-proto') || (url.protocol.replace(':', ''));
+  const origin = `${proto}://${host}`;
+  const redirectUri = process.env.GOOGLE_REDIRECT_URI || `${origin}/api/auth/callback`;
+
   const oauth2Client = new google.auth.OAuth2(
     process.env.GOOGLE_CLIENT_ID,
     process.env.GOOGLE_CLIENT_SECRET,
-    process.env.GOOGLE_REDIRECT_URI
+    redirectUri
   );
 
   const scopes = [

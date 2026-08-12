@@ -18,15 +18,22 @@ export async function GET(request: Request) {
   const stateStr = searchParams.get('state');
   const error = searchParams.get('error');
 
+  const url = new URL(request.url);
+  const host = request.headers.get('x-forwarded-host') || url.host;
+  const proto = request.headers.get('x-forwarded-proto') || (url.protocol.replace(':', ''));
+  const origin = `${proto}://${host}`;
+  const appUrl = process.env.NEXT_PUBLIC_APP_URL || origin;
+  const redirectUri = process.env.GOOGLE_REDIRECT_URI || `${origin}/api/auth/callback`;
+
   if (error) {
     return NextResponse.redirect(
-      `${process.env.NEXT_PUBLIC_APP_URL}/login?error=${encodeURIComponent(error)}`
+      `${appUrl}/login?error=${encodeURIComponent(error)}`
     );
   }
 
   if (!code) {
     return NextResponse.redirect(
-      `${process.env.NEXT_PUBLIC_APP_URL}/login?error=no_code`
+      `${appUrl}/login?error=no_code`
     );
   }
 
@@ -45,7 +52,7 @@ export async function GET(request: Request) {
     const oauth2Client = new google.auth.OAuth2(
       process.env.GOOGLE_CLIENT_ID,
       process.env.GOOGLE_CLIENT_SECRET,
-      process.env.GOOGLE_REDIRECT_URI
+      redirectUri
     );
 
     const { tokens } = await oauth2Client.getToken(code);
@@ -57,7 +64,7 @@ export async function GET(request: Request) {
 
     if (!userInfo.email || !userInfo.id) {
       return NextResponse.redirect(
-        `${process.env.NEXT_PUBLIC_APP_URL}/login?error=no_email`
+        `${appUrl}/login?error=no_email`
       );
     }
 
@@ -202,12 +209,12 @@ export async function GET(request: Request) {
     }
 
     // Redirect to dashboard
-    return NextResponse.redirect(`${process.env.NEXT_PUBLIC_APP_URL}/`);
+    return NextResponse.redirect(`${appUrl}/`);
 
   } catch (err) {
     console.error('OAuth callback error:', err);
     return NextResponse.redirect(
-      `${process.env.NEXT_PUBLIC_APP_URL}/login?error=auth_failed`
+      `${appUrl}/login?error=auth_failed`
     );
   }
 }
