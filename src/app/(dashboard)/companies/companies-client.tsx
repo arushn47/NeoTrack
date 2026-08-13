@@ -18,6 +18,7 @@ import {
 } from 'lucide-react';
 import { cn, timeAgo } from '@/lib/utils';
 import StatusBadge from '@/components/shared/status-badge';
+import StageProgressBar from '@/components/companies/stage-progress-bar';
 
 export interface CompanyWithDetails {
   id: string;
@@ -212,20 +213,28 @@ export default function CompaniesClient({ companies }: CompaniesClientProps) {
                   </div>
 
                   {/* CTC & Location Badges */}
-                  <div className="flex flex-wrap items-center gap-2 mb-4">
+                  <div className="flex flex-wrap items-center gap-2 mb-3">
                     {ctc && (
                       <span className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
                         <IndianRupee className="w-3 h-3" />
-                        {ctc}
+                        {ctc.replace(/\*/g, '').trim()}
                       </span>
                     )}
                     {location && (
                       <span className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-xs text-text-secondary bg-bg-surface-hover border border-border-default">
                         <MapPin className="w-3 h-3 text-text-tertiary" />
-                        {location}
+                        {location.replace(/\*/g, '').trim()}
                       </span>
                     )}
                   </div>
+
+                  {/* Hiring Pipeline Stage Flow */}
+                  <StageProgressBar
+                    status={status}
+                    hasEvent={!!nextEvent}
+                    nextEventTitle={nextEvent?.title}
+                    className="my-3 bg-bg-elevated/40 p-2.5 rounded-xl border border-border-default/50"
+                  />
                 </div>
 
                 {/* Bottom Info Row */}

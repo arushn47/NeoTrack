@@ -33,12 +33,46 @@ export function usePushNotifications() {
       'Notification' in window
     ) {
       setIsSupported(true);
-      setPermission(Notification.permission);
+      const perm = Notification.permission;
+      setPermission(perm);
 
-      navigator.serviceWorker.ready.then((registration) => {
-        registration.pushManager.getSubscription().then((subscription) => {
-          setIsSubscribed(!!subscription);
-        });
+      navigator.serviceWorker.ready.then(async (registration) => {
+        let subscription = await registration.pushManager.getSubscription();
+
+        // If permission is already granted but no subscription exists, auto-subscribe!
+        if (!subscription && perm === 'granted') {
+          const vapidKey = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY;
+          if (vapidKey) {
+            try {
+              const convertedVapidKey = urlBase64ToUint8Array(vapidKey);
+              subscription = await registration.pushManager.subscribe({
+                userVisibleOnly: true,
+                applicationServerKey: convertedVapidKey as unknown as BufferSource,
+              });
+            } catch (e) {
+              console.warn('[Push Hook] Auto-subscribe error:', e);
+            }
+          }
+        }
+
+        setIsSubscribed(!!subscription);
+
+        // Sync subscription with backend database
+        if (subscription) {
+          const subJson = subscription.toJSON();
+          if (subJson.endpoint && subJson.keys?.p256dh && subJson.keys?.auth) {
+            fetch('/api/notifications/subscribe', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                endpoint: subJson.endpoint,
+                p256dh: subJson.keys.p256dh,
+                auth: subJson.keys.auth,
+                userAgent: navigator.userAgent,
+              }),
+            }).catch(console.error);
+          }
+        }
       });
     }
   }, []);

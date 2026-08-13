@@ -20,6 +20,7 @@ import {
 } from 'lucide-react';
 import { cn, timeAgo } from '@/lib/utils';
 import StatusBadge from '@/components/shared/status-badge';
+import StageProgressBar from '@/components/companies/stage-progress-bar';
 
 export interface CompanyDetail {
   id: string;
@@ -190,21 +191,21 @@ export default function CompanyDetailClient({ company }: CompanyDetailClientProp
           <div className="p-3 bg-bg-elevated/50 rounded-xl border border-border-default/40">
             <span className="text-[11px] text-text-tertiary font-medium uppercase tracking-wider block">CTC / Package</span>
             <span className="text-sm font-semibold text-emerald-400 mt-0.5 block truncate">
-              {company.application?.ctc || 'Not specified'}
+              {company.application?.ctc ? company.application.ctc.replace(/\*/g, '').trim() : 'Not specified'}
             </span>
           </div>
 
           <div className="p-3 bg-bg-elevated/50 rounded-xl border border-border-default/40">
             <span className="text-[11px] text-text-tertiary font-medium uppercase tracking-wider block">Stipend</span>
             <span className="text-sm font-semibold text-text-primary mt-0.5 block truncate">
-              {company.application?.stipend || 'Not specified'}
+              {company.application?.stipend ? company.application.stipend.replace(/\*/g, '').trim() : 'Not specified'}
             </span>
           </div>
 
           <div className="p-3 bg-bg-elevated/50 rounded-xl border border-border-default/40">
             <span className="text-[11px] text-text-tertiary font-medium uppercase tracking-wider block">Location</span>
             <span className="text-sm font-semibold text-text-primary mt-0.5 block truncate">
-              {company.application?.location || 'Pan India / Remote'}
+              {company.application?.location ? company.application.location.replace(/\*/g, '').trim() : 'Pan India / Remote'}
             </span>
           </div>
 
@@ -215,6 +216,15 @@ export default function CompanyDetailClient({ company }: CompanyDetailClientProp
             </span>
           </div>
         </div>
+      </div>
+
+      {/* Hiring Process Pipeline Stepper */}
+      <div className="p-5 bg-bg-surface border border-border-default rounded-2xl">
+        <h3 className="text-xs font-bold text-text-tertiary uppercase tracking-wider mb-3 flex items-center gap-2">
+          <Sparkles className="w-3.5 h-3.5 text-accent" />
+          Hiring Pipeline Progression
+        </h3>
+        <StageProgressBar status={status} className="py-2" />
       </div>
 
       {/* Tabs Header */}

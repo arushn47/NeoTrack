@@ -29,6 +29,39 @@ const SUGGESTIONS = [
   'What is the CTC for Value Labs?',
 ];
 
+/**
+ * Formats basic markdown like **bold**, *italic*, and `code` into React nodes.
+ */
+function renderFormattedText(text: string) {
+  // Split text by markdown bold `**...**`
+  const parts = text.split(/(\*\*.*?\*\*|\*.*?\*|`.*?`)/g);
+
+  return parts.map((part, i) => {
+    if (part.startsWith('**') && part.endsWith('**')) {
+      return (
+        <strong key={i} className="font-bold text-accent">
+          {part.slice(2, -2)}
+        </strong>
+      );
+    }
+    if (part.startsWith('*') && part.endsWith('*')) {
+      return (
+        <em key={i} className="italic text-text-primary font-medium">
+          {part.slice(1, -1)}
+        </em>
+      );
+    }
+    if (part.startsWith('`') && part.endsWith('`')) {
+      return (
+        <code key={i} className="px-1 py-0.5 rounded bg-bg-primary text-text-primary font-mono text-[11px]">
+          {part.slice(1, -1)}
+        </code>
+      );
+    }
+    return part;
+  });
+}
+
 export default function ChatAssistant() {
   const [isOpen, setIsOpen] = useState(false);
   const [input, setInput] = useState('');
@@ -37,7 +70,7 @@ export default function ChatAssistant() {
     {
       id: 'welcome',
       sender: 'bot',
-      text: "👋 Hi Arush! I'm your Placement Assistant. You can chat with me to update drive statuses (e.g. *\"Mark Value Labs as shortlisted\"*) or check upcoming tests and CTC details!",
+      text: "👋 Hi Arush! I'm your Placement Assistant. You can chat with me to update drive statuses (e.g. **Mark Value Labs as shortlisted**) or check upcoming tests and CTC details!",
       timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
     },
   ]);
@@ -174,7 +207,7 @@ export default function ChatAssistant() {
                       : 'bg-bg-elevated border border-border-default/80 text-text-primary rounded-bl-none'
                   )}
                 >
-                  {msg.text}
+                  {renderFormattedText(msg.text)}
                   <span
                     className={cn(
                       'block text-[9px] mt-1 text-right',
