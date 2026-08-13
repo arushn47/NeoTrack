@@ -45,6 +45,13 @@ export interface CompanyWithDetails {
     venue: string | null;
     mode: string | null;
   } | null;
+  events?: Array<{
+    id: string;
+    event_type: string;
+    title: string;
+    start_time: string | null;
+    venue?: string | null;
+  }>;
   neoIdMatched: boolean;
   emailCount: number;
 }
@@ -231,8 +238,7 @@ export default function CompaniesClient({ companies }: CompaniesClientProps) {
                   {/* Hiring Pipeline Stage Flow */}
                   <StageProgressBar
                     status={status}
-                    hasEvent={!!nextEvent}
-                    nextEventTitle={nextEvent?.title}
+                    events={c.events}
                     className="my-3 bg-bg-elevated/40 p-2.5 rounded-xl border border-border-default/50"
                   />
                 </div>

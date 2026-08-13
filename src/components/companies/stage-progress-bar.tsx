@@ -4,7 +4,6 @@ import { cn } from '@/lib/utils';
 import {
   FileCheck2,
   Presentation,
-  CheckCircle2,
   Code2,
   Users2,
   Award,
@@ -12,51 +11,36 @@ import {
   LogOut,
 } from 'lucide-react';
 
+export interface CompanyEventSummary {
+  id: string;
+  event_type?: string;
+  eventType?: string;
+  title: string | null;
+  start_time?: string | null;
+  startTime?: string | null;
+  venue?: string | null;
+}
+
 export interface StageProgressBarProps {
   status: string;
-  hasEvent?: boolean;
-  nextEventTitle?: string | null;
+  events?: CompanyEventSummary[];
   className?: string;
 }
 
 const STAGES = [
   { id: 'applied', label: 'Applied', icon: FileCheck2 },
-  { id: 'ppt_scheduled', label: 'PPT', icon: Presentation },
-  { id: 'shortlisted', label: 'Shortlist', icon: CheckCircle2 },
-  { id: 'test_scheduled', label: 'Test', icon: Code2 },
-  { id: 'interview_scheduled', label: 'Interview', icon: Users2 },
+  { id: 'ppt', label: 'PPT', icon: Presentation },
+  { id: 'test', label: 'Online Test', icon: Code2 },
+  { id: 'interview', label: 'Interview', icon: Users2 },
   { id: 'selected', label: 'Selected', icon: Award },
 ];
 
-function getStageIndex(status: string): number {
-  switch (status) {
-    case 'applied':
-      return 0;
-    case 'ppt_scheduled':
-      return 1;
-    case 'shortlisted':
-      return 2;
-    case 'test_scheduled':
-      return 3;
-    case 'interview_scheduled':
-      return 4;
-    case 'selected':
-    case 'offer_received':
-      return 5;
-    default:
-      return 0;
-  }
-}
-
 export default function StageProgressBar({
   status,
-  hasEvent,
-  nextEventTitle,
+  events = [],
   className,
 }: StageProgressBarProps) {
-  const isTerminal = ['not_shortlisted', 'withdrawn', 'declined', 'rejected'].includes(status);
-  const currentIndex = getStageIndex(status);
-
+  // 1. Handle Negative Terminal States
   if (status === 'not_shortlisted') {
     return (
       <div className={cn('p-2.5 rounded-xl bg-rose-500/10 border border-rose-500/20 text-xs flex items-center justify-between', className)}>
@@ -65,7 +49,7 @@ export default function StageProgressBar({
           Not Shortlisted
         </span>
         <span className="text-[11px] text-rose-400/80 font-medium">
-          Eliminated in Shortlist Round
+          Eliminated in Test Shortlist
         </span>
       </div>
     );
@@ -99,46 +83,96 @@ export default function StageProgressBar({
     );
   }
 
+  // Helper getters for event properties
+  const getEventType = (e: CompanyEventSummary) => (e.event_type || e.eventType || '').toLowerCase();
+  const getStartTime = (e: CompanyEventSummary) => e.start_time || e.startTime || null;
+
+  // 2. Event Analysis (Checking if PPT or Test already occurred)
+  const now = new Date();
+  const testEvent = events.find((e) =>
+    ['online_test', 'coding_test', 'assessment', 'test_scheduled'].includes(getEventType(e))
+  );
+  const pptEvent = events.find((e) => ['ppt', 'ppt_scheduled'].includes(getEventType(e)));
+  const interviewEvent = events.find((e) =>
+    ['interview', 'technical_interview', 'hr_interview', 'final_interview', 'interview_scheduled'].includes(
+      getEventType(e)
+    )
+  );
+
+  const rawTestTime = testEvent ? getStartTime(testEvent) : null;
+  const testStartTime = rawTestTime ? new Date(rawTestTime) : null;
+  const isTestInPast = testStartTime ? testStartTime.getTime() < now.getTime() : false;
+
+  // Determine stage states
+  let currentStageIndex = 0;
+  let stageStatusText = 'Awaiting Test Shortlist';
+
+  if (status === 'selected' || status === 'offer_received') {
+    currentStageIndex = 4;
+    stageStatusText = '🎉 Offer Received!';
+  } else if (status === 'interview_scheduled' || interviewEvent) {
+    currentStageIndex = 3;
+    stageStatusText = 'Interview Stage';
+  } else if (status === 'shortlisted' || status === 'test_scheduled' || testEvent) {
+    if (isTestInPast) {
+      // Test time has ended -> Test is Completed (wrote test), now waiting for interview shortlist!
+      currentStageIndex = 3; // Active on Interview stage
+      stageStatusText = 'Test Completed · Awaiting Results';
+    } else {
+      // Test is upcoming
+      currentStageIndex = 2; // Active on Test stage
+      stageStatusText = testStartTime
+        ? `Test: ${testStartTime.toLocaleDateString([], { month: 'short', day: 'numeric' })} @ ${testStartTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`
+        : 'Shortlisted for Test 🎉';
+    }
+  } else if (status === 'ppt_scheduled' || pptEvent) {
+    currentStageIndex = 1;
+    stageStatusText = 'PPT Scheduled';
+  } else {
+    currentStageIndex = 0;
+    stageStatusText = 'Applied · Awaiting Shortlist';
+  }
+
   return (
     <div className={cn('space-y-2 py-1', className)}>
       {/* Visual Stepper Bar */}
-      <div className="relative flex items-center justify-between">
+      <div className="relative flex items-center justify-between px-1">
         {/* Background track */}
-        <div className="absolute left-2 right-2 top-1/2 -translate-y-1/2 h-1 bg-border-default rounded-full z-0" />
-        
+        <div className="absolute left-3 right-3 top-1/2 -translate-y-1/2 h-1 bg-border-default rounded-full z-0" />
+
         {/* Active filled track */}
         <div
-          className="absolute left-2 top-1/2 -translate-y-1/2 h-1 bg-accent rounded-full transition-all duration-300 z-0"
-          style={{ width: `${(currentIndex / (STAGES.length - 1)) * 100}%` }}
+          className="absolute left-3 top-1/2 -translate-y-1/2 h-1 bg-gradient-to-r from-accent to-cyan-400 rounded-full transition-all duration-300 z-0"
+          style={{ width: `${(currentStageIndex / (STAGES.length - 1)) * 100}%` }}
         />
 
         {/* Steps */}
         {STAGES.map((stage, idx) => {
-          const isCompleted = idx < currentIndex;
-          const isCurrent = idx === currentIndex;
-          const isPending = idx > currentIndex;
+          const isCompleted = idx < currentStageIndex;
+          const isCurrent = idx === currentStageIndex;
+          const isPending = idx > currentStageIndex;
 
           return (
             <div key={stage.id} className="relative z-10 flex flex-col items-center group">
               <div
                 className={cn(
                   'w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold transition-all',
-                  isCurrent && 'bg-accent text-white ring-4 ring-accent/20 scale-110 shadow-sm shadow-accent/50',
-                  isCompleted && 'bg-emerald-500 text-white',
+                  isCurrent && 'bg-accent text-white ring-4 ring-accent/20 scale-110 shadow-sm shadow-accent/50 animate-pulse',
+                  isCompleted && 'bg-emerald-500 text-white shadow-sm shadow-emerald-500/30',
                   isPending && 'bg-bg-elevated text-text-tertiary border border-border-default'
                 )}
                 title={stage.label}
               >
-                {isCompleted ? (
-                  '✓'
-                ) : (
-                  <span className="text-[9px]">{idx + 1}</span>
-                )}
+                {isCompleted ? '✓' : idx + 1}
               </div>
               <span
                 className={cn(
                   'text-[9px] font-semibold mt-1 whitespace-nowrap transition-colors',
-                  isCurrent ? 'text-accent font-bold' : isCompleted ? 'text-emerald-400' : 'text-text-tertiary'
+                  isCurrent
+                    ? 'text-accent font-bold'
+                    : isCompleted
+                    ? 'text-emerald-400 font-medium'
+                    : 'text-text-tertiary'
                 )}
               >
                 {stage.label}
@@ -148,26 +182,26 @@ export default function StageProgressBar({
         })}
       </div>
 
-      {/* Stage Status Text Helper */}
-      <div className="flex items-center justify-between text-[11px] pt-1 border-t border-border-default/40">
+      {/* Stage Context Text Helper */}
+      <div className="flex items-center justify-between text-[11px] pt-1.5 border-t border-border-default/40">
         <span className="text-text-secondary font-medium">
-          Stage {currentIndex + 1} of 6: <strong className="text-text-primary">{STAGES[currentIndex].label}</strong>
+          Stage {currentStageIndex + 1} of 5:{' '}
+          <strong className="text-text-primary">{STAGES[currentStageIndex].label}</strong>
         </span>
-        {status === 'applied' && (
-          <span className="text-amber-400 font-medium">Awaiting Shortlist</span>
-        )}
-        {status === 'shortlisted' && (
-          <span className="text-cyan-400 font-medium">Shortlisted 🎉</span>
-        )}
-        {status === 'test_scheduled' && (
-          <span className="text-amber-400 font-medium">Test Scheduled</span>
-        )}
-        {status === 'interview_scheduled' && (
-          <span className="text-emerald-400 font-medium">Interview Stage</span>
-        )}
-        {status === 'selected' && (
-          <span className="text-green-400 font-bold">Offer Released!</span>
-        )}
+        <span
+          className={cn(
+            'font-semibold text-[11px]',
+            isTestInPast && currentStageIndex === 3
+              ? 'text-cyan-400'
+              : status === 'shortlisted'
+              ? 'text-accent'
+              : status === 'selected'
+              ? 'text-green-400'
+              : 'text-amber-400'
+          )}
+        >
+          {stageStatusText}
+        </span>
       </div>
     </div>
   );

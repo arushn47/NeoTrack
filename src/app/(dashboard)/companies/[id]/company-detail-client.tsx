@@ -224,7 +224,7 @@ export default function CompanyDetailClient({ company }: CompanyDetailClientProp
           <Sparkles className="w-3.5 h-3.5 text-accent" />
           Hiring Pipeline Progression
         </h3>
-        <StageProgressBar status={status} className="py-2" />
+        <StageProgressBar status={status} events={company.events} className="py-2" />
       </div>
 
       {/* Tabs Header */}

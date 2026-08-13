@@ -55,6 +55,15 @@ export default async function CompaniesPage() {
     }
   }
 
+  const allEventsByCompany = new Map<string, typeof events>();
+  if (events) {
+    for (const event of events) {
+      const existing = allEventsByCompany.get(event.company_id) || [];
+      existing.push(event);
+      allEventsByCompany.set(event.company_id, existing);
+    }
+  }
+
   const emailCountMap = new Map<string, number>();
   if (emails) {
     for (const email of emails) {
@@ -89,6 +98,7 @@ export default async function CompaniesPage() {
           }
         : null,
       latestEvent: eventMap.get(comp.id) || null,
+      events: allEventsByCompany.get(comp.id) || [],
       neoIdMatched: app ? matchedAppIds.has(app.id) : false,
       emailCount: emailCountMap.get(comp.id) || 0,
     };
