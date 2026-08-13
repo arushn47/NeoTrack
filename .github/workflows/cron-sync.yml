@@ -12,4 +12,4 @@ jobs:
     steps:
       - name: Ping NeoTrack Sync API
         run: |
-          curl -s -X GET "https://neo-track-bice.vercel.app/api/cron/sync"
+          curl -s -X GET "https://neopat-tracker.vercel.app/api/cron/sync"
