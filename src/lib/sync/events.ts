@@ -134,7 +134,15 @@ export function parseDateTime(text: string): Date | null {
     if (timeMatch[2]) minutes = parseInt(timeMatch[2], 10);
   }
 
-  const date = new Date(year, month, day, hours, minutes);
+  // Construct explicitly in Indian Standard Time (IST, UTC+05:30)
+  // This prevents UTC servers (e.g. Vercel) from shifting 2:30 PM IST into 8:00 PM IST!
+  const monthStr = String(month + 1).padStart(2, '0');
+  const dayStr = String(day).padStart(2, '0');
+  const hourStr = String(hours).padStart(2, '0');
+  const minStr = String(minutes).padStart(2, '0');
+  const isoWithIstOffset = `${year}-${monthStr}-${dayStr}T${hourStr}:${minStr}:00+05:30`;
+
+  const date = new Date(isoWithIstOffset);
   return isNaN(date.getTime()) ? null : date;
 }
 
@@ -248,11 +256,13 @@ export function extractJobDetails(text: string): ExtractedJobDetails {
   let stipend: string | null = null;
   let location: string | null = null;
 
-  // CTC extraction e.g. "Year 1 (CTC: 22 Lakhs)", "CTC: 22L PA", "22.0L PA", "INR 12 LPA"
-  const tableCtcMatch = text.match(/CTC\s*[:\-–—]?\s*(?:Year\s*\d+\s*)?(?:\(?CTC\s*[:\-–—]?\s*)?(?:INR|Rs\.?)?\s*([₹\d\.]+(?:\s*-\s*[\d\.]+)?\s*(?:Lakhs?|LPA|L\s*PA|Lac|Cr|K|per\s*annum)?)/i);
+  // CTC extraction e.g. "9LPA+1.2 Lakh JB", "CTC: 22 Lakhs", "CTC: 22L PA", "22.0L PA", "INR 12 LPA"
+  const tableCtcMatch = text.match(
+    /(?:CTC|Package|Salary|Compensation)\s*[:\-–—\t]?\s*(?:Year\s*\d+\s*)?(?:\(?CTC\s*[:\-–—]?\s*)?(?:INR|Rs\.?)?\s*([₹\d\.]+(?:\s*-\s*[\d\.]+)?\s*(?:LPA|L\s*PA|Lakhs?|Lac|Cr|K)?(?:\s*\+\s*[\d\.]+\s*(?:Lakhs?|LPA|L|k)?\s*(?:JB|Bonus|Retention)?)?)/i
+  );
   if (tableCtcMatch && tableCtcMatch[1]) {
     ctc = tableCtcMatch[1].trim();
-    if (!/lpa|lakh|lac|cr|k|pa/i.test(ctc)) {
+    if (/^\d+(\.\d+)?$/.test(ctc)) {
       ctc = `${ctc} LPA`;
     }
   }
@@ -262,21 +272,22 @@ export function extractJobDetails(text: string): ExtractedJobDetails {
     if (standaloneCtc) ctc = standaloneCtc[1].trim();
   }
 
-  // Stipend extraction e.g. "Stipend: 50000", "Stipend: 50,000 pm", "50k PM"
+  // Stipend extraction e.g. "Stipend: 36000", "Stipend: 50,000 pm", "50k PM"
   const stipendMatch = text.match(
-    /stipend\s*[:\-–—]?\s*(?:INR|Rs\.?)?\s*([₹\d,]+(?:\s*k)?(?:\s*\/\s*m(?:onth)?|p\.?m\.?|per\s*month)?)/i
+    /stipend\s*[:\-–—\t]?\s*(?:INR|Rs\.?)?\s*([₹\d,]+(?:\s*k)?(?:\s*\/\s*m(?:onth)?|p\.?m\.?|per\s*month)?)/i
   );
   if (stipendMatch && stipendMatch[1]) {
     stipend = stipendMatch[1].trim();
-    if (/^\d{4,6}$/.test(stipend.replace(/,/g, ''))) {
-      const num = parseInt(stipend.replace(/,/g, ''), 10);
+    const cleanNum = stipend.replace(/[^\d]/g, '');
+    if (cleanNum && parseInt(cleanNum, 10) >= 1000) {
+      const num = parseInt(cleanNum, 10);
       stipend = `₹${num.toLocaleString('en-IN')}/month`;
     }
   }
 
-  // Role extraction e.g. "Software Developer", "SDE", "AI Engineer", "Technical Product Analyst"
+  // Role / Category extraction e.g. "Super Dream Internship", "Software Developer", "SDE"
   const roleMatch = text.match(
-    /(?:role|profile|designation|position)\s*[:\-–—]\s*(.+?)(?:\r?\n|$|,|\.)/i
+    /(?:role|profile|designation|position|category)\s*[:\-–—\t]?\s*(.+?)(?:\r?\n|$|,|\.)/i
   );
   if (roleMatch) {
     role = roleMatch[1].trim().slice(0, 60);
@@ -284,7 +295,7 @@ export function extractJobDetails(text: string): ExtractedJobDetails {
 
   // Location extraction
   const locationMatch = text.match(
-    /(?:job\s+)?location\s*[:\-–—]\s*(.+?)(?:\r?\n|$|,|\.)/i
+    /(?:job\s+)?location\s*[:\-–—\t]?\s*(.+?)(?:\r?\n|$|,|\.)/i
   );
   if (locationMatch) {
     location = locationMatch[1].trim().slice(0, 60);

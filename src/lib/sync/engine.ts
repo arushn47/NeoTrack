@@ -203,7 +203,7 @@ export async function runSync(
                 const metadata = await fetchMessageMetadata(gmail, msgId);
                 const subj = metadata.subject.toLowerCase();
                 const isPlacementRelevant =
-                  /shortlist|selection|online\s+test|coding\s+test|assessment|interview|ppt|pre-placement|super\s+dream|dream\s+core/i.test(
+                  /shortlist|selection|online\s+test|coding\s+test|assessment|interview|ppt|pre-placement|super\s+dream|dream\s+core|registration|internship|placement\s+drive|campus\s+drive|hiring|cdc\s+info/i.test(
                     subj
                   );
                 if (!isPlacementRelevant) {
@@ -226,14 +226,23 @@ export async function runSync(
               let companyId: string | null = null;
 
               if (classification.companyName) {
+                const isRegistrationAnnouncement =
+                  classification.classification === 'registration' ||
+                  classification.classification === 'jd' ||
+                  /registration|internship|placement\s+drive|super\s+dream|dream\s+core|campus\s+drive|hiring/i.test(
+                    parsedEmail.subject
+                  );
+
+                const allowCreate = isPersonal || isRegistrationAnnouncement;
+
                 companyId = await upsertCompany(
                   supabase,
                   userId,
                   classification.companyName,
-                  isPersonal // ONLY allow creating new companies from Personal account emails
+                  allowCreate
                 );
 
-                if (companyId && isPersonal) {
+                if (companyId) {
                   // Check if this is a newly created company
                   const { count } = await supabase
                     .from('emails')
@@ -249,7 +258,7 @@ export async function runSync(
                   // Check current application status first
                   const { data: currentApp } = await supabase
                     .from('applications')
-                    .select('status')
+                    .select('status, applied_at')
                     .eq('user_id', userId)
                     .eq('company_id', companyId)
                     .single();
@@ -288,9 +297,9 @@ export async function runSync(
                       user_id: userId,
                       company_id: companyId,
                       status: targetStatus,
-                      status_source: 'neopat_personal_email',
+                      status_source: isPersonal ? 'neopat_personal_email' : 'college_email_announcement',
                       status_confidence: 'high',
-                      applied_at: parsedEmail.receivedAt.toISOString(),
+                      applied_at: currentApp?.applied_at || parsedEmail.receivedAt.toISOString(),
                       last_updated: new Date().toISOString(),
                     },
                     { onConflict: 'user_id,company_id' }

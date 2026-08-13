@@ -59,8 +59,8 @@ export function getPlacementSearchQuery(
       ? ` after:${afterDate.toISOString().split('T')[0].replace(/-/g, '/')}`
       : ' newer_than:2m';
 
-    // College accounts — STRICTLY official CDC senders with placement keywords only
-    return `(from:vitlions2027@vitbhopal.ac.in OR from:placementoffice@vitbhopal.ac.in OR from:noreply.cdcinfo@vitstudent.ac.in) (shortlist OR shortlisted OR "online test" OR "coding test" OR PPT OR assessment OR interview OR "selection list" OR "super dream" OR "dream core")${collegeDateFilter} -category:promotions -category:social`;
+    // College accounts — STRICTLY official CDC senders with placement keywords
+    return `(from:vitlions2027@vitbhopal.ac.in OR from:placementoffice@vitbhopal.ac.in OR from:noreply.cdcinfo@vitstudent.ac.in) (shortlist OR shortlisted OR "online test" OR "coding test" OR PPT OR assessment OR interview OR "selection list" OR "super dream" OR "dream core" OR registration OR internship OR "placement drive" OR "campus drive")${collegeDateFilter} -category:promotions -category:social`;
   }
 
   // Personal accounts — STRICTLY official NeoPAT / CDC emails from vitstudent.ac.in
