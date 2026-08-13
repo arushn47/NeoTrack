@@ -265,6 +265,12 @@ export function extractJobDetails(text: string): ExtractedJobDetails {
 
   const unannouncedPattern = /will be (?:announced|informed|shared) later|tba|tbd|to be (?:announced|disclosed)|not disclosed/i;
 
+  // 0. CSE Branch Eligibility Guard
+  // If email explicitly excludes CSE (e.g. "other than CSE", "CSE are not eligible"), ignore job details for B.Tech CSE Core student
+  if (/other\s+than\s+(?:cse|computer)|(?:cse|computer|it)[^.\n]*?not\s+eligible|except\s+cse/i.test(cleanText)) {
+    return { role: null, ctc: null, stipend: null, location: null, neoIdMatched: false, matchedNeoIdValue: null };
+  }
+
   // 1. CTC Extraction (Single Value or Multi-profile Range)
   const ctcBlockMatch = cleanText.match(/\bCTC\b\s*[:\-–—\t]?\s*([\s\S]{1,400}?)(?:\b(?:Last date|Website|Location|Eligible|Eligibility|Stipend|Selection|Process|Registration)\b|$)/i);
   if (ctcBlockMatch && unannouncedPattern.test(ctcBlockMatch[1])) {
