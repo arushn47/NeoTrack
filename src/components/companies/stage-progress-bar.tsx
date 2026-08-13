@@ -50,7 +50,7 @@ export default function StageProgressBar({
       <div className={cn('p-2.5 rounded-xl bg-zinc-800/80 border border-zinc-700/50 text-xs flex items-center justify-between', className)}>
         <span className="flex items-center gap-1.5 font-semibold text-zinc-400">
           <LogOut className="w-3.5 h-3.5 text-zinc-400 flex-shrink-0" />
-          Opted Out / Withdrawn
+          Opted Out
         </span>
         <span className="text-[11px] text-zinc-500 font-medium">
           Drive Inactive
@@ -68,6 +68,20 @@ export default function StageProgressBar({
         </span>
         <span className="text-[11px] text-red-400/80 font-medium">
           Process Concluded
+        </span>
+      </div>
+    );
+  }
+
+  if (status === 'not_applied') {
+    return (
+      <div className={cn('p-2.5 rounded-xl bg-slate-800/40 border border-slate-700/40 text-xs flex items-center justify-between', className)}>
+        <span className="flex items-center gap-1.5 font-medium text-slate-300">
+          <Presentation className="w-3.5 h-3.5 text-slate-400 flex-shrink-0" />
+          Drive Announced
+        </span>
+        <span className="text-[11px] text-slate-400 font-medium">
+          Not Applied
         </span>
       </div>
     );
@@ -161,13 +175,10 @@ export default function StageProgressBar({
     currentStageIndex = 3;
     stageStatusText = 'Interview Stage';
   } else if (status === 'shortlisted' || status === 'test_scheduled' || testEvent) {
+    currentStageIndex = 2; // Active on Test stage
     if (isTestInPast) {
-      // Test time has ended -> Test is Completed (wrote test), now waiting for interview shortlist!
-      currentStageIndex = 3; // Active on Interview stage
       stageStatusText = 'Test Completed · Awaiting Results';
     } else {
-      // Test is upcoming
-      currentStageIndex = 2; // Active on Test stage
       stageStatusText = testStartTime
         ? `Test: ${testStartTime.toLocaleDateString([], { month: 'short', day: 'numeric' })} @ ${testStartTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`
         : 'Shortlisted for Test 🎉';
@@ -238,7 +249,7 @@ export default function StageProgressBar({
         <span
           className={cn(
             'font-semibold text-[11px]',
-            isTestInPast && currentStageIndex === 3
+            isTestInPast && currentStageIndex === 2
               ? 'text-cyan-400'
               : status === 'shortlisted'
               ? 'text-accent'

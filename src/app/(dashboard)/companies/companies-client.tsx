@@ -1,6 +1,7 @@
 'use client';
 
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
+import { useSearchParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import {
   Building2,
@@ -15,6 +16,7 @@ import {
   IndianRupee,
   MapPin,
   Tag,
+  ArrowUpDown,
 } from 'lucide-react';
 import { cn, timeAgo } from '@/lib/utils';
 import StatusBadge from '@/components/shared/status-badge';
@@ -61,21 +63,113 @@ interface CompaniesClientProps {
 }
 
 const STATUS_FILTERS = [
-  { id: 'active', label: 'Active' },
-  { id: 'applied', label: 'Applied' },
+  { id: 'active', label: 'In Progress' },
   { id: 'shortlisted', label: 'Shortlisted' },
+  { id: 'applied', label: 'Applied' },
+  { id: 'not_applied', label: 'Not Registered' },
   { id: 'not_shortlisted', label: 'Not Shortlisted' },
   { id: 'selected', label: 'Selected 🎉' },
-  { id: 'withdrawn', label: 'Opted Out / Withdrawn' },
+  { id: 'withdrawn', label: 'Opted Out' },
   { id: 'all', label: 'All Companies' },
 ];
 
+const SORT_OPTIONS = [
+  { id: 'recent', label: 'Recent' },
+  { id: 'name', label: 'Name A-Z' },
+  { id: 'status', label: 'Status' },
+  { id: 'ctc', label: 'CTC ↓' },
+] as const;
+
+type SortMode = typeof SORT_OPTIONS[number]['id'];
+
+// Parse CTC string to a comparable number (e.g. "12 LPA" → 12, "8.5 LPA" → 8.5)
+function parseCTC(ctc: string | null | undefined): number {
+  if (!ctc) return 0;
+  const match = ctc.match(/(\d+\.?\d*)/);
+  return match ? parseFloat(match[1]) : 0;
+}
+
+// Status priority for sorting (higher = more progressed)
+const SORT_STATUS_PRIORITY: Record<string, number> = {
+  selected: 10, offer_received: 9, interview_scheduled: 8,
+  test_scheduled: 7, shortlisted: 6, ppt_scheduled: 5,
+  applied: 4, not_applied: 3, unknown: 2,
+  not_shortlisted: 1, rejected: 1, withdrawn: 0, declined: 0,
+};
+
+function cleanRoleDisplay(rawRole: string | null | undefined, rawCtc?: string | null): string {
+  if (rawRole) {
+    const r = rawRole.replace(/<[^>]+>/g, ' ').replace(/^[*,\.\s>\-]+/, '').replace(/[*,\.\s>\-]+$/, '').trim();
+    if (
+      r &&
+      r.length >= 2 &&
+      r !== 'Placement Drive' &&
+      !/you are eligible|upcoming placement|forwarded message|scheduled on|not japanese role|of someone who|details below|profile 1|profile 2|applied candidates|^[>,\.\*\s]+$/i.test(r)
+    ) {
+      return r;
+    }
+  }
+
+  if (rawCtc) {
+    const match = rawCtc.match(/(\d+(?:\.\d+)?)/);
+    if (match) {
+      const ctcVal = parseFloat(match[1]);
+      if (ctcVal >= 10) return 'Super Dream Drive';
+      if (ctcVal >= 6) return 'Dream Drive';
+      if (ctcVal < 6) return 'Regular Drive';
+    }
+  }
+
+  return 'Placement Drive';
+}
+
+function cleanCtcDisplay(rawCtc: string | null | undefined): string | null {
+  if (!rawCtc) return null;
+  const c = rawCtc.replace(/^[*,\.\s>\-]+/, '').replace(/[*,\.\s>\-]+$/, '').trim();
+  if (!c || c.length < 2 || /^[>,\.\*\s]+$/.test(c)) return null;
+  return c;
+}
+
+function cleanLocationDisplay(rawLoc: string | null | undefined): string | null {
+  if (!rawLoc) return null;
+  let l = rawLoc.replace(/<[^>]+>/g, ' ').replace(/^[*,\.\s>\-]+/, '').replace(/[*,\.\s>\-]+$/, '').trim();
+  l = l.replace(/\s+job$/i, '').replace(/\s+position:.*$/i, '').trim();
+  if (
+    !l ||
+    l.length < 2 ||
+    /please find|mail with|nonsense|come at|assistance|applicable|candidate|round\s+\d+|results|lab|service agreement|forwarded message|scheduled on|online test|@|own location|pearl research|anna auditorium|find the below|candidates list|^[>,\.\*\s]+$/i.test(l)
+  ) {
+    return null;
+  }
+  return l;
+}
+
 export default function CompaniesClient({ companies }: CompaniesClientProps) {
+  const searchParams = useSearchParams();
+  const router = useRouter();
+  const initialFilter = searchParams.get('filter') || searchParams.get('status') || 'active';
+
   const [searchQuery, setSearchQuery] = useState('');
-  const [selectedFilter, setSelectedFilter] = useState('active');
+  const [selectedFilter, setSelectedFilter] = useState(initialFilter);
+  const [sortMode, setSortMode] = useState<SortMode>('recent');
+
+  useEffect(() => {
+    const urlFilter = searchParams.get('filter') || searchParams.get('status');
+    if (urlFilter && urlFilter !== selectedFilter) {
+      setSelectedFilter(urlFilter);
+    }
+  }, [searchParams]);
+
+  const handleFilterChange = (filterId: string) => {
+    setSelectedFilter(filterId);
+    const params = new URLSearchParams(searchParams.toString());
+    params.set('filter', filterId);
+    params.delete('status');
+    router.replace(`/companies?${params.toString()}`, { scroll: false });
+  };
 
   const filteredCompanies = useMemo(() => {
-    return companies.filter((c) => {
+    const filtered = companies.filter((c) => {
       // Search filter
       const matchesSearch =
         c.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -87,16 +181,39 @@ export default function CompaniesClient({ companies }: CompaniesClientProps) {
       // Status filter
       if (selectedFilter === 'all') return true;
       if (selectedFilter === 'active') {
-        const s = c.application?.status || 'applied';
-        return !['withdrawn', 'declined', 'not_shortlisted', 'rejected'].includes(s);
+        // "In Progress" = applied, shortlisted, ppt_scheduled, test_scheduled, interview_scheduled, offer_received
+        const s = c.application?.status || 'not_applied';
+        return !['not_applied', 'withdrawn', 'declined', 'not_shortlisted', 'rejected', 'selected'].includes(s);
+      }
+      if (selectedFilter === 'not_applied') {
+        const s = c.application?.status;
+        return !s || s === 'not_applied';
       }
       if (selectedFilter === 'withdrawn') {
-        const s = c.application?.status || 'applied';
+        const s = c.application?.status || '';
         return s === 'withdrawn' || s === 'declined';
       }
-      return (c.application?.status || 'applied') === selectedFilter;
+      return (c.application?.status || 'not_applied') === selectedFilter;
     });
-  }, [companies, searchQuery, selectedFilter]);
+
+    // Sort
+    return [...filtered].sort((a, b) => {
+      switch (sortMode) {
+        case 'name':
+          return a.name.localeCompare(b.name);
+        case 'status': {
+          const aPri = SORT_STATUS_PRIORITY[a.application?.status || 'unknown'] ?? 2;
+          const bPri = SORT_STATUS_PRIORITY[b.application?.status || 'unknown'] ?? 2;
+          return bPri - aPri; // Higher priority first
+        }
+        case 'ctc':
+          return parseCTC(b.application?.ctc) - parseCTC(a.application?.ctc);
+        case 'recent':
+        default:
+          return new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime();
+      }
+    });
+  }, [companies, searchQuery, selectedFilter, sortMode]);
 
   return (
     <div className="space-y-6 animate-fade-in">
@@ -111,16 +228,33 @@ export default function CompaniesClient({ companies }: CompaniesClientProps) {
           </p>
         </div>
 
-        {/* Search bar */}
-        <div className="relative w-full sm:w-72">
-          <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-text-tertiary" />
-          <input
-            type="text"
-            placeholder="Search company or role..."
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full pl-9 pr-4 py-2 bg-bg-surface border border-border-default rounded-xl text-sm text-text-primary placeholder:text-text-tertiary focus:outline-none focus:border-accent transition-all"
-          />
+        {/* Search bar + Sort */}
+        <div className="flex items-center gap-2 w-full sm:w-auto">
+          <div className="relative flex-1 sm:w-72">
+            <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-text-tertiary" />
+            <input
+              type="text"
+              placeholder="Search company or role..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="w-full pl-9 pr-4 py-2 bg-bg-surface border border-border-default rounded-xl text-sm text-text-primary placeholder:text-text-tertiary focus:outline-none focus:border-accent transition-all"
+            />
+          </div>
+
+          {/* Sort selector */}
+          <div className="relative">
+            <select
+              value={sortMode}
+              onChange={(e) => setSortMode(e.target.value as SortMode)}
+              className="appearance-none pl-8 pr-3 py-2 bg-bg-surface border border-border-default rounded-xl text-xs font-medium text-text-secondary hover:text-text-primary focus:outline-none focus:border-accent transition-all cursor-pointer"
+              aria-label="Sort companies"
+            >
+              {SORT_OPTIONS.map((opt) => (
+                <option key={opt.id} value={opt.id}>{opt.label}</option>
+              ))}
+            </select>
+            <ArrowUpDown className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-text-tertiary pointer-events-none" />
+          </div>
         </div>
       </div>
 
@@ -132,12 +266,14 @@ export default function CompaniesClient({ companies }: CompaniesClientProps) {
             count = companies.length;
           } else if (filter.id === 'active') {
             count = companies.filter(
-              (c) => !['withdrawn', 'declined', 'not_shortlisted', 'rejected'].includes(c.application?.status || 'applied')
+              (c) => !['not_applied', 'withdrawn', 'declined', 'not_shortlisted', 'rejected', 'selected'].includes(c.application?.status || 'not_applied')
             ).length;
+          } else if (filter.id === 'not_applied') {
+            count = companies.filter((c) => !c.application?.status || c.application.status === 'not_applied').length;
           } else if (filter.id === 'withdrawn') {
             count = companies.filter((c) => ['withdrawn', 'declined'].includes(c.application?.status || '')).length;
           } else {
-            count = companies.filter((c) => (c.application?.status || 'applied') === filter.id).length;
+            count = companies.filter((c) => (c.application?.status || 'not_applied') === filter.id).length;
           }
 
           const isActive = selectedFilter === filter.id;
@@ -145,7 +281,7 @@ export default function CompaniesClient({ companies }: CompaniesClientProps) {
           return (
             <button
               key={filter.id}
-              onClick={() => setSelectedFilter(filter.id)}
+              onClick={() => handleFilterChange(filter.id)}
               className={cn(
                 'px-3.5 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition-all flex items-center gap-1.5',
                 isActive
@@ -182,9 +318,9 @@ export default function CompaniesClient({ companies }: CompaniesClientProps) {
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {filteredCompanies.map((c) => {
             const status = c.application?.status || 'applied';
-            const role = c.application?.role || 'Software Engineer / Graduate Trainee';
-            const ctc = c.application?.ctc;
-            const location = c.application?.location;
+            const role = cleanRoleDisplay(c.application?.role, c.application?.ctc);
+            const ctc = cleanCtcDisplay(c.application?.ctc);
+            const location = cleanLocationDisplay(c.application?.location);
             const nextEvent = c.latestEvent;
 
             return (
@@ -196,21 +332,21 @@ export default function CompaniesClient({ companies }: CompaniesClientProps) {
                 <div>
                   {/* Top Row: Icon, Name, Status */}
                   <div className="flex items-start justify-between gap-3 mb-3">
-                    <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 rounded-xl bg-accent/10 border border-accent/20 flex items-center justify-center font-bold text-accent text-base group-hover:scale-105 transition-transform">
+                    <div className="flex items-center gap-3 min-w-0 flex-1">
+                      <div className="w-10 h-10 rounded-xl bg-accent/10 border border-accent/20 flex items-center justify-center font-bold text-accent text-base group-hover:scale-105 transition-transform flex-shrink-0">
                         {c.name.charAt(0).toUpperCase()}
                       </div>
-                      <div>
-                        <h3 className="font-semibold text-text-primary text-base group-hover:text-accent transition-colors flex items-center gap-1.5">
-                          {c.name}
+                      <div className="min-w-0">
+                        <h3 className="font-semibold text-text-primary text-base group-hover:text-accent transition-colors flex items-center gap-1.5 truncate">
+                          <span className="truncate">{c.name}</span>
                           {c.neoIdMatched && (
-                            <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-bold bg-accent/15 text-accent border border-accent/30" title="Neo ID Matched in Shortlist">
+                            <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-bold bg-accent/15 text-accent border border-accent/30 flex-shrink-0" title="Neo ID Matched in Shortlist">
                               <Sparkles className="w-2.5 h-2.5" />
                               Shortlisted
                             </span>
                           )}
                         </h3>
-                        <p className="text-xs text-text-tertiary truncate max-w-[180px]">
+                        <p className="text-xs text-text-tertiary truncate">
                           {role}
                         </p>
                       </div>
@@ -220,20 +356,22 @@ export default function CompaniesClient({ companies }: CompaniesClientProps) {
                   </div>
 
                   {/* CTC & Location Badges */}
-                  <div className="flex flex-wrap items-center gap-2 mb-3">
-                    {ctc && (
-                      <span className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-                        <IndianRupee className="w-3 h-3" />
-                        {ctc.replace(/\*/g, '').trim()}
-                      </span>
-                    )}
-                    {location && (
-                      <span className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-xs text-text-secondary bg-bg-surface-hover border border-border-default">
-                        <MapPin className="w-3 h-3 text-text-tertiary" />
-                        {location.replace(/\*/g, '').trim()}
-                      </span>
-                    )}
-                  </div>
+                  {(ctc || location) && (
+                    <div className="flex flex-wrap items-center gap-2 mb-3">
+                      {ctc && (
+                        <span className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                          <IndianRupee className="w-3 h-3" />
+                          {ctc}
+                        </span>
+                      )}
+                      {location && (
+                        <span className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-xs text-text-secondary bg-bg-surface-hover border border-border-default">
+                          <MapPin className="w-3 h-3 text-text-tertiary" />
+                          {location}
+                        </span>
+                      )}
+                    </div>
+                  )}
 
                   {/* Hiring Pipeline Stage Flow */}
                   <StageProgressBar

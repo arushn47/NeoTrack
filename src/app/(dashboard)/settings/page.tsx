@@ -3,7 +3,7 @@ import { createAdminClient } from '@/lib/supabase/admin';
 import SettingsClient from './settings-client';
 
 export const metadata = {
-  title: 'Settings — NeoPAT Placement Tracker',
+  title: 'Settings — NeoTrack',
   description: 'Manage your Gmail accounts, Neo ID, and preferences.',
 };
 

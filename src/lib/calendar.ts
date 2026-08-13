@@ -18,7 +18,7 @@ export function getGoogleCalendarUrl(event: {
   const title = encodeURIComponent(`${event.companyName ? `${event.companyName} - ` : ''}${event.title}`);
   const location = encodeURIComponent(event.venue || 'Online / VIT Campus');
   const details = encodeURIComponent(
-    `Placement drive schedule tracked by NeoPAT Placement Tracker.\nCompany: ${event.companyName || ''}\nVenue: ${event.venue || 'Online'}`
+    `Placement drive schedule tracked by NeoTrack.\nCompany: ${event.companyName || ''}\nVenue: ${event.venue || 'Online'}`
   );
 
   return `https://calendar.google.com/calendar/render?action=TEMPLATE&text=${title}&dates=${datesParam}&details=${details}&location=${location}`;

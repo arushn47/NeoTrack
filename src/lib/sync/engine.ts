@@ -150,7 +150,7 @@ export async function runSync(
           // Fall back to targeted search if history expired (>30 days)
           const afterDate = account.last_sync_at ? new Date(account.last_sync_at) : undefined;
           const query = getPlacementSearchQuery(account.account_type as 'personal' | 'college', afterDate);
-          const maxLimit = account.account_type === 'personal' ? 150 : 60;
+          const maxLimit = account.account_type === 'personal' ? 500 : 300;
           messageIds = await fetchMessageIds(gmail, query, maxLimit);
           nextHistoryId = historyResult.latestHistoryId || (await getProfileHistoryId(gmail));
         }
@@ -161,7 +161,7 @@ export async function runSync(
 
         const afterDate = account.last_sync_at ? new Date(account.last_sync_at) : undefined;
         const query = getPlacementSearchQuery(account.account_type as 'personal' | 'college', afterDate);
-        const maxLimit = account.account_type === 'personal' ? 150 : 60;
+        const maxLimit = account.account_type === 'personal' ? 500 : 300;
         messageIds = await fetchMessageIds(gmail, query, maxLimit);
         nextHistoryId = await getProfileHistoryId(gmail);
       }
@@ -226,14 +226,10 @@ export async function runSync(
               let companyId: string | null = null;
 
               if (classification.companyName) {
-                const isRegistrationAnnouncement =
-                  classification.classification === 'registration' ||
-                  classification.classification === 'jd' ||
-                  /registration|internship|placement\s+drive|super\s+dream|dream\s+core|campus\s+drive|hiring/i.test(
-                    parsedEmail.subject
-                  );
-
-                const allowCreate = isPersonal || isRegistrationAnnouncement;
+                // RULE: Only personal (NeoPAT) emails create new companies.
+                // College emails have thousands of drives for all branches (MBA, etc.)
+                // and should ONLY match against existing companies for enrichment/verification.
+                const allowCreate = isPersonal;
 
                 companyId = await upsertCompany(
                   supabase,
@@ -263,7 +259,17 @@ export async function runSync(
                     .eq('company_id', companyId)
                     .single();
 
-                  let targetStatus = currentApp?.status || 'applied';
+                  // Determine the correct default status for NEW companies:
+                  // - Registration/JD emails → 'not_applied' (just announced, not yet applied)
+                  // - Registration confirmations → 'applied' (confirmed participation)
+                  // - Existing apps keep their current status
+                  const isConfirmation =
+                    classification.classification === 'registration_confirmation' ||
+                    /registration\s+confirm|successfully\s+register|application\s+received|you\s+have\s+registered/i.test(
+                      (parsedEmail.bodyPlain || parsedEmail.bodySnippet || '')
+                    );
+
+                  let targetStatus = currentApp?.status || (isConfirmation ? 'applied' : 'not_applied');
                   const text = (
                     parsedEmail.subject +
                     ' ' +
@@ -288,7 +294,7 @@ export async function runSync(
                     text.includes('ineligible')
                   ) {
                     targetStatus = 'not_applied';
-                  } else if (!currentApp) {
+                  } else if (!currentApp && isConfirmation) {
                     targetStatus = 'applied';
                   }
 
@@ -461,8 +467,11 @@ async function upsertCompany(
     for (const comp of userCompanies) {
       const compLower = comp.name.toLowerCase();
       // Match if one contains the other (e.g. "MUFG" inside "MUFG Financial", or "PlaySimple" in "PlaySimple Games")
-      if (compLower.includes(targetLower) || targetLower.includes(compLower)) {
-        return comp.id;
+      // Guard: both strings must be at least 4 chars to prevent false merges (e.g. "AT" matching "ATRENTA")
+      if (compLower.length >= 4 && targetLower.length >= 4) {
+        if (compLower.includes(targetLower) || targetLower.includes(compLower)) {
+          return comp.id;
+        }
       }
     }
   }

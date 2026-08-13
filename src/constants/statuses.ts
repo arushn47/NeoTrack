@@ -28,8 +28,8 @@ export const STATUS_LABELS: Record<ApplicationStatus, string> = {
   selected: 'Selected',
   rejected: 'Rejected',
   not_shortlisted: 'Not Shortlisted',
-  withdrawn: 'Opted Out / Withdrawn',
-  declined: 'Opted Out / Withdrawn',
+  withdrawn: 'Opted Out',
+  declined: 'Opted Out',
   offer_received: 'Offer Received',
   unknown: 'Unknown',
 };

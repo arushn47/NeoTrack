@@ -54,6 +54,7 @@ export async function processEmailForEventsAndStatus(
 
   // 1. Check for Neo ID match in email body / subject
   let isNeoMatched = checkNeoIdMatch(fullText, userNeoId, userEmail);
+  let isInAppliedList = false; // Matched in an applied/opt-in list (NOT a shortlist)
   let matchDetail: string | null = null;
   let matchType = 'email_body';
 
@@ -86,9 +87,16 @@ export async function processEmailForEventsAndStatus(
     );
 
     if (excelMatch && excelMatch.matched) {
-      isNeoMatched = true;
-      matchType = 'excel_attachment';
-      matchDetail = excelMatch.details;
+      if (excelMatch.isActualShortlist) {
+        // Matched in a real shortlist file → candidate is shortlisted
+        isNeoMatched = true;
+        matchType = 'excel_attachment';
+        matchDetail = excelMatch.details;
+      } else {
+        // Matched in an applied/opt-in/eligible list → just confirms application
+        isInAppliedList = true;
+        matchDetail = excelMatch.details;
+      }
     }
   }
 
@@ -122,7 +130,13 @@ export async function processEmailForEventsAndStatus(
     existingApp?.status === 'declined' ||
     emailClass === 'withdrawal' ||
     emailClass === 'decline' ||
-    /registration.*(?:has\s+been\s+)?withdrawn|opted\s+out|declined\s+drive/i.test(fullText);
+    // General withdrawal patterns
+    /registration.*(?:has\s+been\s+)?withdrawn|opted\s+out|declined\s+drive/i.test(fullText) ||
+    // NeoPAT-specific: "Confirmation: X Drive Registration Update" + body says withdrawn
+    (/confirmation.*drive\s+registration\s+update/i.test(subjLower) && /withdrawn/i.test(fullText)) ||
+    // NeoPAT body: "your registration for the following placement drive has been withdrawn"
+    /your\s+registration\s+for\s+the\s+following\s+placement\s+drive\s+has\s+been\s+withdrawn/i.test(fullText);
+
 
   if (isWithdrawn) {
     // Delete any previously inserted events for this company if user has withdrawn
@@ -238,39 +252,79 @@ export async function processEmailForEventsAndStatus(
     // User has manually set their status — preserve it
     newStatus = null;
   } else if (isWithdrawn) {
-    // A. Check for Withdrawal / Opt-Out (Highest priority from NeoPAT)
+    // A. Withdrawal / Opt-Out (always highest priority)
     newStatus = 'withdrawn';
   } else if (existingApp?.status === 'withdrawn' || existingApp?.status === 'declined') {
-    // Already withdrawn — general broadcast emails must NEVER overwrite withdrawal
+    // Already withdrawn — nothing can override it
     newStatus = existingApp.status;
-  } else if (isNeoMatched || matchType === 'excel_attachment') {
-    // B. Candidate explicitly shortlisted in Excel attachment or personal shortlist email
+  } else if (isNeoMatched) {
+    // B. Candidate is confirmed in an actual shortlist / test / interview Excel or body match
     if (/interview/i.test(subjLower)) {
       newStatus = 'interview_scheduled';
-    } else if (/(?:test|assessment|coding)/i.test(subjLower) || (matchType === 'excel_attachment' && /test|assessment|coding/i.test(email.attachments.map(a => a.filename).join(' ')))) {
-      newStatus = 'shortlisted';
     } else if (/ppt|pre[\s-]*placement/i.test(subjLower)) {
       newStatus = 'ppt_scheduled';
-    } else if (/(?:selected|congratulations|offer)/i.test(subjLower)) {
+    } else if (/(?:selected|congratulations.*offer)/i.test(subjLower)) {
       newStatus = 'selected';
     } else {
       newStatus = 'shortlisted';
     }
+  } else if (isInAppliedList) {
+    // C. Found in an applied/opt-in list — confirms application but does NOT mean shortlisted
+    // Only upgrade from not_applied to applied; never downgrade from higher states
+    const current = existingApp?.status || 'not_applied';
+    if (current === 'not_applied') {
+      newStatus = 'applied';
+    }
   } else if (
+    // D. A shortlist / test round was officially released but candidate was NOT in it
     /shortlist|selection\s+list|shortlisted|online\s+test|assessment|physical\s+selection|test\s+is\s+scheduled|round\s+of\s+selection|gd\s+is\s+today/i.test(
       subjLower
     ) ||
     /shortlist|shortlisted candidates|initial shortlist|selection list/i.test(fullText) ||
     (email.hasAttachments && email.attachments.some((a) => /shortlist|selection|eligible|test/i.test(a.filename)))
   ) {
-    // C. Shortlist, selection list, or test round was officially released for this company, but candidate was NOT in it
-    if (!existingApp || ['applied', 'ppt_scheduled', 'shortlisted'].includes(existingApp.status)) {
-      if (
-        /test|assessment|coding|selection|shortlist|interview|round/i.test(subjLower) ||
-        (email.hasAttachments && email.attachments.some((a) => /test|shortlist|selection|coding/i.test(a.filename)))
-      ) {
-        newStatus = 'not_shortlisted';
-      }
+    // Only downgrade if the current status is at or below "shortlisted" (not terminal states)
+    const currentStatus = existingApp?.status || 'not_applied';
+    const isDowngradable = ['not_applied', 'applied', 'ppt_scheduled', 'not_shortlisted'].includes(currentStatus);
+    const isTestOrShortlistSignal =
+      /test|assessment|coding|selection|shortlist|interview|round/i.test(subjLower) ||
+      (email.hasAttachments && email.attachments.some((a) => /test|shortlist|selection|coding/i.test(a.filename)));
+
+    if (isDowngradable && isTestOrShortlistSignal) {
+      newStatus = 'not_shortlisted';
+    }
+  }
+
+
+  // ─── STATUS PRIORITY GUARD ──────────────────────────────────────────────────
+  // Never allow a weaker status signal to overwrite a stronger existing status.
+  // e.g. a "registration" broadcast email must not flip "shortlisted" → "applied"
+  if (newStatus && existingApp?.status && newStatus !== existingApp.status) {
+    const STATUS_PRIORITY: Record<string, number> = {
+      unknown: 0,
+      not_applied: 1,
+      applied: 2,
+      shortlisted: 3,
+      ppt_scheduled: 4,
+      test_scheduled: 5,
+      interview_scheduled: 6,
+      offer_received: 7,
+      selected: 8,
+      // Terminal states — always allowed to be set (withdrawal, rejection, etc.)
+      not_shortlisted: 9,
+      declined: 9,
+      withdrawn: 10,
+      rejected: 10,
+    };
+    const existingPriority = STATUS_PRIORITY[existingApp.status] ?? 0;
+    const newPriority = STATUS_PRIORITY[newStatus] ?? 0;
+
+    // If the new status has lower priority than existing AND existing is NOT terminal,
+    // block the downgrade. Terminal states (withdrawn, rejected, not_shortlisted) are
+    // always allowed to be applied.
+    const isTerminal = (s: string) => ['withdrawn', 'declined', 'rejected', 'not_shortlisted', 'selected'].includes(s);
+    if (!isTerminal(newStatus) && newPriority < existingPriority) {
+      newStatus = null; // Block the downgrade
     }
   }
 

@@ -8,10 +8,48 @@ export interface ExcelMatchResult {
   matchedNeoId: string | null;
   details: string | null;
   venueOrRoom: string | null;
+  /** True only if the match was in an actual shortlist file (not an applied/eligible/opt-in list) */
+  isActualShortlist: boolean;
+}
+
+/**
+ * Determines if a filename is an actual shortlist (for next round) vs
+ * just an applied/eligible/opt-in list that any registered student appears in.
+ *
+ * Applied/opt-in lists confirm "you applied" but do NOT mean "you are shortlisted".
+ * Examples of applied lists:  "applied list", "opt-in list", "eligible students", "registered"
+ * Examples of shortlists:     "shortlist", "test shortlist", "selection list"
+ */
+export function classifyExcelFile(filename: string): 'shortlist' | 'applied_list' | 'other' {
+  const f = filename.toLowerCase();
+
+  // --- Applied/opt-in/eligible list patterns (do NOT count as shortlisted) ---
+  if (
+    /applied[_\s-]*list|opt[_\s-]*in[_\s-]*list|opt_in|eligible[_\s-]*student|registered[_\s-]*student|registration[_\s-]*list|applied[_\s-]*candidate|applied[_\s-]*student/i.test(
+      f
+    )
+  ) {
+    return 'applied_list';
+  }
+
+  // --- Actual shortlist patterns ---
+  if (/shortlist|selection[_\s-]*list|test[_\s-]*shortlist|selected[_\s-]*student|shortlisted/i.test(f)) {
+    return 'shortlist';
+  }
+
+  return 'other';
 }
 
 /**
  * Downloads and scans Excel/CSV attachments for a candidate's Neo ID or Registration No.
+ *
+ * Priority order:
+ *   1. Actual shortlist files (shortlist, selection-list, test-shortlist)
+ *   2. Applied/eligible/opt-in list files
+ *   3. Other Excel files
+ *
+ * A match in an applied-list file means "you registered/applied" — NOT shortlisted.
+ * A match in a shortlist file means "you are shortlisted for the next round" — shortlisted.
  *
  * @param gmail Gmail API client
  * @param messageId Gmail Message ID
@@ -50,9 +88,19 @@ export async function scanExcelAttachmentsForNeoId(
     return null;
   }
 
-  for (const att of excelAttachments) {
+  // Sort: scan actual shortlist files first, then applied lists, then others
+  // This way if found in a shortlist, we return early with isActualShortlist=true
+  const PRIORITY = { shortlist: 0, applied_list: 1, other: 2 } as const;
+  const sorted = [...excelAttachments].sort((a, b) => {
+    return PRIORITY[classifyExcelFile(a.filename)] - PRIORITY[classifyExcelFile(b.filename)];
+  });
+
+  let appliedListMatch: ExcelMatchResult | null = null;
+
+  for (const att of sorted) {
+    const fileType = classifyExcelFile(att.filename);
+
     try {
-      // Download attachment data from Gmail API
       const res = await gmail.users.messages.attachments.get({
         userId: 'me',
         messageId,
@@ -61,17 +109,13 @@ export async function scanExcelAttachmentsForNeoId(
 
       if (!res.data.data) continue;
 
-      // Base64URL decode to Buffer
       const buffer = Buffer.from(res.data.data, 'base64url');
-
-      // Parse with SheetJS
       const workbook = XLSX.read(buffer, { type: 'buffer' });
 
       for (const sheetName of workbook.SheetNames) {
         const sheet = workbook.Sheets[sheetName];
         if (!sheet) continue;
 
-        // Convert sheet to array of rows (JSON)
         const rows: unknown[][] = XLSX.utils.sheet_to_json(sheet, {
           header: 1,
           raw: false,
@@ -82,14 +126,12 @@ export async function scanExcelAttachmentsForNeoId(
           const row = rows[rowIndex];
           if (!Array.isArray(row)) continue;
 
-          // Check each cell in the row
           for (let colIndex = 0; colIndex < row.length; colIndex++) {
             const cellValue = String(row[colIndex] || '').toUpperCase().trim();
 
             for (const token of searchTokens) {
               if (cellValue === token || cellValue.includes(token)) {
-                // MATCH FOUND!
-                // Look for Room / Venue / Time in adjacent columns
+                // MATCH FOUND — look for Room / Venue in adjacent columns
                 let roomOrVenue: string | null = null;
                 for (let c = 0; c < row.length; c++) {
                   if (c === colIndex) continue;
@@ -100,7 +142,7 @@ export async function scanExcelAttachmentsForNeoId(
                   }
                 }
 
-                return {
+                const result: ExcelMatchResult = {
                   matched: true,
                   filename: att.filename,
                   matchedNeoId: token,
@@ -108,7 +150,18 @@ export async function scanExcelAttachmentsForNeoId(
                     roomOrVenue ? ` - Details: ${roomOrVenue}` : ''
                   }`,
                   venueOrRoom: roomOrVenue,
+                  isActualShortlist: fileType === 'shortlist',
                 };
+
+                if (fileType === 'shortlist') {
+                  // Best possible result — return immediately
+                  return result;
+                } else {
+                  // Applied list match — save it but keep scanning for an actual shortlist
+                  if (!appliedListMatch) {
+                    appliedListMatch = result;
+                  }
+                }
               }
             }
           }
@@ -119,5 +172,6 @@ export async function scanExcelAttachmentsForNeoId(
     }
   }
 
-  return null;
+  // No shortlist match found — return the applied list match if any (for informational purposes)
+  return appliedListMatch;
 }

@@ -1,9 +1,10 @@
+import { Suspense } from 'react';
 import { requireSession } from '@/lib/auth';
 import { createAdminClient } from '@/lib/supabase/admin';
 import CompaniesClient, { type CompanyWithDetails } from './companies-client';
 
 export const metadata = {
-  title: 'Companies — NeoPAT Placement Tracker',
+  title: 'Companies — NeoTrack',
   description: 'View all tracked placement drives, application statuses, and roles.',
 };
 
@@ -104,5 +105,9 @@ export default async function CompaniesPage() {
     };
   });
 
-  return <CompaniesClient companies={formattedCompanies} />;
+  return (
+    <Suspense fallback={<div className="p-6 text-text-tertiary">Loading companies...</div>}>
+      <CompaniesClient companies={formattedCompanies} />
+    </Suspense>
+  );
 }

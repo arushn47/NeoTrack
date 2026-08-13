@@ -3,7 +3,7 @@ import { redirect } from 'next/navigation';
 import LoginClient from './login-client';
 
 export const metadata = {
-  title: 'Sign In — NeoPAT Placement Tracker',
+  title: 'Sign In — NeoTrack',
   description: 'Sign in with Google to start tracking your campus placements.',
 };
 

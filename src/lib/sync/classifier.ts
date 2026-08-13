@@ -273,6 +273,30 @@ const COMPANY_ALIASES: Record<string, string> = {
   'mufg': 'MUFG',
   'mitsubishi ufj': 'MUFG',
   'mitsubishi ufj financial group': 'MUFG',
+  'nielsen': 'NielsenIQ',
+  'nielseniq': 'NielsenIQ',
+  'fischerjordan': 'FischerJordan',
+  'fischer jordan': 'FischerJordan',
+  'playsimple': 'PlaySimple Games',
+  'playsimple games': 'PlaySimple Games',
+  'idfc': 'IDFC First Bank',
+  'idfc bank': 'IDFC First Bank',
+  'idfc first bank': 'IDFC First Bank',
+  'ubs': 'UBS',
+  'blackrock': 'BlackRock',
+  'pallav': 'Pallav Technologies',
+  'pallav tech': 'Pallav Technologies',
+  'pallav technologies': 'Pallav Technologies',
+  'zs': 'ZS Associates',
+  'zs associates': 'ZS Associates',
+  'london stock exchange': 'London Stock Exchange Group (LSEG)',
+  'honeywell aerospace': 'Honeywell Aerospace',
+  'honeywell technology solutions': 'Honeywell Technology Solutions Lab',
+  'honeywell technology solutions lab': 'Honeywell Technology Solutions Lab',
+  'q2': 'Q2 Software',
+  'q2 software': 'Q2 Software',
+  'ion': 'ION Group',
+  'ion group': 'ION Group',
 };
 
 /**
@@ -378,9 +402,9 @@ export function extractCompanyName(
   subject: string,
   _senderEmail: string
 ): string | null {
-  // 1. Ignore generic coursework, practice tests, mock tests, codeathons
+  // 1. Ignore generic coursework, practice tests, mock tests, codeathons, portal invites
   if (
-    /mock\s+test|practice\s+(?:test|assessment)|codeathon|nerd\s+season|learning\s+contents|you\s+have\s+been\s+enrolled|complete\s+today/i.test(
+    /you\s+are\s+invited|invited\s+to\s+join|assessment\s+portal|mock\s+test|practice\s+(?:test|assessment)|codeathon|nerd\s+season|learning\s+contents|you\s+have\s+been\s+enrolled|complete\s+today/i.test(
       subject
     ) &&
     !/placement\s+drive|super\s+dream|dream\s+core|regular\s+internship/i.test(subject)

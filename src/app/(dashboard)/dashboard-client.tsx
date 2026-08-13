@@ -40,11 +40,11 @@ interface DashboardClientProps {
   neoId: string | null;
 }
 
-const statCards = [
+const METRIC_CARDS = [
   {
     key: 'total_companies',
     label: 'Total Companies',
-    href: '/companies',
+    href: '/companies?filter=all',
     icon: Building2,
     color: 'text-blue-400',
     bgColor: 'bg-blue-500/10',
@@ -52,7 +52,7 @@ const statCards = [
   {
     key: 'active_applications',
     label: 'Active Opportunities',
-    href: '/companies',
+    href: '/companies?filter=active',
     icon: Briefcase,
     color: 'text-emerald-400',
     bgColor: 'bg-emerald-500/10',
@@ -60,7 +60,7 @@ const statCards = [
   {
     key: 'shortlisted',
     label: 'Shortlisted',
-    href: '/companies',
+    href: '/companies?filter=shortlisted',
     icon: CheckCircle2,
     color: 'text-cyan-400',
     bgColor: 'bg-cyan-500/10',
@@ -68,7 +68,7 @@ const statCards = [
   {
     key: 'upcoming_tests',
     label: 'Upcoming Tests',
-    href: '/calendar',
+    href: '/companies?filter=test_scheduled',
     icon: FileCode,
     color: 'text-amber-400',
     bgColor: 'bg-amber-500/10',
@@ -76,7 +76,7 @@ const statCards = [
   {
     key: 'upcoming_interviews',
     label: 'Interviews',
-    href: '/calendar',
+    href: '/companies?filter=interview_scheduled',
     icon: MessageSquare,
     color: 'text-green-400',
     bgColor: 'bg-green-500/10',
@@ -84,7 +84,7 @@ const statCards = [
   {
     key: 'not_shortlisted',
     label: 'Not Shortlisted',
-    href: '/companies',
+    href: '/companies?filter=not_shortlisted',
     icon: XCircle,
     color: 'text-red-400',
     bgColor: 'bg-red-500/10',
@@ -130,14 +130,14 @@ export default function DashboardClient({
                 <Fingerprint className="w-5 h-5 text-violet-400" />
               </div>
               <div className="flex-1 min-w-0">
-                <p className="text-sm font-medium text-text-primary">Set your Neo ID</p>
+                <p className="text-sm font-medium text-text-primary">Set your NeoPAT Registration ID</p>
                 <p className="text-xs text-text-secondary mt-0.5">
-                  Enter your NeoPAT ID so we can find you in candidate shortlists.
+                  Enter your ID to automatically match your shortlists in CDC emails.
                 </p>
               </div>
               <Link
                 href="/settings"
-                className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-violet-500/80 text-white text-sm font-medium hover:bg-violet-500 transition-all flex-shrink-0"
+                className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-violet-500 text-white text-sm font-medium hover:bg-violet-600 transition-all flex-shrink-0"
               >
                 Set ID
                 <ArrowRight className="w-3.5 h-3.5" />
@@ -153,23 +153,23 @@ export default function DashboardClient({
           <span className="font-semibold text-text-primary uppercase tracking-wider text-[11px]">
             Active Pipeline:
           </span>
-          <span className="inline-flex items-center gap-1.5 px-2 py-1 rounded-lg bg-amber-500/10 text-amber-400 font-medium">
+          <Link href="/companies?filter=applied" className="inline-flex items-center gap-1.5 px-2 py-1 rounded-lg bg-amber-500/10 text-amber-400 font-medium hover:bg-amber-500/20 transition-all">
             <span className="w-1.5 h-1.5 rounded-full bg-amber-400" />
             Applied ({stats.applied})
-          </span>
-          <span className="inline-flex items-center gap-1.5 px-2 py-1 rounded-lg bg-cyan-500/10 text-cyan-400 font-medium">
+          </Link>
+          <Link href="/companies?filter=shortlisted" className="inline-flex items-center gap-1.5 px-2 py-1 rounded-lg bg-cyan-500/10 text-cyan-400 font-medium hover:bg-cyan-500/20 transition-all">
             <span className="w-1.5 h-1.5 rounded-full bg-cyan-400" />
             Shortlisted ({stats.shortlisted})
-          </span>
-          <span className="inline-flex items-center gap-1.5 px-2 py-1 rounded-lg bg-emerald-500/10 text-emerald-400 font-medium">
+          </Link>
+          <Link href="/companies?filter=test_scheduled" className="inline-flex items-center gap-1.5 px-2 py-1 rounded-lg bg-emerald-500/10 text-emerald-400 font-medium hover:bg-emerald-500/20 transition-all">
             <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
             Upcoming Tests ({stats.upcoming_tests})
-          </span>
+          </Link>
           {stats.withdrawn > 0 && (
-            <span className="inline-flex items-center gap-1.5 px-2 py-1 rounded-lg bg-zinc-800 text-zinc-400 font-medium">
+            <Link href="/companies?filter=withdrawn" className="inline-flex items-center gap-1.5 px-2 py-1 rounded-lg bg-zinc-800 text-zinc-400 font-medium hover:bg-zinc-700 transition-all">
               <span className="w-1.5 h-1.5 rounded-full bg-zinc-500" />
               Withdrawn ({stats.withdrawn})
-            </span>
+            </Link>
           )}
         </div>
 
@@ -186,7 +186,7 @@ export default function DashboardClient({
 
       {/* Stats cards (Clickable) */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 stagger-children">
-        {statCards.map((card) => {
+        {METRIC_CARDS.map((card) => {
           const value = stats[card.key as keyof DashboardStats];
           return (
             <Link

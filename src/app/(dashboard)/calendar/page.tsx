@@ -3,7 +3,7 @@ import { createAdminClient } from '@/lib/supabase/admin';
 import CalendarClient, { type CalendarEvent } from './calendar-client';
 
 export const metadata = {
-  title: 'Calendar — NeoPAT Placement Tracker',
+  title: 'Calendar — NeoTrack',
   description: 'View upcoming placement talks, online assessments, and interview schedules.',
 };
 

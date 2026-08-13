@@ -256,49 +256,112 @@ export function extractJobDetails(text: string): ExtractedJobDetails {
   let stipend: string | null = null;
   let location: string | null = null;
 
-  // CTC extraction e.g. "9LPA+1.2 Lakh JB", "CTC: 22 Lakhs", "CTC: 22L PA", "22.0L PA", "INR 12 LPA"
-  const tableCtcMatch = text.match(
-    /(?:CTC|Package|Salary|Compensation)\s*[:\-–—\t]?\s*(?:Year\s*\d+\s*)?(?:\(?CTC\s*[:\-–—]?\s*)?(?:INR|Rs\.?)?\s*([₹\d\.]+(?:\s*-\s*[\d\.]+)?\s*(?:LPA|L\s*PA|Lakhs?|Lac|Cr|K)?(?:\s*\+\s*[\d\.]+\s*(?:Lakhs?|LPA|L|k)?\s*(?:JB|Bonus|Retention)?)?)/i
-  );
-  if (tableCtcMatch && tableCtcMatch[1]) {
-    ctc = tableCtcMatch[1].trim();
-    if (/^\d+(\.\d+)?$/.test(ctc)) {
-      ctc = `${ctc} LPA`;
+  // Clean markdown formatting, HTML entities, and excess whitespace
+  const cleanText = text
+    .replace(/[*_`>#]/g, ' ')
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&amp;/gi, '&')
+    .replace(/\s+/g, ' ');
+
+  const unannouncedPattern = /will be (?:announced|informed|shared) later|tba|tbd|to be (?:announced|disclosed)|not disclosed/i;
+
+  // 1. CTC Extraction (Single Value or Multi-profile Range)
+  const ctcBlockMatch = cleanText.match(/\bCTC\b\s*[:\-–—\t]?\s*([\s\S]{1,400}?)(?:\b(?:Last date|Website|Location|Eligible|Eligibility|Stipend|Selection|Process|Registration)\b|$)/i);
+  if (ctcBlockMatch && unannouncedPattern.test(ctcBlockMatch[1])) {
+    ctc = null;
+  } else {
+    let ctcText = ctcBlockMatch ? ctcBlockMatch[1] : cleanText;
+
+    // Check for "9 LPA + 1.2 Lakh JB" pattern to add base + bonus
+    const jbMatch = ctcText.match(/(\d+(?:\.\d+)?)\s*(?:LPA|L\s*PA|Lakhs?|Lac|L)?\s*\+\s*(\d+(?:\.\d+)?)\s*(?:Lakhs?|L)?\s*(?:JB|Joining Bonus|Bonus|Retention Bonus)/i);
+    if (jbMatch) {
+      const base = parseFloat(jbMatch[1]);
+      const bonus = parseFloat(jbMatch[2]);
+      if (base > 0 && bonus > 0) {
+        ctc = `${(base + bonus).toFixed(1).replace(/\.0$/, '')} LPA`;
+      }
+    }
+
+    if (!ctc) {
+      // Strip + X Lakh JB so joining bonus numbers don't pollute min-max range calculations
+      ctcText = ctcText.replace(/\+\s*\d+(?:\.\d+)?\s*(?:Lakhs?|L)?\s*(?:JB|Joining Bonus|Bonus)/gi, '');
+      const ctcMatches = [...ctcText.matchAll(/\b(\d+(?:\.\d+)?)\s*(?:LPA|L\s*PA|Lakhs?|Lac|L)\b/gi)];
+      if (ctcMatches.length > 0) {
+        const vals = ctcMatches.map(m => parseFloat(m[1])).filter(v => v > 0 && v < 200);
+        if (vals.length > 0) {
+          const min = Math.min(...vals);
+          const max = Math.max(...vals);
+          ctc = min === max ? `${min} LPA` : `${min} - ${max} LPA`;
+        }
+      }
+    }
+
+    if (!ctc) {
+      const ctcMatchA = cleanText.match(
+        /(?:CTC|Package|Salary|Compensation)\s*[:\-–—\t]?\s*(?:INR|₹|Rs\.?)?\s*([₹\d\.]+\s*(?:LPA|L\s*PA|Lakhs?|Lac|Cr|K)?(?:\s*\+\s*[\d\.]+\s*(?:Lakhs?|LPA|L|k)?\s*(?:JB|Bonus)?)?)/i
+      );
+      if (ctcMatchA && ctcMatchA[1] && /\d/.test(ctcMatchA[1])) {
+        let val = ctcMatchA[1].trim();
+        if (/^\d+(\.\d+)?$/.test(val)) val = `${val} LPA`;
+        ctc = val;
+      }
     }
   }
 
-  if (!ctc) {
-    const standaloneCtc = text.match(/\b([₹\d\.]+\s*(?:L|LPA)\s*PA)\b/i);
-    if (standaloneCtc) ctc = standaloneCtc[1].trim();
-  }
-
-  // Stipend extraction e.g. "Stipend: 36000", "Stipend: 50,000 pm", "50k PM"
-  const stipendMatch = text.match(
-    /stipend\s*[:\-–—\t]?\s*(?:INR|Rs\.?)?\s*([₹\d,]+(?:\s*k)?(?:\s*\/\s*m(?:onth)?|p\.?m\.?|per\s*month)?)/i
-  );
-  if (stipendMatch && stipendMatch[1]) {
-    stipend = stipendMatch[1].trim();
-    const cleanNum = stipend.replace(/[^\d]/g, '');
-    if (cleanNum && parseInt(cleanNum, 10) >= 1000) {
-      const num = parseInt(cleanNum, 10);
-      stipend = `₹${num.toLocaleString('en-IN')}/month`;
+  // 2. Stipend Extraction (Single Value or Multi-profile Range)
+  const stipendBlockMatch = cleanText.match(/\b(?:Stipend|Stipened)\b\s*[:\-–—\t]?\s*([\s\S]{1,300}?)(?:\b(?:CTC|Last date|Website|Location|Eligible|Eligibility|Selection|Process|Registration)\b|$)/i);
+  if (stipendBlockMatch && unannouncedPattern.test(stipendBlockMatch[1])) {
+    stipend = null;
+  } else if (stipendBlockMatch) {
+    const stipendText = stipendBlockMatch[1];
+    const stipendMatches = [...stipendText.matchAll(/(?:INR|₹|Rs\.?)?\s*([\d,]+)(?:\s*(?:k|thousand))?\s*(?:INR|Rs\.?)?/gi)];
+    const nums: number[] = [];
+    for (const m of stipendMatches) {
+      const rawNum = m[1].replace(/,/g, '');
+      const val = parseInt(rawNum, 10);
+      if (val >= 5000 && val < 500000 && ![2024, 2025, 2026, 2027].includes(val)) {
+        nums.push(val);
+      }
+    }
+    if (nums.length > 0) {
+      const min = Math.min(...nums);
+      const max = Math.max(...nums);
+      if (min === max) {
+        stipend = `₹${min.toLocaleString('en-IN')}/month`;
+      } else {
+        stipend = `₹${min.toLocaleString('en-IN')} - ₹${max.toLocaleString('en-IN')}/month`;
+      }
     }
   }
 
-  // Role / Category extraction e.g. "Super Dream Internship", "Software Developer", "SDE"
-  const roleMatch = text.match(
-    /(?:role|profile|designation|position|category)\s*[:\-–—\t]?\s*(.+?)(?:\r?\n|$|,|\.)/i
+  // 3. Job Role Extraction
+  const roleMatch = cleanText.match(
+    /(?:Job\s+Role|Designation|Position|Profile)\s*[:\-–—\t]?\s*([A-Za-z0-9\s\/\-\,\&]+?)(?:\s+(?:Service|Greetings|About|Campus|Eligible|Selection|Location|CTC|Stipend|Process|Note)|$|\.|\r?\n)/i
   );
   if (roleMatch) {
-    role = roleMatch[1].trim().slice(0, 60);
+    const rawRole = roleMatch[1].replace(/^[*,\.\s>\-]+/, '').replace(/[*,\.\s>\-]+$/, '').trim().slice(0, 40);
+    if (
+      rawRole &&
+      rawRole.length >= 2 &&
+      !/you are eligible|upcoming placement|forwarded message|scheduled on|not japanese role|^[>,\.\*\s]+$/i.test(rawRole)
+    ) {
+      role = rawRole;
+    }
   }
 
-  // Location extraction
-  const locationMatch = text.match(
-    /(?:job\s+)?location\s*[:\-–—\t]?\s*(.+?)(?:\r?\n|$|,|\.)/i
+  // 4. Job Location Extraction
+  const locMatch = cleanText.match(
+    /(?:Job\s+)?Location\s*[:\-–—\t]?\s*([A-Za-z0-9\s\/\-]+?)(?:\s+(?:Eligibility|Designation|Role|Process|CTC|Stipend|Note|Kind)|$|\.|\r?\n)/i
   );
-  if (locationMatch) {
-    location = locationMatch[1].trim().slice(0, 60);
+  if (locMatch) {
+    const rawLoc = locMatch[1].replace(/^[*,\.\s>\-]+/, '').replace(/[*,\.\s>\-]+$/, '').trim().slice(0, 40);
+    if (
+      rawLoc &&
+      rawLoc.length >= 2 &&
+      !/nonsense|come at|assistance|applicable|candidate|round\s+\d+|results|lab|service agreement|forwarded message|scheduled on|online test|@|own location|pearl research|anna auditorium|^[>,\.\*\s]+$/i.test(rawLoc)
+    ) {
+      location = rawLoc;
+    }
   }
 
   return {

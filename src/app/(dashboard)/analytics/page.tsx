@@ -3,7 +3,7 @@ import { createAdminClient } from '@/lib/supabase/admin';
 import AnalyticsClient from './analytics-client';
 
 export const metadata = {
-  title: 'Analytics — NeoPAT Placement Tracker',
+  title: 'Analytics — NeoTrack',
   description: 'Visualize your placement journey, conversion rates, and CTC trends.',
 };
 

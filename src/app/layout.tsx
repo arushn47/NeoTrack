@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Inter, JetBrains_Mono } from "next/font/google";
 import "./globals.css";
 
@@ -14,13 +14,16 @@ const jetbrainsMono = JetBrains_Mono({
   display: "swap",
 });
 
+export const viewport: Viewport = {
+  themeColor: "#6366f1",
+};
+
 export const metadata: Metadata = {
-  title: "NeoPAT Placement Tracker",
+  title: "NeoTrack",
   description:
     "Track your campus placement drives, interviews, and application statuses in one dashboard.",
   keywords: ["placement", "tracker", "VIT", "NeoPAT", "campus", "jobs"],
   manifest: "/manifest.json",
-  themeColor: "#6366f1",
   appleWebApp: {
     capable: true,
     statusBarStyle: "black-translucent",

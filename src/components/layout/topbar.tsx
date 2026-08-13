@@ -350,7 +350,7 @@ export default function Topbar({ userName, userAvatar, lastSyncAt }: TopbarProps
 
       {/* Sync Result Toast */}
       {syncResult?.show && (
-        <div className="fixed bottom-6 right-6 z-50 animate-fade-in">
+        <div className="fixed bottom-24 right-4 lg:bottom-6 lg:right-6 z-50 animate-fade-in">
           <div
             className={cn(
               'flex items-start gap-3 px-4 py-3 rounded-xl border shadow-lg min-w-[300px] max-w-[400px]',

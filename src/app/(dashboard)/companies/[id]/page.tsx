@@ -4,7 +4,7 @@ import { createAdminClient } from '@/lib/supabase/admin';
 import CompanyDetailClient, { type CompanyDetail } from './company-detail-client';
 
 export const metadata = {
-  title: 'Company Details — NeoPAT Placement Tracker',
+  title: 'Company Details — NeoTrack',
 };
 
 export default async function CompanyDetailPage({

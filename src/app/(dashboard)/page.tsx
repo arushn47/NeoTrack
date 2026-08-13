@@ -3,7 +3,7 @@ import { createAdminClient } from '@/lib/supabase/admin';
 import DashboardClient from './dashboard-client';
 
 export const metadata = {
-  title: 'Dashboard — NeoPAT Placement Tracker',
+  title: 'Dashboard — NeoTrack',
   description: 'Your campus placement command center.',
 };
 
@@ -33,7 +33,7 @@ export default async function DashboardPage() {
       .from('applications')
       .select('*', { count: 'exact', head: true })
       .eq('user_id', session.userId)
-      .in('status', ['applied', 'shortlisted', 'ppt_scheduled', 'test_scheduled', 'interview_scheduled', 'selected']),
+      .in('status', ['applied', 'shortlisted', 'ppt_scheduled', 'test_scheduled', 'interview_scheduled']),
     supabase
       .from('applications')
       .select('*', { count: 'exact', head: true })

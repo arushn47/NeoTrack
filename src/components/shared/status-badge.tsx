@@ -16,12 +16,12 @@ export default function StatusBadge({ status, size = 'sm', className }: StatusBa
   return (
     <span
       className={cn(
-        'inline-flex items-center gap-1.5 rounded-full font-medium',
+        'inline-flex items-center gap-1.5 rounded-full font-medium whitespace-nowrap flex-shrink-0',
         colors.bg,
         colors.text,
         colors.border,
         'border',
-        size === 'sm' ? 'px-2 py-0.5 text-[11px]' : 'px-3 py-1 text-xs',
+        size === 'sm' ? 'px-2.5 py-0.5 text-[11px]' : 'px-3 py-1 text-xs',
         className
       )}
     >

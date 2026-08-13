@@ -3,7 +3,7 @@ import { createAdminClient } from '@/lib/supabase/admin';
 import SearchClient, { type SearchData } from './search-client';
 
 export const metadata = {
-  title: 'Search — NeoPAT Placement Tracker',
+  title: 'Search — NeoTrack',
   description: 'Search across companies, emails, job roles, tests, and interview schedules.',
 };
 

@@ -136,11 +136,11 @@ export default function ChatAssistant() {
 
   return (
     <>
-      {/* Floating Chat Button */}
+      {/* Floating Chat Button — positioned above mobile nav (h-16 = 64px) */}
       <button
         onClick={() => setIsOpen(!isOpen)}
         className={cn(
-          'fixed bottom-6 right-6 z-40 p-3.5 rounded-2xl shadow-xl flex items-center justify-center transition-all duration-300 group',
+          'fixed bottom-20 right-4 lg:bottom-6 lg:right-6 z-40 p-3.5 rounded-2xl shadow-xl flex items-center justify-center transition-all duration-300 group',
           isOpen
             ? 'bg-bg-elevated border border-border-default text-text-primary scale-90'
             : 'bg-gradient-to-tr from-accent to-accent-hover text-white shadow-accent/25 hover:scale-105 hover:shadow-2xl'
@@ -157,9 +157,9 @@ export default function ChatAssistant() {
         )}
       </button>
 
-      {/* Chat Drawer Window */}
+      {/* Chat Drawer Window — full-width on mobile, fixed width on desktop */}
       {isOpen && (
-        <div className="fixed bottom-20 right-6 z-50 w-[380px] max-w-[calc(100vw-2rem)] h-[520px] bg-bg-surface/95 backdrop-blur-xl border border-border-default rounded-3xl shadow-2xl flex flex-col overflow-hidden animate-fade-in">
+        <div className="fixed bottom-[8.5rem] right-2 left-2 lg:bottom-20 lg:right-6 lg:left-auto z-50 lg:w-[380px] h-[min(520px,60vh)] bg-bg-surface/95 backdrop-blur-xl border border-border-default rounded-3xl shadow-2xl flex flex-col overflow-hidden animate-fade-in">
           {/* Drawer Header */}
           <div className="flex items-center justify-between px-5 py-4 bg-bg-elevated/80 border-b border-border-default">
             <div className="flex items-center gap-3">

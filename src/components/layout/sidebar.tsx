@@ -42,7 +42,7 @@ export default function Sidebar() {
         </div>
         {!collapsed && (
           <span className="text-text-primary font-semibold text-sm whitespace-nowrap">
-            NeoPAT Tracker
+            NeoTrack
           </span>
         )}
       </div>

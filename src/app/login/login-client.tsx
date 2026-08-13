@@ -67,7 +67,7 @@ export default function LoginClient() {
             <Briefcase className="w-8 h-8 text-accent" />
           </div>
           <h1 className="text-3xl font-bold text-text-primary mb-2">
-            NeoPAT Tracker
+            NeoTrack
           </h1>
           <p className="text-text-secondary text-base">
             Your campus placement command center
