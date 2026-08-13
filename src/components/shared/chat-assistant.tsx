@@ -12,6 +12,8 @@ import {
   Calendar,
   Building2,
   RefreshCw,
+  Maximize2,
+  Minimize2,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
@@ -64,6 +66,7 @@ function renderFormattedText(text: string) {
 
 export default function ChatAssistant() {
   const [isOpen, setIsOpen] = useState(false);
+  const [isExpanded, setIsExpanded] = useState(false);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
   const [messages, setMessages] = useState<ChatMessage[]>([
@@ -157,9 +160,16 @@ export default function ChatAssistant() {
         )}
       </button>
 
-      {/* Chat Drawer Window — full-width on mobile, fixed width on desktop */}
+      {/* Chat Drawer Window — full-width on mobile, resizable / expandable on desktop */}
       {isOpen && (
-        <div className="fixed bottom-[8.5rem] right-2 left-2 lg:bottom-20 lg:right-6 lg:left-auto z-50 lg:w-[380px] h-[min(520px,60vh)] bg-bg-surface/95 backdrop-blur-xl border border-border-default rounded-3xl shadow-2xl flex flex-col overflow-hidden animate-fade-in">
+        <div
+          className={cn(
+            'fixed bottom-[8.5rem] right-2 left-2 lg:bottom-20 lg:right-6 lg:left-auto z-50 bg-bg-surface/95 backdrop-blur-xl border border-border-default rounded-3xl shadow-2xl flex flex-col overflow-hidden transition-all duration-300 animate-fade-in',
+            isExpanded
+              ? 'lg:w-[620px] h-[min(700px,85vh)]'
+              : 'lg:w-[390px] h-[min(540px,65vh)]'
+          )}
+        >
           {/* Drawer Header */}
           <div className="flex items-center justify-between px-5 py-4 bg-bg-elevated/80 border-b border-border-default">
             <div className="flex items-center gap-3">
@@ -175,12 +185,22 @@ export default function ChatAssistant() {
               </div>
             </div>
 
-            <button
-              onClick={() => setIsOpen(false)}
-              className="p-1 rounded-lg text-text-tertiary hover:text-text-primary transition-colors"
-            >
-              <X className="w-4 h-4" />
-            </button>
+            <div className="flex items-center gap-1">
+              <button
+                onClick={() => setIsExpanded(!isExpanded)}
+                className="p-1.5 rounded-lg text-text-tertiary hover:text-text-primary hover:bg-bg-surface-hover transition-colors hidden sm:flex items-center justify-center"
+                title={isExpanded ? 'Collapse window size' : 'Expand window size'}
+              >
+                {isExpanded ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
+              </button>
+              <button
+                onClick={() => setIsOpen(false)}
+                className="p-1.5 rounded-lg text-text-tertiary hover:text-text-primary hover:bg-bg-surface-hover transition-colors"
+                title="Close Assistant"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
           </div>
 
           {/* Messages Feed */}

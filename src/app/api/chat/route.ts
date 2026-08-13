@@ -115,17 +115,90 @@ export async function POST(request: Request) {
     }
   }
 
-  // 2. QUERY: Upcoming Tests / Interviews / Calendar
-  if (lowerMsg.includes('test') || lowerMsg.includes('interview') || lowerMsg.includes('upcoming') || lowerMsg.includes('schedule')) {
-    const upcoming = (events || []).filter((e) => e.start_time && new Date(e.start_time) >= new Date());
-    if (upcoming.length === 0) {
+  // 2. QUERY: Tests (Past, Given, Attended, or Upcoming)
+  if (
+    lowerMsg.includes('test') ||
+    lowerMsg.includes('interview') ||
+    lowerMsg.includes('upcoming') ||
+    lowerMsg.includes('schedule') ||
+    lowerMsg.includes('given') ||
+    lowerMsg.includes('previous') ||
+    lowerMsg.includes('past') ||
+    lowerMsg.includes('history')
+  ) {
+    const isPastQuery = /past|previous|given|attended|history|already|completed|done|was|were|all/i.test(lowerMsg);
+    const now = new Date();
+    const companyMap = new Map(companyList.map((c) => [c.id, c.name]));
+
+    const pastEvents = (events || []).filter((e) => e.start_time && new Date(e.start_time) < now);
+    const upcomingEvents = (events || []).filter((e) => e.start_time && new Date(e.start_time) >= now);
+
+    // If user asked for past/given tests or general "which all tests"
+    if (isPastQuery || !lowerMsg.includes('upcoming')) {
+      const replyParts: string[] = [];
+
+      if (pastEvents.length > 0) {
+        const list = pastEvents.map((e) => {
+          const cName = companyMap.get(e.company_id) || 'Company';
+          const dateStr = new Date(e.start_time!).toLocaleDateString('en-IN', {
+            day: 'numeric',
+            month: 'short',
+            hour: '2-digit',
+            minute: '2-digit',
+          });
+          const app = appMap.get(e.company_id);
+          const statusText = app?.status ? ` · Status: *${app.status.replace('_', ' ')}*` : '';
+          return `• **${cName}** — ${e.title || e.event_type} (*${dateStr}* @ ${e.venue || 'Online'})${statusText}`;
+        });
+        replyParts.push(`📋 **Past Tests & Events Attended (${pastEvents.length}):**\n${list.join('\n')}`);
+      }
+
+      if (upcomingEvents.length > 0) {
+        const list = upcomingEvents.map((e) => {
+          const cName = companyMap.get(e.company_id) || 'Company';
+          const dateStr = new Date(e.start_time!).toLocaleDateString('en-IN', {
+            day: 'numeric',
+            month: 'short',
+            hour: '2-digit',
+            minute: '2-digit',
+          });
+          return `• **${cName}** — ${e.title || e.event_type} (*${dateStr}* @ ${e.venue || 'Online'})`;
+        });
+        replyParts.push(`⏰ **Upcoming Scheduled Tests (${upcomingEvents.length}):**\n${list.join('\n')}`);
+      }
+
+      if (replyParts.length > 0) {
+        return NextResponse.json({ reply: replyParts.join('\n\n') });
+      } else {
+        // Fallback: list applications where process reached online test
+        const testComps = companyList.filter((c) => {
+          const s = appMap.get(c.id)?.status;
+          return ['test_scheduled', 'not_shortlisted', 'shortlisted', 'interview_scheduled', 'selected'].includes(s || '');
+        });
+        if (testComps.length > 0) {
+          const list = testComps.map((c) => {
+            const app = appMap.get(c.id);
+            return `• **${c.name}** (${app?.role || 'Software Engineer'}) — Status: *${app?.status.replace('_', ' ')}*`;
+          });
+          return NextResponse.json({
+            reply: `Here are the companies whose online test / assessment rounds you have participated in:\n\n${list.join('\n')}`,
+          });
+        }
+
+        return NextResponse.json({
+          reply: "You don't have any recorded past or upcoming online tests yet. Sync your emails to import test schedules automatically!",
+        });
+      }
+    }
+
+    // Explicit "upcoming" query
+    if (upcomingEvents.length === 0) {
       return NextResponse.json({
-        reply: "You don't have any upcoming tests or interviews scheduled right now. Sync your emails or check the Calendar tab for past events!",
+        reply: "You don't have any upcoming tests or interviews scheduled right now. Check back after email syncs!",
       });
     }
 
-    const companyMap = new Map(companyList.map((c) => [c.id, c.name]));
-    const list = upcoming.slice(0, 5).map((e) => {
+    const list = upcomingEvents.slice(0, 5).map((e) => {
       const cName = companyMap.get(e.company_id) || 'Placement Event';
       const dateStr = new Date(e.start_time!).toLocaleDateString('en-IN', {
         day: 'numeric',
