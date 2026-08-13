@@ -224,7 +224,7 @@ export default function CompaniesClient({ companies }: CompaniesClientProps) {
             Companies ({companies.length})
           </h1>
           <p className="text-sm text-text-secondary mt-1">
-            Tracked placement drives from your NeoPAT personal emails and college announcements.
+            Tracked placement drives from your synced emails and college announcements.
           </p>
         </div>
 

@@ -195,13 +195,15 @@ export default function Topbar({ userName, userAvatar, lastSyncAt }: TopbarProps
 
   return (
     <>
-      <header className="flex items-center justify-between h-14 px-6 bg-bg-surface border-b border-border-default sticky top-0 z-40">
+      <header className="flex items-center justify-between h-14 px-4 sm:px-6 bg-bg-surface/90 backdrop-blur-xl border-b border-border-default sticky top-0 z-40">
         {/* Left: Mobile logo (hidden on desktop) */}
-        <div className="flex items-center gap-3 lg:hidden">
-          <div className="w-8 h-8 rounded-lg bg-accent/10 border border-accent/20 flex items-center justify-center">
-            <span className="text-accent font-bold text-sm">N</span>
+        <div className="flex items-center gap-2.5 lg:hidden">
+          <div className="w-8 h-8 rounded-xl bg-gradient-to-tr from-accent to-indigo-500 shadow-md shadow-accent/20 flex items-center justify-center flex-shrink-0">
+            <span className="text-white font-bold text-sm">N</span>
           </div>
-          <span className="text-text-primary font-semibold text-sm">NeoPAT</span>
+          <span className="text-text-primary font-bold text-base tracking-tight">
+            Neo<span className="text-accent">Track</span>
+          </span>
         </div>
 
         {/* Left spacer on desktop */}

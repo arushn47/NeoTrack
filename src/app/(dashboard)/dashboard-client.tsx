@@ -148,25 +148,25 @@ export default function DashboardClient({
       )}
 
       {/* Neo ID display & Active Breakdown Summary */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-bg-surface p-4 rounded-xl border border-border-default">
-        <div className="flex flex-wrap items-center gap-3 text-xs">
-          <span className="font-semibold text-text-primary uppercase tracking-wider text-[11px]">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3.5 bg-bg-surface/90 backdrop-blur-xl p-4 sm:p-5 rounded-2xl border border-border-default shadow-sm">
+        <div className="flex flex-wrap items-center gap-2 sm:gap-2.5 text-xs">
+          <span className="font-bold text-text-primary uppercase tracking-wider text-[10px] sm:text-[11px] mr-1">
             Active Pipeline:
           </span>
-          <Link href="/companies?filter=applied" className="inline-flex items-center gap-1.5 px-2 py-1 rounded-lg bg-amber-500/10 text-amber-400 font-medium hover:bg-amber-500/20 transition-all">
-            <span className="w-1.5 h-1.5 rounded-full bg-amber-400" />
+          <Link href="/companies?filter=applied" className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-amber-500/10 text-amber-400 font-semibold border border-amber-500/20 hover:bg-amber-500/20 active:scale-95 transition-all">
+            <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" />
             Applied ({stats.applied})
           </Link>
-          <Link href="/companies?filter=shortlisted" className="inline-flex items-center gap-1.5 px-2 py-1 rounded-lg bg-cyan-500/10 text-cyan-400 font-medium hover:bg-cyan-500/20 transition-all">
+          <Link href="/companies?filter=shortlisted" className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-cyan-500/10 text-cyan-400 font-semibold border border-cyan-500/20 hover:bg-cyan-500/20 active:scale-95 transition-all">
             <span className="w-1.5 h-1.5 rounded-full bg-cyan-400" />
             Shortlisted ({stats.shortlisted})
           </Link>
-          <Link href="/companies?filter=test_scheduled" className="inline-flex items-center gap-1.5 px-2 py-1 rounded-lg bg-emerald-500/10 text-emerald-400 font-medium hover:bg-emerald-500/20 transition-all">
+          <Link href="/companies?filter=test_scheduled" className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-emerald-500/10 text-emerald-400 font-semibold border border-emerald-500/20 hover:bg-emerald-500/20 active:scale-95 transition-all">
             <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
             Upcoming Tests ({stats.upcoming_tests})
           </Link>
           {stats.withdrawn > 0 && (
-            <Link href="/companies?filter=withdrawn" className="inline-flex items-center gap-1.5 px-2 py-1 rounded-lg bg-zinc-800 text-zinc-400 font-medium hover:bg-zinc-700 transition-all">
+            <Link href="/companies?filter=withdrawn" className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-zinc-800/80 text-zinc-400 font-medium border border-zinc-700/50 hover:bg-zinc-800 active:scale-95 transition-all">
               <span className="w-1.5 h-1.5 rounded-full bg-zinc-500" />
               Withdrawn ({stats.withdrawn})
             </Link>
@@ -174,10 +174,10 @@ export default function DashboardClient({
         </div>
 
         {neoId && (
-          <div className="flex items-center gap-2 text-xs text-text-tertiary self-start sm:self-center">
-            <Fingerprint className="w-3.5 h-3.5 text-violet-400" />
-            <span>Neo ID:</span>
-            <span className="font-mono tracking-wider text-text-secondary font-semibold bg-bg-elevated px-2 py-0.5 rounded border border-border-default">
+          <div className="flex items-center gap-2 text-xs text-text-tertiary self-start sm:self-center bg-bg-elevated/60 px-3 py-1.5 rounded-xl border border-border-default">
+            <Fingerprint className="w-3.5 h-3.5 text-violet-400 flex-shrink-0" />
+            <span className="font-medium text-text-tertiary">Neo ID:</span>
+            <span className="font-mono tracking-wider text-text-primary font-bold">
               {neoId}
             </span>
           </div>
@@ -185,24 +185,24 @@ export default function DashboardClient({
       </div>
 
       {/* Stats cards (Clickable) */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 stagger-children">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2.5 sm:gap-3.5 stagger-children">
         {METRIC_CARDS.map((card) => {
           const value = stats[card.key as keyof DashboardStats];
           return (
             <Link
               key={card.key}
               href={card.href}
-              className="p-4 rounded-xl bg-bg-surface border border-border-default hover:border-accent/40 hover:bg-bg-surface-hover transition-all group hover:-translate-y-0.5 hover:shadow-lg hover:shadow-accent/5 block"
+              className="p-3.5 sm:p-4 rounded-2xl bg-bg-surface/90 backdrop-blur-xl border border-border-default hover:border-accent/40 hover:bg-bg-surface-hover active:scale-[0.98] transition-all group hover:-translate-y-0.5 hover:shadow-lg hover:shadow-accent/5 block select-none"
             >
-              <div className={cn('w-8 h-8 rounded-lg flex items-center justify-center mb-3 group-hover:scale-105 transition-transform', card.bgColor)}>
+              <div className={cn('w-9 h-9 rounded-xl flex items-center justify-center mb-3 group-hover:scale-105 transition-transform shadow-sm', card.bgColor)}>
                 <card.icon className={cn('w-4 h-4', card.color)} />
               </div>
-              <p className="text-2xl font-bold text-text-primary animate-count-up">
+              <p className="text-2xl sm:text-3xl font-extrabold text-text-primary tracking-tight animate-count-up">
                 {value}
               </p>
-              <div className="flex items-center justify-between text-xs text-text-secondary mt-0.5">
-                <span>{card.label}</span>
-                <ChevronRight className="w-3 h-3 text-text-tertiary opacity-0 group-hover:opacity-100 group-hover:translate-x-0.5 transition-all" />
+              <div className="flex items-center justify-between text-[11px] sm:text-xs text-text-secondary mt-1 font-medium">
+                <span className="truncate">{card.label}</span>
+                <ChevronRight className="w-3 h-3 text-text-tertiary opacity-0 group-hover:opacity-100 group-hover:translate-x-0.5 transition-all flex-shrink-0" />
               </div>
             </Link>
           );
