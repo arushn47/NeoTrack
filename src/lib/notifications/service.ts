@@ -111,10 +111,11 @@ export async function sendNotification(
 
     if (insertError) {
       if (insertError.code === '23505') {
-        // Unique constraint violation on dedupe_key -> Notification was already generated before!
-        return { inAppCreated: false, pushSent: false };
+        // Unique constraint violation on dedupe_key -> In-app was already recorded, continue to push!
+        inAppCreated = false;
+      } else {
+        console.error('[Notification Service] In-app insert error:', insertError);
       }
-      console.error('[Notification Service] In-app insert error:', insertError);
     } else if (inserted) {
       inAppCreated = true;
     }
@@ -125,17 +126,17 @@ export async function sendNotification(
   if (prefs.browserPushEnabled) {
     const targetLink = link || (companyId ? `/companies/${companyId}` : '/');
     const { sent } = await sendPushToUser(userId, {
+      ...pushPayload,
       title,
       body,
       tag: dedupeKey,
       data: {
+        ...pushPayload?.data,
         url: targetLink,
         companyId: companyId || undefined,
         eventId: eventId || undefined,
         type,
-        ...pushPayload?.data,
       },
-      ...pushPayload,
     });
     pushSent = sent > 0;
   }

@@ -11,8 +11,8 @@ self.addEventListener('push', function (event) {
     const title = payload.title || 'NeoTrack Notification';
     const options = {
       body: payload.body || '',
-      icon: payload.icon || '/favicon.ico',
-      badge: payload.badge || '/favicon.ico',
+      icon: payload.icon || '/icon.svg',
+      badge: payload.badge || '/icon.svg',
       tag: payload.tag || 'neotrack-alert',
       renotify: true,
       data: payload.data || { url: '/' },
@@ -27,7 +27,7 @@ self.addEventListener('push', function (event) {
     event.waitUntil(
       self.registration.showNotification('NeoTrack', {
         body: text,
-        icon: '/favicon.ico',
+        icon: '/icon.svg',
       })
     );
   }

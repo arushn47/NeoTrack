@@ -62,8 +62,8 @@ export async function sendPushToUser(
   const stringifiedPayload = JSON.stringify({
     title: payload.title,
     body: payload.body,
-    icon: payload.icon || '/favicon.ico',
-    badge: payload.badge || '/favicon.ico',
+    icon: payload.icon || '/icon.svg',
+    badge: payload.badge || '/icon.svg',
     tag: payload.tag || 'neotrack-notification',
     data: payload.data || { url: '/' },
   });
