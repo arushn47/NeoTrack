@@ -247,21 +247,30 @@ export async function processEmailForEventsAndStatus(
     // B. Candidate explicitly shortlisted in Excel attachment or personal shortlist email
     if (/interview/i.test(subjLower)) {
       newStatus = 'interview_scheduled';
-    } else if (/(?:test|assessment|shortlist)/i.test(subjLower) || matchType === 'excel_attachment') {
+    } else if (/(?:test|assessment|coding)/i.test(subjLower) || (matchType === 'excel_attachment' && /test|assessment|coding/i.test(email.attachments.map(a => a.filename).join(' ')))) {
       newStatus = 'shortlisted';
+    } else if (/ppt|pre[\s-]*placement/i.test(subjLower)) {
+      newStatus = 'ppt_scheduled';
     } else if (/(?:selected|congratulations|offer)/i.test(subjLower)) {
       newStatus = 'selected';
+    } else {
+      newStatus = 'shortlisted';
     }
   } else if (
-    /shortlist|selection\s+list|shortlisted|online\s+test|assessment|physical\s+selection|ppt\s+is\s+scheduled|test\s+is\s+scheduled|round\s+of\s+selection|gd\s+is\s+today/i.test(
+    /shortlist|selection\s+list|shortlisted|online\s+test|assessment|physical\s+selection|test\s+is\s+scheduled|round\s+of\s+selection|gd\s+is\s+today/i.test(
       subjLower
     ) ||
     /shortlist|shortlisted candidates|initial shortlist|selection list/i.test(fullText) ||
     (email.hasAttachments && email.attachments.some((a) => /shortlist|selection|eligible|test/i.test(a.filename)))
   ) {
     // C. Shortlist, selection list, or test round was officially released for this company, but candidate was NOT in it
-    if (!existingApp || existingApp.status === 'applied' || existingApp.status === 'ppt_scheduled') {
-      newStatus = 'not_shortlisted';
+    if (!existingApp || ['applied', 'ppt_scheduled', 'shortlisted'].includes(existingApp.status)) {
+      if (
+        /test|assessment|coding|selection|shortlist|interview|round/i.test(subjLower) ||
+        (email.hasAttachments && email.attachments.some((a) => /test|shortlist|selection|coding/i.test(a.filename)))
+      ) {
+        newStatus = 'not_shortlisted';
+      }
     }
   }
 
