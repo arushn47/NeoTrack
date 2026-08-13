@@ -6,8 +6,12 @@ __pycache__/
 
 # environment variables
 .env
+.env.*
 .env.local
 .env.production.local
+
+# local scripts & database runners
+scripts/
 
 # next.js
 .next/
