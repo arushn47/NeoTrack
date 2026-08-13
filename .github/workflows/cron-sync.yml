@@ -1,0 +1,15 @@
+name: Scheduled Background Email Sync
+
+on:
+  schedule:
+    # Run every 15 minutes automatically
+    - cron: '*/15 * * * *'
+  workflow_dispatch:
+
+jobs:
+  cron-sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping NeoTrack Sync API
+        run: |
+          curl -s -X GET "https://neo-track-bice.vercel.app/api/cron/sync"
