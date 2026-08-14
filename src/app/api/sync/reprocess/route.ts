@@ -135,9 +135,14 @@ export async function POST() {
       ['technical_interview', 'hr_interview', 'final_interview'].includes(e.event_type)
     );
 
-    const hasShortlistOrSelectionBroadcast = companyEmails.some((e) => {
+    const hasTestOrShortlistSignal = companyEmails.some((e) => {
       const subj = (e.subject || '').toLowerCase();
-      return /shortlist|selection\s+list|selection\s+process|next\s+round/i.test(subj);
+      const body = (e.body_snippet || '').toLowerCase();
+      const full = subj + ' ' + body;
+      return (
+        /test|assessment|coding|selection|shortlist|interview|round/i.test(subj) ||
+        /shortlist|shortlisted candidates|initial shortlist|selection list/i.test(full)
+      );
     });
 
     let computedStatus = 'not_applied';
@@ -148,17 +153,22 @@ export async function POST() {
       const isSelectionList = companyEmails.some((e) =>
         /selection\s+list|selected|congratulations.*offer/i.test(e.subject || '')
       );
-      computedStatus = isSelectionList ? 'selected' : 'shortlisted';
-    } else if (hasConfirmedRegistration) {
-      if (hasInterviewEvent) {
+      if (isSelectionList) {
+        computedStatus = 'selected';
+      } else if (hasInterviewEvent) {
         computedStatus = 'interview_scheduled';
       } else if (hasTestEvent) {
         computedStatus = 'test_scheduled';
-      } else if (hasPptEvent) {
-        computedStatus = 'ppt_scheduled';
-      } else if (hasShortlistOrSelectionBroadcast) {
-        // Registered for the drive, but shortlist came out and user was not matched
+      } else {
+        computedStatus = 'shortlisted';
+      }
+    } else if (hasConfirmedRegistration) {
+      if (hasTestEvent || hasInterviewEvent || hasTestOrShortlistSignal) {
+        // User applied, but a test/interview/shortlist occurred and they are NOT matched
         computedStatus = 'not_shortlisted';
+      } else if (hasPptEvent) {
+        // PPTs are usually for all registered candidates
+        computedStatus = 'ppt_scheduled';
       } else {
         computedStatus = 'applied';
       }

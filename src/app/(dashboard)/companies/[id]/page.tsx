@@ -128,6 +128,15 @@ export default async function CompanyDetailPage({
     );
   });
 
+  const hasTestOrShortlistSignal = (emails || []).some((e) => {
+    const subj = (e.subject || '').toLowerCase();
+    const full = subj + ' ' + (e.body_snippet || '').toLowerCase();
+    return (
+      /test|assessment|coding|selection|shortlist|interview|round/i.test(subj) ||
+      /shortlist|shortlisted candidates|initial shortlist|selection list/i.test(full)
+    );
+  });
+
   const hasCandidateMatch = (candidateMatches || []).length > 0;
 
   if (!application?.manual_override) {
@@ -138,41 +147,37 @@ export default async function CompanyDetailPage({
       const isSelectionList = (emails || []).some((e) =>
         /selection\s+list|selected|congratulations.*offer/i.test(e.subject || '')
       );
-      healedStatus = isSelectionList ? 'selected' : 'shortlisted';
-      needsDbUpdate = true;
-    } else if (!hasConfirmedRegistration && healedStatus === 'not_shortlisted') {
-      // User NEVER applied to this company! Must be not_applied, NOT not_shortlisted!
+      const hasInterviewEvent = (events || []).some(e => ['technical_interview', 'hr_interview', 'final_interview'].includes(e.event_type));
+      const hasTestEvent = (events || []).some(e => ['online_test', 'coding_test', 'assessment'].includes(e.event_type));
+
+      let target = 'shortlisted';
+      if (isSelectionList) target = 'selected';
+      else if (hasInterviewEvent) target = 'interview_scheduled';
+      else if (hasTestEvent) target = 'test_scheduled';
+
+      if (healedStatus !== target) {
+        healedStatus = target;
+        needsDbUpdate = true;
+      }
+    } else if (!hasConfirmedRegistration && healedStatus !== 'not_applied') {
+      // User NEVER applied to this company!
       healedStatus = 'not_applied';
       needsDbUpdate = true;
-    } else if (hasConfirmedRegistration && events && events.length > 0) {
-      const EVENT_STATUS_MAP: Record<string, string> = {
-        ppt: 'ppt_scheduled',
-        online_test: 'test_scheduled',
-        coding_test: 'test_scheduled',
-        technical_interview: 'interview_scheduled',
-        hr_interview: 'interview_scheduled',
-        final_interview: 'interview_scheduled',
-      };
-      const EVENT_PRIORITY: Record<string, number> = {
-        ppt: 4, online_test: 5, coding_test: 5,
-        technical_interview: 6, hr_interview: 6, final_interview: 6,
-      };
-      const STATUS_PRIORITY: Record<string, number> = {
-        unknown: 0, not_applied: 1, applied: 2, shortlisted: 3,
-        ppt_scheduled: 4, test_scheduled: 5, interview_scheduled: 6,
-        offer_received: 7, selected: 8, not_shortlisted: 9,
-        declined: 9, withdrawn: 10, rejected: 10,
-      };
+    } else if (hasConfirmedRegistration) {
+      const hasInterviewEvent = (events || []).some(e => ['technical_interview', 'hr_interview', 'final_interview'].includes(e.event_type));
+      const hasTestEvent = (events || []).some(e => ['online_test', 'coding_test', 'assessment'].includes(e.event_type));
+      const hasPptEvent = (events || []).some(e => e.event_type === 'ppt');
 
-      let currentPri = STATUS_PRIORITY[healedStatus] ?? 0;
-      for (const e of events) {
-        const target = EVENT_STATUS_MAP[e.event_type];
-        const pri = EVENT_PRIORITY[e.event_type] ?? 0;
-        if (target && pri > currentPri && !['withdrawn', 'declined', 'rejected', 'selected'].includes(healedStatus)) {
-          healedStatus = target;
-          currentPri = pri;
-          needsDbUpdate = true;
-        }
+      let target = 'applied';
+      if (hasTestEvent || hasInterviewEvent || hasTestOrShortlistSignal) {
+        target = 'not_shortlisted';
+      } else if (hasPptEvent) {
+        target = 'ppt_scheduled';
+      }
+
+      if (healedStatus !== target && !['withdrawn', 'declined', 'rejected', 'selected'].includes(healedStatus)) {
+        healedStatus = target;
+        needsDbUpdate = true;
       }
     }
   }
