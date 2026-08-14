@@ -11,9 +11,10 @@ export const maxDuration = 60;
  * Runs sync automatically for all active users even when the web app is closed.
  */
 export async function GET(req: NextRequest) {
-  // Verify secret authorization header if configured
+  // Verify secret authorization header if configured (accepts with or without 'Bearer ' prefix)
   const authHeader = req.headers.get('authorization');
-  if (process.env.CRON_SECRET && authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
+  const secret = process.env.CRON_SECRET;
+  if (secret && authHeader !== `Bearer ${secret}` && authHeader !== secret) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
