@@ -77,14 +77,18 @@ export async function POST(request: Request) {
     const targetComp = findMentionedCompany();
 
     let targetStatus: string | null = null;
-    if (lowerMsg.includes('shortlist')) targetStatus = 'shortlisted';
+    // IMPORTANT: check 'not shortlisted' BEFORE 'shortlisted' to avoid false match
+    if (/not\s+shortlist|not\s+selected\s+in\s+shortlist/i.test(lowerMsg)) targetStatus = 'not_shortlisted';
+    else if (lowerMsg.includes('shortlist')) targetStatus = 'shortlisted';
     else if (lowerMsg.includes('select') || lowerMsg.includes('offer') || lowerMsg.includes('placed')) targetStatus = 'selected';
     else if (lowerMsg.includes('reject')) targetStatus = 'rejected';
     else if (lowerMsg.includes('decline') || lowerMsg.includes('opt out') || lowerMsg.includes('opted out')) targetStatus = 'declined';
     else if (lowerMsg.includes('withdraw') || lowerMsg.includes('withdrew')) targetStatus = 'withdrawn';
+    else if (lowerMsg.includes('ppt') || lowerMsg.includes('pre-placement') || lowerMsg.includes('pre placement')) targetStatus = 'ppt_scheduled';
     else if (lowerMsg.includes('test')) targetStatus = 'test_scheduled';
     else if (lowerMsg.includes('interview')) targetStatus = 'interview_scheduled';
-    else if (lowerMsg.includes('applied')) targetStatus = 'applied';
+    else if (lowerMsg.includes('applied') || lowerMsg.includes('registered')) targetStatus = 'applied';
+    else if (lowerMsg.includes('not applied') || lowerMsg.includes('didnt apply') || lowerMsg.includes("didn't apply")) targetStatus = 'not_applied';
 
     if (targetComp && targetStatus) {
       // Perform status update in DB

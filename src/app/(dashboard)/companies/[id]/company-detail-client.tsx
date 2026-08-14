@@ -163,7 +163,7 @@ export default function CompanyDetailClient({ company }: CompanyDetailClientProp
                   className="fixed inset-0 z-40"
                   onClick={() => setShowStatusMenu(false)}
                 />
-                <div className="absolute right-0 top-full mt-2 w-56 bg-bg-elevated border border-border-default rounded-xl shadow-xl z-50 py-1 max-h-64 overflow-y-auto">
+                <div className="absolute right-0 top-full mt-2 w-56 bg-bg-elevated border border-border-default rounded-xl shadow-xl z-50 py-1 max-h-96 overflow-y-auto">
                   <div className="px-3 py-1.5 text-[11px] font-semibold text-text-tertiary uppercase tracking-wider">
                     Override Status
                   </div>
