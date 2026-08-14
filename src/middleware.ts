@@ -3,7 +3,13 @@ import type { NextRequest } from 'next/server';
 import * as jose from 'jose';
 
 /** Routes that don't require authentication */
-const PUBLIC_ROUTES = ['/login', '/api/auth/google', '/api/auth/callback'];
+const PUBLIC_ROUTES = [
+  '/login',
+  '/api/auth/google',
+  '/api/auth/callback',
+  '/api/cron',
+  '/api/webhooks',
+];
 
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
