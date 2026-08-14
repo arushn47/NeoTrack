@@ -322,22 +322,17 @@ export async function processEmailForEventsAndStatus(
       newStatus = 'applied';
     }
   } else if (
-    // E. A shortlist / test round was officially released but candidate was NOT in it
-    /shortlist|selection\s+list|shortlisted|online\s+test|assessment|physical\s+selection|test\s+is\s+scheduled|round\s+of\s+selection|gd\s+is\s+today/i.test(
-      subjLower
-    ) ||
+    // E. A shortlist was officially released but candidate was NOT in it
+    /shortlist|selection\s+list|selected\s+candidates/i.test(subjLower) ||
     /shortlist|shortlisted candidates|initial shortlist|selection list/i.test(fullText) ||
+    (email.hasAttachments && /test|assessment|coding|selection|shortlist|interview|round/i.test(subjLower)) ||
     (email.hasAttachments && email.attachments.some((a) => /shortlist|selection|eligible|test/i.test(a.filename)))
   ) {
     // RULE: Only downgrade if candidate actually APPLIED or was in the process!
-    // If the candidate NEVER applied (not_applied), they must REMAIN not_applied!
     const currentStatus = existingApp?.status || 'not_applied';
     const isDowngradable = ['applied', 'ppt_scheduled', 'test_scheduled', 'shortlisted'].includes(currentStatus);
-    const isTestOrShortlistSignal =
-      /test|assessment|coding|selection|shortlist|interview|round/i.test(subjLower) ||
-      (email.hasAttachments && email.attachments.some((a) => /test|shortlist|selection|coding/i.test(a.filename)));
 
-    if (isDowngradable && isTestOrShortlistSignal) {
+    if (isDowngradable) {
       newStatus = 'not_shortlisted';
     }
   } else if (
