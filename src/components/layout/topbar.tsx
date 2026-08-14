@@ -112,7 +112,11 @@ export default function Topbar({ userName, userAvatar, lastSyncAt }: TopbarProps
                   newEmails: r.newEmails,
                   newCompanies: r.newCompanies,
                 });
-                router.refresh();
+                // Re-evaluate all stored emails against the latest classification rules
+                // to fix any stale statuses (e.g. not_applied → applied for confirmed registrations)
+                fetch('/api/sync/reprocess', { method: 'POST' })
+                  .then(() => router.refresh())
+                  .catch(() => router.refresh());
                 // Auto-hide after 5 seconds
                 setTimeout(() => setSyncResult(null), 5000);
               } else if (currentEvent === 'sync_error') {
