@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import Link from 'next/link';
 import {
   ArrowLeft,
@@ -89,6 +89,19 @@ export default function CompanyDetailClient({ company }: CompanyDetailClientProp
   const [isUpdating, setIsUpdating] = useState(false);
   const [showStatusMenu, setShowStatusMenu] = useState(false);
   const [activeTab, setActiveTab] = useState<'timeline' | 'emails'>('timeline');
+  const statusBtnRef = useRef<HTMLButtonElement>(null);
+  const [menuPos, setMenuPos] = useState<{ top: number; right: number } | null>(null);
+
+  // Calculate fixed position when menu opens
+  useEffect(() => {
+    if (showStatusMenu && statusBtnRef.current) {
+      const rect = statusBtnRef.current.getBoundingClientRect();
+      setMenuPos({
+        top: rect.bottom + window.scrollY + 8,
+        right: window.innerWidth - rect.right,
+      });
+    }
+  }, [showStatusMenu]);
 
   const handleStatusChange = async (newStatus: string) => {
     setIsUpdating(true);
@@ -149,6 +162,7 @@ export default function CompanyDetailClient({ company }: CompanyDetailClientProp
           {/* Status Override Selector */}
           <div className="relative">
             <button
+              ref={statusBtnRef}
               onClick={() => setShowStatusMenu(!showStatusMenu)}
               disabled={isUpdating}
               className="flex items-center gap-2.5 px-4 py-2 bg-bg-elevated border border-border-default hover:border-accent/40 rounded-xl text-sm font-medium transition-all"
@@ -157,13 +171,16 @@ export default function CompanyDetailClient({ company }: CompanyDetailClientProp
               <ChevronDown className="w-4 h-4 text-text-tertiary" />
             </button>
 
-            {showStatusMenu && (
+            {showStatusMenu && menuPos && (
               <>
                 <div
                   className="fixed inset-0 z-40"
                   onClick={() => setShowStatusMenu(false)}
                 />
-                <div className="absolute right-0 top-full mt-2 w-56 bg-bg-elevated border border-border-default rounded-xl shadow-xl z-50 py-1 max-h-96 overflow-y-auto">
+                <div
+                  className="fixed w-56 bg-bg-elevated border border-border-default rounded-xl shadow-xl z-50 py-1 max-h-[min(24rem,80vh)] overflow-y-auto"
+                  style={{ top: menuPos.top, right: menuPos.right }}
+                >
                   <div className="px-3 py-1.5 text-[11px] font-semibold text-text-tertiary uppercase tracking-wider">
                     Override Status
                   </div>
