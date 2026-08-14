@@ -276,6 +276,23 @@ export async function processEmailForEventsAndStatus(
       newStatus = 'applied';
     }
   } else if (
+    // D. NeoPAT registration confirmation emails:
+    // "Confirmed: Your Registration for EY Placement Drive"
+    // "Congratulations! You're Eligible for EY Placement Drive"
+    emailClass === 'registration_confirmation' ||
+    emailClass === 'registration' ||
+    /confirmed:\s*your\s+registration/i.test(subjLower) ||
+    /congratulations[!]*\s*(you'?re|you\s+are)\s+eligible/i.test(subjLower) ||
+    /registration\s+(confirmed|successful|received)/i.test(fullText) ||
+    /successfully\s+registered|thank\s+you\s+for\s+(registering|applying)/i.test(fullText) ||
+    /confirms?\s+(that\s+)?(you(r|'re)|your)\s+(successful\s+)?(registration|application)/i.test(fullText)
+  ) {
+    // Only set applied if user isn't already at a higher status
+    const current = existingApp?.status || 'not_applied';
+    if (current === 'not_applied' || current === 'unknown') {
+      newStatus = 'applied';
+    }
+  } else if (
     // D. A shortlist / test round was officially released but candidate was NOT in it
     /shortlist|selection\s+list|shortlisted|online\s+test|assessment|physical\s+selection|test\s+is\s+scheduled|round\s+of\s+selection|gd\s+is\s+today/i.test(
       subjLower
