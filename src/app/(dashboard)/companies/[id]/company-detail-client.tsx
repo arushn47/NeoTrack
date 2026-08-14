@@ -182,7 +182,7 @@ export default function CompanyDetailClient({ company }: CompanyDetailClientProp
               disabled={isUpdating}
               className="flex items-center gap-2.5 px-4 py-2 bg-bg-elevated border border-border-default hover:border-accent/40 rounded-xl text-sm font-medium transition-all"
             >
-              <StatusBadge status={status} />
+              <StatusBadge status={status} events={company.events} />
               <ChevronDown className="w-4 h-4 text-text-tertiary" />
             </button>
 

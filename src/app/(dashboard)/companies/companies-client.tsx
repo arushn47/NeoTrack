@@ -352,7 +352,7 @@ export default function CompaniesClient({ companies }: CompaniesClientProps) {
                       </div>
                     </div>
 
-                    <StatusBadge status={status} />
+                    <StatusBadge status={status} events={c.events} />
                   </div>
 
                   {/* CTC & Location Badges */}

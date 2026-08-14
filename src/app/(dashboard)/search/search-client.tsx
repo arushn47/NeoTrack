@@ -160,7 +160,7 @@ export default function SearchClient({ data }: SearchClientProps) {
                     <p className="text-xs text-text-tertiary truncate max-w-[180px]">{c.role || 'Placement Drive'}</p>
                   </div>
                 </div>
-                <StatusBadge status={c.status} />
+                <StatusBadge status={c.status} events={data.events.filter((e) => e.companyId === c.id)} />
               </Link>
             ))}
           </div>
