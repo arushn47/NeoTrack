@@ -271,60 +271,47 @@ export function extractJobDetails(text: string): ExtractedJobDetails {
     return { role: null, ctc: null, stipend: null, location: null, neoIdMatched: false, matchedNeoIdValue: null };
   }
 
-  // 1. CTC Extraction (Single Value or Multi-profile Range)
+  // 1. CTC Extraction — only the base LPA number (e.g. "14 LPA"), JB/variable ignored
   const ctcBlockMatch = cleanText.match(/\bCTC\b\s*[:\-–—\t]?\s*([\s\S]{1,400}?)(?:\b(?:Last date|Website|Location|Eligible|Eligibility|Stipend|Selection|Process|Registration)\b|$)/i);
   if (ctcBlockMatch && unannouncedPattern.test(ctcBlockMatch[1])) {
     ctc = null;
   } else {
-    let ctcText = ctcBlockMatch ? ctcBlockMatch[1] : cleanText;
+    const ctcText = ctcBlockMatch ? ctcBlockMatch[1].trim() : cleanText;
 
-    // Check for "9 LPA + 1.2 Lakh JB" pattern to add base + bonus
-    const jbMatch = ctcText.match(/(\d+(?:\.\d+)?)\s*(?:LPA|L\s*PA|Lakhs?|Lac|L)?\s*\+\s*(\d+(?:\.\d+)?)\s*(?:Lakhs?|L)?\s*(?:JB|Joining Bonus|Bonus|Retention Bonus)/i);
-    if (jbMatch) {
-      const base = parseFloat(jbMatch[1]);
-      const bonus = parseFloat(jbMatch[2]);
-      if (base > 0 && bonus > 0) {
-        ctc = `${(base + bonus).toFixed(1).replace(/\.0$/, '')} LPA`;
+    // Match the first occurrence of "Rs. X LPA" or "X LPA" — take only base number
+    const baseMatch = ctcText.match(/(?:INR|₹|Rs\.?)?\s*(\d+(?:\.\d+)?)\s*(?:LPA|L\s*PA|Lakhs?|Lac)\b/i);
+    if (baseMatch) {
+      const base = parseFloat(baseMatch[1]);
+      if (base > 0 && base < 200) {
+        ctc = `${base} LPA`;
       }
     }
 
+    // Fallback: scan whole cleanText for CTC/Package label
     if (!ctc) {
-      // Strip + X Lakh JB so joining bonus numbers don't pollute min-max range calculations
-      ctcText = ctcText.replace(/\+\s*\d+(?:\.\d+)?\s*(?:Lakhs?|L)?\s*(?:JB|Joining Bonus|Bonus)/gi, '');
-      const ctcMatches = [...ctcText.matchAll(/\b(\d+(?:\.\d+)?)\s*(?:LPA|L\s*PA|Lakhs?|Lac|L)\b/gi)];
-      if (ctcMatches.length > 0) {
-        const vals = ctcMatches.map(m => parseFloat(m[1])).filter(v => v > 0 && v < 200);
-        if (vals.length > 0) {
-          const min = Math.min(...vals);
-          const max = Math.max(...vals);
-          ctc = min === max ? `${min} LPA` : `${min} - ${max} LPA`;
-        }
-      }
-    }
-
-    if (!ctc) {
-      const ctcMatchA = cleanText.match(
-        /(?:CTC|Package|Salary|Compensation)\s*[:\-–—\t]?\s*(?:INR|₹|Rs\.?)?\s*([₹\d\.]+\s*(?:LPA|L\s*PA|Lakhs?|Lac|Cr|K)?(?:\s*\+\s*[\d\.]+\s*(?:Lakhs?|LPA|L|k)?\s*(?:JB|Bonus)?)?)/i
+      const fallback = cleanText.match(
+        /(?:CTC|Package|Salary|Compensation)\s*[:\-–—\t]?\s*(?:INR|₹|Rs\.?)?\s*(\d+(?:\.\d+)?)\s*(?:LPA|L\s*PA|Lakhs?|Lac)\b/i
       );
-      if (ctcMatchA && ctcMatchA[1] && /\d/.test(ctcMatchA[1])) {
-        let val = ctcMatchA[1].trim();
-        if (/^\d+(\.\d+)?$/.test(val)) val = `${val} LPA`;
-        ctc = val;
+      if (fallback) {
+        const base = parseFloat(fallback[1]);
+        if (base > 0 && base < 200) ctc = `${base} LPA`;
       }
     }
   }
 
-  // 2. Stipend Extraction (Single Value or Multi-profile Range)
+  // 2. Stipend Extraction
   const stipendBlockMatch = cleanText.match(/\b(?:Stipend|Stipened)\b\s*[:\-–—\t]?\s*([\s\S]{1,300}?)(?:\b(?:CTC|Last date|Website|Location|Eligible|Eligibility|Selection|Process|Registration)\b|$)/i);
   if (stipendBlockMatch && unannouncedPattern.test(stipendBlockMatch[1])) {
     stipend = null;
   } else if (stipendBlockMatch) {
     const stipendText = stipendBlockMatch[1];
-    const stipendMatches = [...stipendText.matchAll(/(?:INR|₹|Rs\.?)?\s*([\d,]+)(?:\s*(?:k|thousand))?\s*(?:INR|Rs\.?)?/gi)];
+    // Also match bare numbers like "40000" without currency prefix
+    const stipendMatches = [...stipendText.matchAll(/(?:INR|₹|Rs\.?)?\s*([\d,]+)(?:\s*(?:\/\s*month|\/\s*mo|pm|p\.?m\.?|k|thousand))?/gi)];
     const nums: number[] = [];
     for (const m of stipendMatches) {
       const rawNum = m[1].replace(/,/g, '');
       const val = parseInt(rawNum, 10);
+      // Accept values 5000-500000, excluding years
       if (val >= 5000 && val < 500000 && ![2024, 2025, 2026, 2027].includes(val)) {
         nums.push(val);
       }
