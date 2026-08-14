@@ -124,6 +124,9 @@ export async function processEmailForEventsAndStatus(
   }
 
   // 3. Extract Events (PPT, Test, Interview) with Deduplication
+  // Hoist extractedEvents so the status computation block can reference it
+  const extractedEvents = extractEvents(email);
+
   // Check if candidate is withdrawn or opted out
   const isWithdrawn =
     existingApp?.status === 'withdrawn' ||
@@ -142,8 +145,6 @@ export async function processEmailForEventsAndStatus(
     // Delete any previously inserted events for this company if user has withdrawn
     await supabase.from('events').delete().eq('user_id', userId).eq('company_id', companyId);
   } else {
-    const extractedEvents = extractEvents(email);
-
     for (const event of extractedEvents) {
       // RULE: For tests and interviews, ONLY add to user's schedule if candidate is shortlisted!
       const isTestOrInterview = ['online_test', 'coding_test', 'technical_interview', 'hr_interview', 'final_interview'].includes(event.eventType);

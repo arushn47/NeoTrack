@@ -336,7 +336,7 @@ export function extractJobDetails(text: string): ExtractedJobDetails {
     if (
       rawRole &&
       rawRole.length >= 2 &&
-      !/you are eligible|upcoming placement|forwarded message|scheduled on|not japanese role|^[>,\.\*\s]+$/i.test(rawRole)
+      !/you\s+are|you\s+have|dear\s|greetings|hi\s+|hello\s|upcoming placement|forwarded message|scheduled on|not japanese role|eligible|please\s+find|please\s+note|kindly\s|hereby|inform|congratulat|registr|^[>,\.\*\s]+$/i.test(rawRole)
     ) {
       role = rawRole;
     }
