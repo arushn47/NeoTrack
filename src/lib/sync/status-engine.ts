@@ -293,7 +293,37 @@ export async function processEmailForEventsAndStatus(
       newStatus = 'applied';
     }
   } else if (
-    // D. A shortlist / test round was officially released but candidate was NOT in it
+    // E. PPT / Test / Interview event found in email — upgrade status even without Neo match
+    // (PPT announcements are sent to ALL eligible candidates, not just shortlisted)
+    extractedEvents.length > 0
+  ) {
+    const current = existingApp?.status || 'not_applied';
+    const STATUS_UPGRADE_MAP: Record<string, string> = {
+      ppt: 'ppt_scheduled',
+      online_test: 'test_scheduled',
+      coding_test: 'test_scheduled',
+      technical_interview: 'interview_scheduled',
+      hr_interview: 'interview_scheduled',
+      final_interview: 'interview_scheduled',
+    };
+    // Find the highest-priority event type present
+    const eventPriorities: Record<string, number> = {
+      ppt: 1, online_test: 2, coding_test: 2,
+      technical_interview: 3, hr_interview: 3, final_interview: 3,
+    };
+    const sortedEvents = [...extractedEvents]
+      .filter(e => STATUS_UPGRADE_MAP[e.eventType])
+      .sort((a, b) => (eventPriorities[b.eventType] ?? 0) - (eventPriorities[a.eventType] ?? 0));
+    if (sortedEvents.length > 0) {
+      const candidateStatus = STATUS_UPGRADE_MAP[sortedEvents[0].eventType];
+      // Only upgrade (never downgrade) from current status
+      const upgradeable = ['not_applied', 'unknown', 'applied', 'ppt_scheduled'];
+      if (candidateStatus && upgradeable.includes(current)) {
+        newStatus = candidateStatus;
+      }
+    }
+  } else if (
+    // F. A shortlist / test round was officially released but candidate was NOT in it
     /shortlist|selection\s+list|shortlisted|online\s+test|assessment|physical\s+selection|test\s+is\s+scheduled|round\s+of\s+selection|gd\s+is\s+today/i.test(
       subjLower
     ) ||

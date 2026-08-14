@@ -123,6 +123,39 @@ export async function POST() {
       }
     }
 
+    // ─── Event-based status upgrade ──────────────────────────────────────
+    // Check stored events for this company — PPT/test/interview events should
+    // upgrade the status even if not detected from body_snippet alone
+    const { data: storedEvents } = await supabase
+      .from('events')
+      .select('event_type')
+      .eq('user_id', userId)
+      .eq('company_id', companyId);
+
+    if (storedEvents && storedEvents.length > 0) {
+      const EVENT_STATUS_MAP: Record<string, string> = {
+        ppt: 'ppt_scheduled',
+        online_test: 'test_scheduled',
+        coding_test: 'test_scheduled',
+        technical_interview: 'interview_scheduled',
+        hr_interview: 'interview_scheduled',
+        final_interview: 'interview_scheduled',
+      };
+      const EVENT_PRIORITY: Record<string, number> = {
+        ppt: 4, online_test: 5, coding_test: 5,
+        technical_interview: 6, hr_interview: 6, final_interview: 6,
+      };
+      for (const evt of storedEvents) {
+        const candidate = EVENT_STATUS_MAP[evt.event_type];
+        if (!candidate) continue;
+        const candidatePriority = EVENT_PRIORITY[evt.event_type] ?? 0;
+        if (candidatePriority > bestPriority) {
+          bestPriority = candidatePriority;
+          bestNewStatus = candidate;
+        }
+      }
+    }
+
     // 4. Apply if we found a better status
     if (bestNewStatus && bestNewStatus !== currentStatus) {
       await supabase
