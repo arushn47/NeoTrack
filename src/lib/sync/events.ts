@@ -327,31 +327,58 @@ export function extractJobDetails(text: string): ExtractedJobDetails {
     }
   }
 
-  // 3. Job Role Extraction
+  // 3. Category & Job Role Extraction
+  let category: string | null = null;
+  const categoryMatch = cleanText.match(
+    /\bCategory\b\s*[:\-–—\t]?\s*([A-Za-z0-9\s\/\-\,\&]+?)(?:\s+(?:Date|Visit|Eligible|Eligibility|CTC|Stipend|Selection|Website|Process|Last\s+date)|$|\.|\r?\n)/i
+  );
+  if (categoryMatch) {
+    let rawCat = categoryMatch[1].replace(/^[*,\.\s>\-]+/, '').replace(/[*,\.\s>\-]+$/, '').trim();
+    // Normalize e.g. "Super Dream Internship Registration - 2027 Batch" -> "Super Dream Internship"
+    rawCat = rawCat.replace(/\s*(?:Registration|Drive|Batch|\d{4}).*$/i, '').trim();
+    if (rawCat && rawCat.length >= 3 && !/will be|tba|tbd/i.test(rawCat)) {
+      category = rawCat;
+    }
+  }
+
+  // Also check subject/body for common tier keywords if category not explicitly in table
+  if (!category) {
+    if (/super\s+dream\s+internship/i.test(cleanText)) category = 'Super Dream Internship';
+    else if (/super\s+dream/i.test(cleanText)) category = 'Super Dream';
+    else if (/dream\s+internship/i.test(cleanText)) category = 'Dream Internship';
+    else if (/\bdream\b/i.test(cleanText)) category = 'Dream';
+    else if (/regular\s+offer/i.test(cleanText)) category = 'Regular';
+  }
+
   const roleMatch = cleanText.match(
-    /(?:Job\s+Role|Designation|Position|Profile)\s*[:\-–—\t]?\s*([A-Za-z0-9\s\/\-\,\&]+?)(?:\s+(?:Service|Greetings|About|Campus|Eligible|Selection|Location|CTC|Stipend|Process|Note)|$|\.|\r?\n)/i
+    /(?:Job\s+Role|Designation|Position|Profile)\s*[:\-–—\t]?\s*([A-Za-z0-9\s\/\-\,\&]+?)(?:\s+(?:Service|Greetings|About|Campus|Eligible|Selection|Location|CTC|Stipend|Process|Note|Date)|$|\.|\r?\n)/i
   );
   if (roleMatch) {
     const rawRole = roleMatch[1].replace(/^[*,\.\s>\-]+/, '').replace(/[*,\.\s>\-]+$/, '').trim().slice(0, 40);
     if (
       rawRole &&
       rawRole.length >= 2 &&
-      !/you\s+are|you\s+have|dear\s|greetings|hi\s+|hello\s|upcoming placement|forwarded message|scheduled on|not japanese role|eligible|please\s+find|please\s+note|kindly\s|hereby|inform|congratulat|registr|^[>,\.\*\s]+$/i.test(rawRole)
+      !/\byou\b|\bwe\b|\bi\b|dear\s|greetings|hi\s+|hello\s|upcoming|forwarded|scheduled|not japanese|eligible|please|kindly|hereby|inform|congratulat|registr|passout|batch|drive|internship\s+registration|^[>,\.\*\s]+$/i.test(rawRole)
     ) {
       role = rawRole;
     }
   }
 
+  // If no specific technical role was extracted, use the clean placement category (e.g. "Super Dream Internship")
+  if (!role && category) {
+    role = category;
+  }
+
   // 4. Job Location Extraction
   const locMatch = cleanText.match(
-    /(?:Job\s+)?Location\s*[:\-–—\t]?\s*([A-Za-z0-9\s\/\-]+?)(?:\s+(?:Eligibility|Designation|Role|Process|CTC|Stipend|Note|Kind)|$|\.|\r?\n)/i
+    /(?:Job\s+)?Location\s*[:\-–—\t]?\s*([A-Za-z0-9\s\/\-]+?)(?:\s+(?:Eligibility|Designation|Role|Process|CTC|Stipend|Note|Kind|Website|Selection)|$|\.|\r?\n)/i
   );
   if (locMatch) {
     const rawLoc = locMatch[1].replace(/^[*,\.\s>\-]+/, '').replace(/[*,\.\s>\-]+$/, '').trim().slice(0, 40);
     if (
       rawLoc &&
       rawLoc.length >= 2 &&
-      !/nonsense|come at|assistance|applicable|candidate|round\s+\d+|results|lab|service agreement|forwarded message|scheduled on|online test|@|own location|pearl research|anna auditorium|^[>,\.\*\s]+$/i.test(rawLoc)
+      !/nonsense|come at|assistance|applicable|candidate|round\s+\d+|results|lab|service agreement|forwarded message|scheduled on|online test|@|own location|pearl research|anna auditorium|will be|tba|tbd|^[>,\.\*\s]+$/i.test(rawLoc)
     ) {
       location = rawLoc;
     }

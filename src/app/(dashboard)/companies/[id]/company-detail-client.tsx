@@ -92,6 +92,13 @@ export default function CompanyDetailClient({ company }: CompanyDetailClientProp
   const statusBtnRef = useRef<HTMLButtonElement>(null);
   const [menuPos, setMenuPos] = useState<{ top: number; right: number } | null>(null);
 
+  // Sync state if server component re-renders with new application status
+  useEffect(() => {
+    if (company.application?.status) {
+      setStatus(company.application.status);
+    }
+  }, [company.application?.status]);
+
   // Calculate fixed position when menu opens
   useEffect(() => {
     if (showStatusMenu && statusBtnRef.current) {
@@ -124,6 +131,14 @@ export default function CompanyDetailClient({ company }: CompanyDetailClientProp
 
   const isNeoMatched = company.candidateMatches.length > 0;
 
+  const displayRole = (() => {
+    const r = company.application?.role;
+    if (!r || /\byou\s*(?:are|have|re)\b|dear\s|greetings|eligible|registr/i.test(r)) {
+      return 'Campus Placement Drive';
+    }
+    return r;
+  })();
+
   return (
     <div className="space-y-6 animate-fade-in max-w-5xl">
       {/* Back Button */}
@@ -153,7 +168,7 @@ export default function CompanyDetailClient({ company }: CompanyDetailClientProp
                 )}
               </div>
               <p className="text-sm text-text-secondary mt-0.5">
-                {company.application?.role || 'Campus Placement Drive'}
+                {displayRole}
                 {company.legalName && ` · ${company.legalName}`}
               </p>
             </div>

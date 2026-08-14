@@ -104,7 +104,7 @@ function cleanRoleDisplay(rawRole: string | null | undefined, rawCtc?: string | 
       r &&
       r.length >= 2 &&
       r !== 'Placement Drive' &&
-      !/you are eligible|upcoming placement|forwarded message|scheduled on|not japanese role|of someone who|details below|profile 1|profile 2|applied candidates|^[>,\.\*\s]+$/i.test(r)
+      !/\byou\s*(?:are|have|re)\b|\byou\b|dear\s|greetings|hi\s+|upcoming|forwarded|scheduled|not japanese|eligible|please|kindly|hereby|inform|congratulat|registr|passout|batch|drive|details below|profile 1|profile 2|applied candidates|^[>,\.\*\s]+$/i.test(r)
     ) {
       return r;
     }

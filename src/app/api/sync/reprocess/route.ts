@@ -1,16 +1,17 @@
 import { NextResponse } from 'next/server';
 import { getSession } from '@/lib/auth';
 import { createAdminClient } from '@/lib/supabase/admin';
+import { extractJobDetails } from '@/lib/sync/events';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
 
 /**
  * POST /api/sync/reprocess
- * Re-evaluates ALL stored emails for the current user against the current classification
- * rules to fix stale application statuses (e.g. not_applied when confirmed registration exists).
- *
- * Only upgrades statuses — never downgrades a status that is already higher.
+ * Re-evaluates ALL stored emails for the current user against current extraction & classification
+ * rules to fix:
+ * 1. Stale application statuses (e.g. not_applied -> applied for confirmed registrations, applied -> ppt_scheduled if PPT event exists)
+ * 2. Missing or corrupted Job Details (role, category, CTC, stipend, location)
  */
 export async function POST() {
   const session = await getSession();
@@ -32,14 +33,6 @@ export async function POST() {
     return NextResponse.json({ message: 'No emails to reprocess', fixed: 0 });
   }
 
-  // 2. Get user's Neo ID
-  const { data: profile } = await supabase
-    .from('profiles')
-    .select('neo_id')
-    .eq('user_id', userId)
-    .single();
-  const userNeoId = profile?.neo_id || null;
-
   const STATUS_PRIORITY: Record<string, number> = {
     unknown: 0,
     not_applied: 1,
@@ -57,9 +50,9 @@ export async function POST() {
   };
 
   let fixed = 0;
-  const details: { companyId: string; subject: string; newStatus: string }[] = [];
+  const details: { companyId: string; subject: string; newStatus: string; role?: string | null; ctc?: string | null }[] = [];
 
-  // 3. Group emails by company_id and determine correct status
+  // 2. Group emails by company_id
   const byCompany = new Map<string, typeof emails>();
   for (const email of emails) {
     if (!email.company_id) continue;
@@ -68,16 +61,13 @@ export async function POST() {
   }
 
   for (const [companyId, companyEmails] of byCompany.entries()) {
-    // Get current application status
+    // Get current application record
     const { data: app } = await supabase
       .from('applications')
-      .select('status, manual_override')
+      .select('status, manual_override, role, ctc, stipend, location, applied_at')
       .eq('user_id', userId)
       .eq('company_id', companyId)
       .single();
-
-    // Never touch manually-overridden statuses
-    if (app?.manual_override) continue;
 
     const currentStatus = app?.status || 'not_applied';
     const currentPriority = STATUS_PRIORITY[currentStatus] ?? 0;
@@ -85,6 +75,15 @@ export async function POST() {
     let bestNewStatus: string | null = null;
     let bestPriority = currentPriority;
 
+    // Combine all email text for comprehensive job detail extraction
+    const combinedEmailText = companyEmails
+      .map((e) => `${e.subject || ''}\n${e.body_snippet || ''}`)
+      .join('\n\n');
+
+    // Extract updated role, CTC, stipend, location
+    const extracted = extractJobDetails(combinedEmailText);
+
+    // ─── Status Computation from Emails ──────────────────────────────────
     for (const email of companyEmails) {
       const subj = (email.subject || '').toLowerCase();
       const body = (email.body_snippet || '').toLowerCase();
@@ -93,7 +92,7 @@ export async function POST() {
 
       let candidate: string | null = null;
 
-      // ─── Withdrawal / Decline (terminal — always apply) ────────────────
+      // Withdrawal / Decline
       if (
         cls === 'withdrawal' || cls === 'decline' ||
         /registration.*has been withdrawn|your registration.*withdrawn/i.test(full) ||
@@ -101,8 +100,7 @@ export async function POST() {
       ) {
         candidate = 'withdrawn';
       }
-
-      // ─── Confirmed Registration / Eligible ─────────────────────────────
+      // Confirmed Registration / Eligible
       else if (
         cls === 'registration_confirmation' || cls === 'registration' ||
         /confirmed:\s*your\s+registration/i.test(subj) ||
@@ -123,9 +121,7 @@ export async function POST() {
       }
     }
 
-    // ─── Event-based status upgrade ──────────────────────────────────────
-    // Check stored events for this company — PPT/test/interview events should
-    // upgrade the status even if not detected from body_snippet alone
+    // ─── Event-based Status Upgrade ──────────────────────────────────────
     const { data: storedEvents } = await supabase
       .from('events')
       .select('event_type')
@@ -156,28 +152,42 @@ export async function POST() {
       }
     }
 
-    // 4. Apply if we found a better status
-    if (bestNewStatus && bestNewStatus !== currentStatus) {
-      await supabase
-        .from('applications')
-        .upsert(
-          {
-            user_id: userId,
-            company_id: companyId,
-            status: bestNewStatus,
-            status_source: 'sync_reprocess',
-            status_confidence: 'high',
-            last_updated: new Date().toISOString(),
-          },
-          { onConflict: 'user_id,company_id' }
-        );
-      fixed++;
-      details.push({
-        companyId,
-        subject: companyEmails[0].subject || '',
-        newStatus: bestNewStatus,
-      });
+    // Determine final status (respect manual_override if present)
+    const finalStatus = app?.manual_override ? currentStatus : (bestNewStatus || currentStatus);
+
+    // Sanitize role: fix "you are", "you have", or empty values
+    let finalRole = extracted.role || app?.role || null;
+    if (finalRole && /\byou\s*(?:are|have|re)\b|dear\s|greetings|eligible|registr/i.test(finalRole)) {
+      finalRole = extracted.role && !/\byou\s*(?:are|have|re)\b/i.test(extracted.role) ? extracted.role : null;
     }
+
+    // Build update payload
+    const updatePayload: Record<string, unknown> = {
+      user_id: userId,
+      company_id: companyId,
+      status: finalStatus,
+      status_source: app?.manual_override ? 'manual_override' : 'sync_reprocess',
+      status_confidence: 'high',
+      last_updated: new Date().toISOString(),
+    };
+
+    if (finalRole !== undefined) updatePayload.role = finalRole;
+    if (extracted.ctc) updatePayload.ctc = extracted.ctc;
+    if (extracted.stipend) updatePayload.stipend = extracted.stipend;
+    if (extracted.location) updatePayload.location = extracted.location;
+
+    await supabase
+      .from('applications')
+      .upsert(updatePayload, { onConflict: 'user_id,company_id' });
+
+    fixed++;
+    details.push({
+      companyId,
+      subject: companyEmails[0].subject || '',
+      newStatus: finalStatus,
+      role: finalRole,
+      ctc: extracted.ctc || app?.ctc,
+    });
   }
 
   return NextResponse.json({ success: true, emailsScanned: emails.length, fixed, details });
