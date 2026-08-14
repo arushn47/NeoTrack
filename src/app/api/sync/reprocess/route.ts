@@ -135,14 +135,13 @@ export async function POST() {
       ['technical_interview', 'hr_interview', 'final_interview'].includes(e.event_type)
     );
 
-    const hasTestOrShortlistSignal = companyEmails.some((e) => {
+    const hasExplicitShortlistSignal = companyEmails.some((e) => {
       const subj = (e.subject || '').toLowerCase();
-      const body = (e.body_snippet || '').toLowerCase();
-      const full = subj + ' ' + body;
-      return (
-        /test|assessment|coding|selection|shortlist|interview|round/i.test(subj) ||
-        /shortlist|shortlisted candidates|initial shortlist|selection list/i.test(full)
-      );
+      const full = subj + ' ' + (e.body_snippet || '').toLowerCase();
+      const isExplicitShortlist = /shortlist|selection\s+list|selected\s+candidates/i.test(subj) ||
+                                  /shortlist|shortlisted candidates|initial shortlist|selection list/i.test(full);
+      const isShortlistClass = e.classification === 'shortlist';
+      return isExplicitShortlist || isShortlistClass;
     });
 
     let computedStatus = 'not_applied';
@@ -163,11 +162,14 @@ export async function POST() {
         computedStatus = 'shortlisted';
       }
     } else if (hasConfirmedRegistration) {
-      if (hasTestEvent || hasInterviewEvent || hasTestOrShortlistSignal) {
-        // User applied, but a test/interview/shortlist occurred and they are NOT matched
+      if (hasExplicitShortlistSignal) {
+        // User applied, but a shortlist occurred and they are NOT matched
         computedStatus = 'not_shortlisted';
+      } else if (hasInterviewEvent) {
+        computedStatus = 'interview_scheduled';
+      } else if (hasTestEvent) {
+        computedStatus = 'test_scheduled';
       } else if (hasPptEvent) {
-        // PPTs are usually for all registered candidates
         computedStatus = 'ppt_scheduled';
       } else {
         computedStatus = 'applied';

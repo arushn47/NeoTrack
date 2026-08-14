@@ -128,13 +128,13 @@ export default async function CompanyDetailPage({
     );
   });
 
-  const hasTestOrShortlistSignal = (emails || []).some((e) => {
+  const hasExplicitShortlistSignal = (emails || []).some((e) => {
     const subj = (e.subject || '').toLowerCase();
     const full = subj + ' ' + (e.body_snippet || '').toLowerCase();
-    return (
-      /test|assessment|coding|selection|shortlist|interview|round/i.test(subj) ||
-      /shortlist|shortlisted candidates|initial shortlist|selection list/i.test(full)
-    );
+    const isExplicitShortlist = /shortlist|selection\s+list|selected\s+candidates/i.test(subj) ||
+                                /shortlist|shortlisted candidates|initial shortlist|selection list/i.test(full);
+    const isShortlistClass = e.classification === 'shortlist';
+    return isExplicitShortlist || isShortlistClass;
   });
 
   const hasCandidateMatch = (candidateMatches || []).length > 0;
@@ -169,8 +169,12 @@ export default async function CompanyDetailPage({
       const hasPptEvent = (events || []).some(e => e.event_type === 'ppt');
 
       let target = 'applied';
-      if (hasTestEvent || hasInterviewEvent || hasTestOrShortlistSignal) {
+      if (hasExplicitShortlistSignal) {
         target = 'not_shortlisted';
+      } else if (hasInterviewEvent) {
+        target = 'interview_scheduled';
+      } else if (hasTestEvent) {
+        target = 'test_scheduled';
       } else if (hasPptEvent) {
         target = 'ppt_scheduled';
       }
