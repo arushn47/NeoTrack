@@ -12,4 +12,9 @@ jobs:
     steps:
       - name: Ping NeoTrack Sync API
         run: |
-          curl -s -X GET "https://neopat-tracker.vercel.app/api/cron/sync"
+          if [ -n "${{ secrets.CRON_SECRET }}" ]; then
+            curl -s -X GET "https://neopat-tracker.vercel.app/api/cron/sync" \
+              -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}"
+          else
+            curl -s -X GET "https://neopat-tracker.vercel.app/api/cron/sync"
+          fi

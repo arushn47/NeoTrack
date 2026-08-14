@@ -2,6 +2,9 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { runSync } from '@/lib/sync/engine';
 
+export const dynamic = 'force-dynamic';
+export const maxDuration = 60;
+
 /**
  * GET /api/cron/sync
  * Scheduled background sync endpoint for Vercel Cron or external cron jobs.
