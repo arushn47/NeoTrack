@@ -102,35 +102,77 @@ export default async function CompanyDetailPage({
     }
   }
 
-  // 3. Upgrade status if events exist and user didn't manually override
-  if (!application?.manual_override && events && events.length > 0) {
-    const EVENT_STATUS_MAP: Record<string, string> = {
-      ppt: 'ppt_scheduled',
-      online_test: 'test_scheduled',
-      coding_test: 'test_scheduled',
-      technical_interview: 'interview_scheduled',
-      hr_interview: 'interview_scheduled',
-      final_interview: 'interview_scheduled',
-    };
-    const EVENT_PRIORITY: Record<string, number> = {
-      ppt: 4, online_test: 5, coding_test: 5,
-      technical_interview: 6, hr_interview: 6, final_interview: 6,
-    };
-    const STATUS_PRIORITY: Record<string, number> = {
-      unknown: 0, not_applied: 1, applied: 2, shortlisted: 3,
-      ppt_scheduled: 4, test_scheduled: 5, interview_scheduled: 6,
-      offer_received: 7, selected: 8, not_shortlisted: 9,
-      declined: 9, withdrawn: 10, rejected: 10,
-    };
+  // 3. Status self-healing based on registration, withdrawals, events, and candidate matches
+  const hasConfirmedRegistration = (emails || []).some((e) => {
+    const subj = (e.subject || '').toLowerCase();
+    const body = (e.body_snippet || '').toLowerCase();
+    const full = subj + ' ' + body;
+    return (
+      e.classification === 'registration_confirmation' ||
+      /confirmed:\s*your\s+registration/i.test(subj) ||
+      /registration\s+(confirmed|successful|received)/i.test(full) ||
+      /successfully\s+registered|thank\s+you\s+for\s+(registering|applying)/i.test(full) ||
+      /confirms?\s+(that\s+)?(you(r|'re)|your)\s+(successful\s+)?(registration|application)/i.test(full)
+    );
+  });
 
-    let currentPri = STATUS_PRIORITY[healedStatus] ?? 0;
-    for (const e of events) {
-      const target = EVENT_STATUS_MAP[e.event_type];
-      const pri = EVENT_PRIORITY[e.event_type] ?? 0;
-      if (target && pri > currentPri && !['withdrawn', 'declined', 'rejected', 'selected'].includes(healedStatus)) {
-        healedStatus = target;
-        currentPri = pri;
-        needsDbUpdate = true;
+  const isWithdrawn = (emails || []).some((e) => {
+    const subj = (e.subject || '').toLowerCase();
+    const body = (e.body_snippet || '').toLowerCase();
+    const full = subj + ' ' + body;
+    return (
+      e.classification === 'withdrawal' ||
+      e.classification === 'decline' ||
+      /registration.*has been withdrawn|your registration.*withdrawn/i.test(full) ||
+      (/confirmation.*drive\s+registration\s+update/i.test(subj) && /withdrawn/i.test(full))
+    );
+  });
+
+  const hasCandidateMatch = (candidateMatches || []).length > 0;
+
+  if (!application?.manual_override) {
+    if (isWithdrawn && healedStatus !== 'declined' && healedStatus !== 'withdrawn') {
+      healedStatus = 'declined';
+      needsDbUpdate = true;
+    } else if (hasCandidateMatch) {
+      const isSelectionList = (emails || []).some((e) =>
+        /selection\s+list|selected|congratulations.*offer/i.test(e.subject || '')
+      );
+      healedStatus = isSelectionList ? 'selected' : 'shortlisted';
+      needsDbUpdate = true;
+    } else if (!hasConfirmedRegistration && healedStatus === 'not_shortlisted') {
+      // User NEVER applied to this company! Must be not_applied, NOT not_shortlisted!
+      healedStatus = 'not_applied';
+      needsDbUpdate = true;
+    } else if (hasConfirmedRegistration && events && events.length > 0) {
+      const EVENT_STATUS_MAP: Record<string, string> = {
+        ppt: 'ppt_scheduled',
+        online_test: 'test_scheduled',
+        coding_test: 'test_scheduled',
+        technical_interview: 'interview_scheduled',
+        hr_interview: 'interview_scheduled',
+        final_interview: 'interview_scheduled',
+      };
+      const EVENT_PRIORITY: Record<string, number> = {
+        ppt: 4, online_test: 5, coding_test: 5,
+        technical_interview: 6, hr_interview: 6, final_interview: 6,
+      };
+      const STATUS_PRIORITY: Record<string, number> = {
+        unknown: 0, not_applied: 1, applied: 2, shortlisted: 3,
+        ppt_scheduled: 4, test_scheduled: 5, interview_scheduled: 6,
+        offer_received: 7, selected: 8, not_shortlisted: 9,
+        declined: 9, withdrawn: 10, rejected: 10,
+      };
+
+      let currentPri = STATUS_PRIORITY[healedStatus] ?? 0;
+      for (const e of events) {
+        const target = EVENT_STATUS_MAP[e.event_type];
+        const pri = EVENT_PRIORITY[e.event_type] ?? 0;
+        if (target && pri > currentPri && !['withdrawn', 'declined', 'rejected', 'selected'].includes(healedStatus)) {
+          healedStatus = target;
+          currentPri = pri;
+          needsDbUpdate = true;
+        }
       }
     }
   }

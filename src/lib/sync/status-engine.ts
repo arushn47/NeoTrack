@@ -309,11 +309,9 @@ export async function processEmailForEventsAndStatus(
   } else if (
     // D. NeoPAT registration confirmation emails:
     // "Confirmed: Your Registration for EY Placement Drive"
-    // "Congratulations! You're Eligible for EY Placement Drive"
+    // (Note: "Congratulations! You're Eligible..." is just an invitation to apply, not an application confirmation!)
     emailClass === 'registration_confirmation' ||
-    emailClass === 'registration' ||
     /confirmed:\s*your\s+registration/i.test(subjLower) ||
-    /congratulations[!]*\s*(you'?re|you\s+are)\s+eligible/i.test(subjLower) ||
     /registration\s+(confirmed|successful|received)/i.test(fullText) ||
     /successfully\s+registered|thank\s+you\s+for\s+(registering|applying)/i.test(fullText) ||
     /confirms?\s+(that\s+)?(you(r|'re)|your)\s+(successful\s+)?(registration|application)/i.test(fullText)
@@ -325,7 +323,7 @@ export async function processEmailForEventsAndStatus(
     }
   } else if (
     // E. PPT / Test / Interview event found in email — upgrade status even without Neo match
-    // (PPT announcements are sent to ALL eligible candidates, not just shortlisted)
+    // (PPT announcements are sent to ALL registered/eligible candidates)
     extractedEvents.length > 0
   ) {
     const current = existingApp?.status || 'not_applied';
@@ -347,8 +345,8 @@ export async function processEmailForEventsAndStatus(
       .sort((a, b) => (eventPriorities[b.eventType] ?? 0) - (eventPriorities[a.eventType] ?? 0));
     if (sortedEvents.length > 0) {
       const candidateStatus = STATUS_UPGRADE_MAP[sortedEvents[0].eventType];
-      // Only upgrade (never downgrade) from current status
-      const upgradeable = ['not_applied', 'unknown', 'applied', 'ppt_scheduled'];
+      // Only upgrade if candidate has applied or is in progress
+      const upgradeable = ['applied', 'ppt_scheduled'];
       if (candidateStatus && upgradeable.includes(current)) {
         newStatus = candidateStatus;
       }
@@ -361,9 +359,10 @@ export async function processEmailForEventsAndStatus(
     /shortlist|shortlisted candidates|initial shortlist|selection list/i.test(fullText) ||
     (email.hasAttachments && email.attachments.some((a) => /shortlist|selection|eligible|test/i.test(a.filename)))
   ) {
-    // Only downgrade if the current status is at or below "shortlisted" (not terminal states)
+    // RULE: Only downgrade if candidate actually APPLIED or was in the process!
+    // If the candidate NEVER applied (not_applied), they must REMAIN not_applied!
     const currentStatus = existingApp?.status || 'not_applied';
-    const isDowngradable = ['not_applied', 'applied', 'ppt_scheduled', 'not_shortlisted'].includes(currentStatus);
+    const isDowngradable = ['applied', 'ppt_scheduled', 'test_scheduled', 'shortlisted'].includes(currentStatus);
     const isTestOrShortlistSignal =
       /test|assessment|coding|selection|shortlist|interview|round/i.test(subjLower) ||
       (email.hasAttachments && email.attachments.some((a) => /test|shortlist|selection|coding/i.test(a.filename)));

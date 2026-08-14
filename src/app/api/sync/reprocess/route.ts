@@ -83,45 +83,33 @@ export async function POST() {
     // Extract updated role, CTC, stipend, location
     const extracted = extractJobDetails(combinedEmailText);
 
-    // ─── Status Computation from Emails ──────────────────────────────────
-    for (const email of companyEmails) {
-      const subj = (email.subject || '').toLowerCase();
-      const body = (email.body_snippet || '').toLowerCase();
+    // ─── Status Computation from Emails & Events ────────────────────────
+    const hasConfirmedRegistration = companyEmails.some((e) => {
+      const subj = (e.subject || '').toLowerCase();
+      const body = (e.body_snippet || '').toLowerCase();
       const full = subj + ' ' + body;
-      const cls = email.classification;
-
-      let candidate: string | null = null;
-
-      // Withdrawal / Decline
-      if (
-        cls === 'withdrawal' || cls === 'decline' ||
-        /registration.*has been withdrawn|your registration.*withdrawn/i.test(full) ||
-        (/confirmation.*drive\s+registration\s+update/i.test(subj) && /withdrawn/i.test(full))
-      ) {
-        candidate = 'withdrawn';
-      }
-      // Confirmed Registration / Eligible
-      else if (
-        cls === 'registration_confirmation' || cls === 'registration' ||
+      return (
+        e.classification === 'registration_confirmation' ||
         /confirmed:\s*your\s+registration/i.test(subj) ||
-        /congratulations[!]*\s*(you'?re|you\s+are)\s+eligible/i.test(subj) ||
         /registration\s+(confirmed|successful|received)/i.test(full) ||
         /successfully\s+registered|thank\s+you\s+for\s+(registering|applying)/i.test(full) ||
         /confirms?\s+(that\s+)?(you(r|'re)|your)\s+(successful\s+)?(registration|application)/i.test(full)
-      ) {
-        candidate = 'applied';
-      }
+      );
+    });
 
-      if (!candidate) continue;
+    const isWithdrawn = companyEmails.some((e) => {
+      const subj = (e.subject || '').toLowerCase();
+      const body = (e.body_snippet || '').toLowerCase();
+      const full = subj + ' ' + body;
+      return (
+        e.classification === 'withdrawal' ||
+        e.classification === 'decline' ||
+        /registration.*has been withdrawn|your registration.*withdrawn/i.test(full) ||
+        (/confirmation.*drive\s+registration\s+update/i.test(subj) && /withdrawn/i.test(full))
+      );
+    });
 
-      const candidatePriority = STATUS_PRIORITY[candidate] ?? 0;
-      if (candidatePriority > bestPriority) {
-        bestPriority = candidatePriority;
-        bestNewStatus = candidate;
-      }
-    }
-
-    // ─── Candidate Matches (Neo ID matched in Excel or email body) ──────
+    // Candidate Matches (Neo ID matched in Excel or email body)
     const { data: candidateMatches } = await supabase
       .from('candidate_matches')
       .select('id, match_type')
@@ -129,55 +117,58 @@ export async function POST() {
 
     const emailIds = new Set(companyEmails.map((e) => e.id));
     const isCompanyCandidateMatched = (candidateMatches || []).some((cm) =>
-      // Check if match is on any of this company's emails
       emailIds.has((cm as unknown as { email_id: string }).email_id)
     );
 
-    if (isCompanyCandidateMatched) {
-      const isSelectionList = companyEmails.some((e) =>
-        /selection\s+list|selected|congratulations.*offer/i.test(e.subject || '')
-      );
-      const candidate = isSelectionList ? 'selected' : 'shortlisted';
-      const candidatePriority = STATUS_PRIORITY[candidate] ?? 0;
-      if (candidatePriority > bestPriority) {
-        bestPriority = candidatePriority;
-        bestNewStatus = candidate;
-      }
-    }
-
-    // ─── Event-based Status Upgrade ──────────────────────────────────────
+    // Stored Events (PPT, Test, Interview)
     const { data: storedEvents } = await supabase
       .from('events')
       .select('event_type')
       .eq('user_id', userId)
       .eq('company_id', companyId);
 
-    if (storedEvents && storedEvents.length > 0) {
-      const EVENT_STATUS_MAP: Record<string, string> = {
-        ppt: 'ppt_scheduled',
-        online_test: 'test_scheduled',
-        coding_test: 'test_scheduled',
-        technical_interview: 'interview_scheduled',
-        hr_interview: 'interview_scheduled',
-        final_interview: 'interview_scheduled',
-      };
-      const EVENT_PRIORITY: Record<string, number> = {
-        ppt: 4, online_test: 5, coding_test: 5,
-        technical_interview: 6, hr_interview: 6, final_interview: 6,
-      };
-      for (const evt of storedEvents) {
-        const candidate = EVENT_STATUS_MAP[evt.event_type];
-        if (!candidate) continue;
-        const candidatePriority = EVENT_PRIORITY[evt.event_type] ?? 0;
-        if (candidatePriority > bestPriority) {
-          bestPriority = candidatePriority;
-          bestNewStatus = candidate;
-        }
+    const hasTestEvent = (storedEvents || []).some((e) =>
+      ['online_test', 'coding_test', 'assessment'].includes(e.event_type)
+    );
+    const hasPptEvent = (storedEvents || []).some((e) => e.event_type === 'ppt');
+    const hasInterviewEvent = (storedEvents || []).some((e) =>
+      ['technical_interview', 'hr_interview', 'final_interview'].includes(e.event_type)
+    );
+
+    const hasShortlistOrSelectionBroadcast = companyEmails.some((e) => {
+      const subj = (e.subject || '').toLowerCase();
+      return /shortlist|selection\s+list|selection\s+process|next\s+round/i.test(subj);
+    });
+
+    let computedStatus = 'not_applied';
+
+    if (isWithdrawn) {
+      computedStatus = 'declined';
+    } else if (isCompanyCandidateMatched) {
+      const isSelectionList = companyEmails.some((e) =>
+        /selection\s+list|selected|congratulations.*offer/i.test(e.subject || '')
+      );
+      computedStatus = isSelectionList ? 'selected' : 'shortlisted';
+    } else if (hasConfirmedRegistration) {
+      if (hasInterviewEvent) {
+        computedStatus = 'interview_scheduled';
+      } else if (hasTestEvent) {
+        computedStatus = 'test_scheduled';
+      } else if (hasPptEvent) {
+        computedStatus = 'ppt_scheduled';
+      } else if (hasShortlistOrSelectionBroadcast) {
+        // Registered for the drive, but shortlist came out and user was not matched
+        computedStatus = 'not_shortlisted';
+      } else {
+        computedStatus = 'applied';
       }
+    } else {
+      // User NEVER applied to this company — keep as not_applied
+      computedStatus = 'not_applied';
     }
 
     // Determine final status (respect manual_override if present)
-    const finalStatus = app?.manual_override ? currentStatus : (bestNewStatus || currentStatus);
+    const finalStatus = app?.manual_override ? currentStatus : computedStatus;
 
     // Sanitize role: fix "you are", "you have", or empty values
     let finalRole = extracted.role || app?.role || null;
