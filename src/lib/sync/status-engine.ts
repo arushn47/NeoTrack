@@ -3,29 +3,55 @@ import { extractEvents, extractJobDetails } from '@/lib/sync/events';
 import { createAdminClient } from '@/lib/supabase/admin';
 
 /**
- * Checks if the user's Neo ID or identity is mentioned in an email.
+ * Converts HTML email content to clean plain text so table cells, divs, and paragraphs
+ * containing Neo IDs or text are fully searchable.
+ */
+function htmlToPlainText(html: string | undefined | null): string {
+  if (!html) return '';
+  return html
+    .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, ' ')
+    .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, ' ')
+    .replace(/<\/?[a-z][a-z0-9]*[^<>]*>/gi, ' ')
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&amp;/gi, '&')
+    .replace(/&lt;/gi, '<')
+    .replace(/&gt;/gi, '>')
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;/gi, "'")
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/**
+ * Checks if the user's Neo ID or identity is mentioned in an email (subject, plain body, or HTML table).
  */
 export function checkNeoIdMatch(
   text: string,
   userNeoId: string | null,
   userEmail: string
-): boolean {
-  if (!text) return false;
+): { matched: boolean; matchedValue: string | null } {
+  if (!text) return { matched: false, matchedValue: null };
 
   const upperText = text.toUpperCase();
 
-  // 1. Check user's explicitly set Neo ID (e.g. "I4W0P0K8" or "A6S2A7G9")
-  if (userNeoId && userNeoId.length >= 4) {
-    if (upperText.includes(userNeoId.toUpperCase())) return true;
+  // 1. Check user's explicitly set Neo ID (e.g. "I4W0P0K8", "K1D6D1R7")
+  if (userNeoId && userNeoId.trim().length >= 4) {
+    const cleanNeoId = userNeoId.trim().toUpperCase();
+    if (upperText.includes(cleanNeoId)) {
+      return { matched: true, matchedValue: cleanNeoId };
+    }
   }
 
-  // 2. Check registration number pattern (e.g. "23BCE10472" or "23bce10472")
+  // 2. Check registration number pattern (e.g. "23BCE10472")
   const regMatch = userEmail.match(/([0-9]{2}[a-z]{3}[0-9]{4,5})/i);
   if (regMatch && regMatch[1]) {
-    if (upperText.includes(regMatch[1].toUpperCase())) return true;
+    const regNo = regMatch[1].toUpperCase();
+    if (upperText.includes(regNo)) {
+      return { matched: true, matchedValue: regNo };
+    }
   }
 
-  return false;
+  return { matched: false, matchedValue: null };
 }
 
 /**
@@ -50,12 +76,16 @@ export async function processEmailForEventsAndStatus(
   gmail?: import('googleapis').gmail_v1.Gmail
 ) {
   const subjLower = email.subject.toLowerCase();
-  const fullText = `${email.subject}\n${email.bodyPlain || email.bodySnippet}`;
+  const htmlText = htmlToPlainText(email.bodyHtml);
+  const fullText = `${email.subject}\n${email.bodyPlain || ''}\n${htmlText}\n${email.bodySnippet || ''}`;
 
-  // 1. Check for Neo ID match in email body / subject
-  let isNeoMatched = checkNeoIdMatch(fullText, userNeoId, userEmail);
+  // 1. Check for Neo ID match in email body / HTML tables / subject
+  const bodyMatch = checkNeoIdMatch(fullText, userNeoId, userEmail);
+  let isNeoMatched = bodyMatch.matched;
   let isInAppliedList = false; // Matched in an applied/opt-in list (NOT a shortlist)
-  let matchDetail: string | null = null;
+  let matchDetail: string | null = bodyMatch.matchedValue
+    ? `Found ${bodyMatch.matchedValue} in email body selection list`
+    : null;
   let matchType = 'email_body';
 
   // 2. If attachments exist and gmail client is available, scan Excel attachments ONLY if relevant!

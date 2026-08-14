@@ -121,6 +121,30 @@ export async function POST() {
       }
     }
 
+    // ─── Candidate Matches (Neo ID matched in Excel or email body) ──────
+    const { data: candidateMatches } = await supabase
+      .from('candidate_matches')
+      .select('id, match_type')
+      .eq('user_id', userId);
+
+    const emailIds = new Set(companyEmails.map((e) => e.id));
+    const isCompanyCandidateMatched = (candidateMatches || []).some((cm) =>
+      // Check if match is on any of this company's emails
+      emailIds.has((cm as unknown as { email_id: string }).email_id)
+    );
+
+    if (isCompanyCandidateMatched) {
+      const isSelectionList = companyEmails.some((e) =>
+        /selection\s+list|selected|congratulations.*offer/i.test(e.subject || '')
+      );
+      const candidate = isSelectionList ? 'selected' : 'shortlisted';
+      const candidatePriority = STATUS_PRIORITY[candidate] ?? 0;
+      if (candidatePriority > bestPriority) {
+        bestPriority = candidatePriority;
+        bestNewStatus = candidate;
+      }
+    }
+
     // ─── Event-based Status Upgrade ──────────────────────────────────────
     const { data: storedEvents } = await supabase
       .from('events')
