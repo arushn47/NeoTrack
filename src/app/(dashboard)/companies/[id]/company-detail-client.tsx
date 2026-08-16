@@ -137,7 +137,7 @@ export default function CompanyDetailClient({ company }: CompanyDetailClientProp
       </Link>
 
       {/* Header Card */}
-      <div className="p-6 bg-bg-surface border border-border-default rounded-2xl relative overflow-hidden">
+      <div className="p-6 bg-bg-surface border border-border-default rounded-2xl relative z-20">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div className="flex items-center gap-4">
             <div className="w-14 h-14 rounded-2xl bg-accent/10 border border-accent/20 flex items-center justify-center font-bold text-accent text-2xl">
@@ -146,12 +146,6 @@ export default function CompanyDetailClient({ company }: CompanyDetailClientProp
             <div>
               <div className="flex items-center gap-2.5">
                 <h1 className="text-2xl font-bold text-text-primary">{company.name}</h1>
-                {isNeoMatched && (
-                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold bg-accent/15 text-accent border border-accent/30">
-                    <Sparkles className="w-3 h-3" />
-                    Shortlisted
-                  </span>
-                )}
               </div>
               <p className="text-sm text-text-secondary mt-0.5">
                 {displayRole}

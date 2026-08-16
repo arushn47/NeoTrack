@@ -74,7 +74,13 @@ export default async function CompaniesPage() {
     }
   }
 
-  const matchedAppIds = new Set((matches || []).map((m) => m.application_id).filter(Boolean));
+  const matchedEmailIds = new Set((matches || []).map((m) => m.email_id).filter(Boolean));
+  const matchedCompanyIds = new Set(
+    (emails || [])
+      .filter((e) => matchedEmailIds.has(e.id))
+      .map((e) => e.company_id)
+      .filter(Boolean)
+  );
 
   // Assemble full details
   const formattedCompanies: CompanyWithDetails[] = (companies || []).map((comp) => {
@@ -100,7 +106,7 @@ export default async function CompaniesPage() {
         : null,
       latestEvent: eventMap.get(comp.id) || null,
       events: allEventsByCompany.get(comp.id) || [],
-      neoIdMatched: app ? matchedAppIds.has(app.id) : false,
+      neoIdMatched: matchedCompanyIds.has(comp.id),
       emailCount: emailCountMap.get(comp.id) || 0,
     };
   });

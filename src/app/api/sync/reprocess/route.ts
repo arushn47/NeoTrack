@@ -135,14 +135,29 @@ export async function POST() {
       ['technical_interview', 'hr_interview', 'final_interview'].includes(e.event_type)
     );
 
+    // Post-test progression signals (interviews, next rounds, selection lists)
+    const hasPostTestProgressionSignal = companyEmails.some((e) => {
+      const subj = (e.subject || '').toLowerCase();
+      const full = subj + ' ' + (e.body_snippet || '').toLowerCase();
+      return (
+        e.classification === 'interview' ||
+        /interview\s+(?:is\s+)?scheduled|technical\s+interview|hr\s+interview|final\s+interview/i.test(subj) ||
+        /next\s+round\s+of\s+selection|next\s+round\s+is\s+scheduled/i.test(subj) ||
+        /selection\s+list|final\s+shortlist|congratulations.*(?:selection\s+list|selects)/i.test(subj) ||
+        /interview\s+shortlist|shortlist\s+for\s+interview/i.test(full) ||
+        /next\s+round\s+shortlist|shortlisted\s+for\s+next\s+round|shortlisted\s+for\s+(?:the\s+)?interview/i.test(full)
+      );
+    });
+
+    // General shortlist / screening signal (including initial screening lists)
     const hasExplicitShortlistSignal = companyEmails.some((e) => {
       const subj = (e.subject || '').toLowerCase();
       const full = subj + ' ' + (e.body_snippet || '').toLowerCase();
-      const isExplicitShortlist =
+      return (
         /shortlist|selection\s+list|selected\s+candidates|students\s+list|shortlisted\s+students/i.test(subj) ||
-        /shortlist|shortlisted candidates|initial shortlist|selection list|students list|shortlisted students|attached list of students/i.test(full);
-      const isShortlistClass = e.classification === 'shortlist';
-      return isExplicitShortlist || isShortlistClass;
+        /shortlist|shortlisted candidates|initial shortlist|selection list|students list|shortlisted students|attached list of students/i.test(full) ||
+        e.classification === 'shortlist'
+      );
     });
 
     let computedStatus = 'not_applied';
@@ -163,19 +178,19 @@ export async function POST() {
         computedStatus = 'shortlisted';
       }
     } else if (hasConfirmedRegistration) {
-      if (hasExplicitShortlistSignal) {
-        // User applied, but a shortlist occurred and they are NOT matched
-        if (hasTestEvent || hasInterviewEvent) {
-          // User progressed to test/interview but failed subsequent round
+      if (hasTestEvent || hasInterviewEvent) {
+        // Candidate had a test or interview scheduled:
+        if (hasPostTestProgressionSignal) {
+          // A subsequent round (interview, next round, or final selection list) was released,
+          // and candidate was not matched -> rejected
           computedStatus = 'rejected';
         } else {
-          // User never cleared initial screening
-          computedStatus = 'not_shortlisted';
+          // Test/Interview results are not out yet -> Keep waiting in test_scheduled / interview_scheduled!
+          computedStatus = hasInterviewEvent ? 'interview_scheduled' : 'test_scheduled';
         }
-      } else if (hasInterviewEvent) {
-        computedStatus = 'interview_scheduled';
-      } else if (hasTestEvent) {
-        computedStatus = 'test_scheduled';
+      } else if (hasExplicitShortlistSignal || hasPostTestProgressionSignal) {
+        // Candidate never had a test scheduled and a shortlist was released -> not shortlisted
+        computedStatus = 'not_shortlisted';
       } else if (hasPptEvent) {
         computedStatus = 'ppt_scheduled';
       } else {
@@ -220,9 +235,9 @@ export async function POST() {
     };
 
     if (finalRole !== undefined) updatePayload.role = finalRole;
-    if (extracted.ctc) updatePayload.ctc = extracted.ctc;
-    if (extracted.stipend) updatePayload.stipend = extracted.stipend;
-    if (extracted.location) updatePayload.location = extracted.location;
+    updatePayload.ctc = extracted.ctc;
+    updatePayload.stipend = extracted.stipend;
+    updatePayload.location = extracted.location;
 
     await supabase
       .from('applications')

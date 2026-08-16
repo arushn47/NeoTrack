@@ -130,7 +130,14 @@ export async function scanExcelAttachmentsForNeoId(
             const cellValue = String(row[colIndex] || '').toUpperCase().trim();
 
             for (const token of searchTokens) {
-              if (cellValue === token || cellValue.includes(token)) {
+              const matchesDirect = cellValue === token || cellValue.includes(token);
+              const matchesFlexible =
+                token.length >= 4 &&
+                cellValue.replace(/[0O]/g, '#0#').replace(/[1I]/g, '#1#').includes(
+                  token.replace(/[0O]/g, '#0#').replace(/[1I]/g, '#1#')
+                );
+
+              if (matchesDirect || matchesFlexible) {
                 // MATCH FOUND — look for Room / Venue in adjacent columns
                 let roomOrVenue: string | null = null;
                 for (let c = 0; c < row.length; c++) {

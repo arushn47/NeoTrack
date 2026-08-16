@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useMemo, useEffect } from 'react';
+import { useState, useMemo, useEffect, useRef } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import {
@@ -11,6 +11,8 @@ import {
   Clock,
   ExternalLink,
   ChevronRight,
+  ChevronDown,
+  Check,
   Sparkles,
   Calendar,
   IndianRupee,
@@ -153,6 +155,22 @@ export default function CompaniesClient({ companies }: CompaniesClientProps) {
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedFilter, setSelectedFilter] = useState(initialFilter);
   const [sortMode, setSortMode] = useState<SortMode>('recent');
+  const [isSortOpen, setIsSortOpen] = useState(false);
+  const sortDropdownRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (sortDropdownRef.current && !sortDropdownRef.current.contains(event.target as Node)) {
+        setIsSortOpen(false);
+      }
+    };
+    if (isSortOpen) {
+      document.addEventListener('mousedown', handleClickOutside);
+    }
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [isSortOpen]);
 
   useEffect(() => {
     const urlFilter = searchParams.get('filter') || searchParams.get('status');
@@ -193,6 +211,9 @@ export default function CompaniesClient({ companies }: CompaniesClientProps) {
       if (selectedFilter === 'withdrawn') {
         const s = c.application?.status || '';
         return s === 'withdrawn' || s === 'declined';
+      }
+      if (selectedFilter === 'shortlisted') {
+        return c.application?.status === 'shortlisted' || c.neoIdMatched;
       }
       return (c.application?.status || 'not_applied') === selectedFilter;
     });
@@ -242,19 +263,56 @@ export default function CompaniesClient({ companies }: CompaniesClientProps) {
             />
           </div>
 
-          {/* Sort selector */}
-          <div className="relative">
-            <select
-              value={sortMode}
-              onChange={(e) => setSortMode(e.target.value as SortMode)}
-              className="appearance-none pl-8 pr-3 py-2 bg-bg-surface border border-border-default rounded-xl text-xs font-medium text-text-secondary hover:text-text-primary focus:outline-none focus:border-accent transition-all cursor-pointer"
+          {/* Custom Sort selector */}
+          <div className="relative" ref={sortDropdownRef}>
+            <button
+              type="button"
+              onClick={() => setIsSortOpen((prev) => !prev)}
+              className={cn(
+                'flex items-center gap-2 px-3 py-2 bg-bg-surface hover:bg-bg-surface-hover border rounded-xl text-xs font-medium transition-all cursor-pointer shadow-sm',
+                isSortOpen
+                  ? 'border-accent text-text-primary ring-2 ring-accent/20'
+                  : 'border-border-default text-text-secondary hover:text-text-primary'
+              )}
               aria-label="Sort companies"
+              aria-expanded={isSortOpen}
             >
-              {SORT_OPTIONS.map((opt) => (
-                <option key={opt.id} value={opt.id}>{opt.label}</option>
-              ))}
-            </select>
-            <ArrowUpDown className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-text-tertiary pointer-events-none" />
+              <ArrowUpDown className="w-3.5 h-3.5 text-text-tertiary" />
+              <span>{SORT_OPTIONS.find((opt) => opt.id === sortMode)?.label}</span>
+              <ChevronDown
+                className={cn(
+                  'w-3.5 h-3.5 text-text-tertiary transition-transform duration-200',
+                  isSortOpen && 'rotate-180 text-accent'
+                )}
+              />
+            </button>
+
+            {isSortOpen && (
+              <div className="absolute right-0 top-full mt-1.5 w-40 p-1 bg-bg-surface/95 backdrop-blur-xl border border-border-default rounded-xl shadow-xl shadow-black/40 z-50 animate-fade-in">
+                {SORT_OPTIONS.map((opt) => {
+                  const isSelected = opt.id === sortMode;
+                  return (
+                    <button
+                      key={opt.id}
+                      type="button"
+                      onClick={() => {
+                        setSortMode(opt.id);
+                        setIsSortOpen(false);
+                      }}
+                      className={cn(
+                        'w-full px-2.5 py-1.5 rounded-lg text-xs font-medium flex items-center justify-between transition-all text-left',
+                        isSelected
+                          ? 'bg-accent/15 text-accent font-semibold'
+                          : 'text-text-secondary hover:text-text-primary hover:bg-bg-surface-hover'
+                      )}
+                    >
+                      <span>{opt.label}</span>
+                      {isSelected && <Check className="w-3.5 h-3.5 text-accent flex-shrink-0" />}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
           </div>
         </div>
       </div>
@@ -273,6 +331,8 @@ export default function CompaniesClient({ companies }: CompaniesClientProps) {
             count = companies.filter((c) => !c.application?.status || c.application.status === 'not_applied').length;
           } else if (filter.id === 'withdrawn') {
             count = companies.filter((c) => ['withdrawn', 'declined'].includes(c.application?.status || '')).length;
+          } else if (filter.id === 'shortlisted') {
+            count = companies.filter((c) => (c.application?.status === 'shortlisted') || c.neoIdMatched).length;
           } else {
             count = companies.filter((c) => (c.application?.status || 'not_applied') === filter.id).length;
           }
@@ -340,12 +400,6 @@ export default function CompaniesClient({ companies }: CompaniesClientProps) {
                       <div className="min-w-0">
                         <h3 className="font-semibold text-text-primary text-base group-hover:text-accent transition-colors flex items-center gap-1.5 truncate">
                           <span className="truncate">{c.name}</span>
-                          {c.neoIdMatched && (
-                            <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-bold bg-accent/15 text-accent border border-accent/30 flex-shrink-0" title="Neo ID Matched in Shortlist">
-                              <Sparkles className="w-2.5 h-2.5" />
-                              Shortlisted
-                            </span>
-                          )}
                         </h3>
                         <p className="text-xs text-text-tertiary truncate">
                           {role}

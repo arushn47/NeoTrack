@@ -34,10 +34,16 @@ export function checkNeoIdMatch(
 
   const upperText = text.toUpperCase();
 
-  // 1. Check user's explicitly set Neo ID (e.g. "I4W0P0K8", "K1D6D1R7")
+  // 1. Check user's explicitly set Neo ID (e.g. "I4W0POK8", "I4W0P0K8", "K1D6D1R7")
   if (userNeoId && userNeoId.trim().length >= 4) {
     const cleanNeoId = userNeoId.trim().toUpperCase();
-    if (upperText.includes(cleanNeoId)) {
+    const matchesDirect = upperText.includes(cleanNeoId);
+    const matchesFlexible = upperText
+      .replace(/[0O]/g, '#0#')
+      .replace(/[1I]/g, '#1#')
+      .includes(cleanNeoId.replace(/[0O]/g, '#0#').replace(/[1I]/g, '#1#'));
+
+    if (matchesDirect || matchesFlexible) {
       return { matched: true, matchedValue: cleanNeoId };
     }
   }
@@ -120,7 +126,7 @@ export async function processEmailForEventsAndStatus(
       if (excelMatch.isActualShortlist) {
         // Matched in a real shortlist file → candidate is shortlisted
         isNeoMatched = true;
-        matchType = 'excel_attachment';
+        matchType = 'xlsx_cell';
         matchDetail = excelMatch.details;
       } else {
         // Matched in an applied/opt-in/eligible list → just confirms application
@@ -333,11 +339,22 @@ export async function processEmailForEventsAndStatus(
     // RULE: Only downgrade if candidate actually APPLIED or was in the process!
     const currentStatus = existingApp?.status || 'not_applied';
     
+    // Check if this is a post-test round announcement (interview, next round, selection list)
+    const isPostTestRound =
+      emailClass === 'interview' ||
+      /interview\s+(?:is\s+)?scheduled|technical\s+interview|hr\s+interview|final\s+interview/i.test(subjLower) ||
+      /next\s+round\s+of\s+selection|next\s+round\s+is\s+scheduled/i.test(subjLower) ||
+      /selection\s+list|final\s+shortlist|congratulations.*(?:selection\s+list|selects)/i.test(subjLower) ||
+      /interview\s+shortlist|shortlist\s+for\s+interview|next\s+round\s+shortlist|shortlisted\s+for\s+next\s+round/i.test(fullText);
+
     if (['test_scheduled', 'interview_scheduled', 'shortlisted'].includes(currentStatus)) {
-      // User cleared initial screening but failed a subsequent round (e.g. Test -> Interview)
-      newStatus = 'rejected';
+      if (isPostTestRound) {
+        // User cleared initial screening but failed a subsequent round (e.g. Test -> Interview)
+        newStatus = 'rejected';
+      }
+      // If it's just a test schedule announcement, test results are still pending -> do not reject!
     } else if (['applied', 'ppt_scheduled'].includes(currentStatus)) {
-      // User never cleared the initial screening
+      // User never cleared the initial screening for test
       newStatus = 'not_shortlisted';
     }
   } else if (

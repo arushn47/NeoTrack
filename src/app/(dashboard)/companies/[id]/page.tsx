@@ -54,13 +54,19 @@ export default async function CompanyDetailPage({
 
     supabase
       .from('candidate_matches')
-      .select('id, match_type, matched_value, created_at')
+      .select('id, match_type, matched_value, created_at, email_id')
       .eq('user_id', session.userId),
   ]);
 
   if (!company) {
     notFound();
   }
+
+  // Filter candidate matches to only those belonging to this company's emails
+  const companyEmailIds = new Set((emails || []).map((e) => e.id));
+  const companyCandidateMatches = (candidateMatches || []).filter((cm) =>
+    companyEmailIds.has((cm as { email_id?: string }).email_id || '')
+  );
 
   // Self-heal: Check if application status, role, or CTC/stipend need upgrading
   let healedStatus = application?.status || 'not_applied';
@@ -76,27 +82,27 @@ export default async function CompanyDetailPage({
     needsDbUpdate = true;
   }
 
-  // 2. Extract fresh job details from emails if role/ctc/stipend are missing
-  if (emails && emails.length > 0 && (!healedRole || !healedCtc || !healedStipend)) {
+  // 2. Extract fresh job details from emails to ensure accurate role/ctc/stipend
+  if (emails && emails.length > 0) {
     const { extractJobDetails } = await import('@/lib/sync/events');
     const combinedEmailText = emails
       .map((e) => `${e.subject || ''}\n${e.body_snippet || ''}`)
       .join('\n\n');
     const extracted = extractJobDetails(combinedEmailText);
 
-    if (!healedRole && extracted.role) {
+    if (extracted.role && healedRole !== extracted.role) {
       healedRole = extracted.role;
       needsDbUpdate = true;
     }
-    if (!healedCtc && extracted.ctc) {
+    if (extracted.ctc !== healedCtc) {
       healedCtc = extracted.ctc;
       needsDbUpdate = true;
     }
-    if (!healedStipend && extracted.stipend) {
+    if (extracted.stipend !== healedStipend) {
       healedStipend = extracted.stipend;
       needsDbUpdate = true;
     }
-    if (!healedLocation && extracted.location) {
+    if (extracted.location && healedLocation !== extracted.location) {
       healedLocation = extracted.location;
       needsDbUpdate = true;
     }
@@ -137,7 +143,7 @@ export default async function CompanyDetailPage({
     return isExplicitShortlist || isShortlistClass;
   });
 
-  const hasCandidateMatch = (candidateMatches || []).length > 0;
+  const hasCandidateMatch = companyCandidateMatches.length > 0;
 
   if (!application?.manual_override) {
     if (isWithdrawn && healedStatus !== 'declined' && healedStatus !== 'withdrawn') {
@@ -239,7 +245,7 @@ export default async function CompanyDetailPage({
       snippet: em.body_snippet,
       classification: em.classification,
     })),
-    candidateMatches: (candidateMatches || []).map((cm) => ({
+    candidateMatches: companyCandidateMatches.map((cm) => ({
       id: cm.id,
       matchType: cm.match_type,
       matchedValue: cm.matched_value,
