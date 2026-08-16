@@ -293,6 +293,19 @@ const COMPANY_ALIASES: Record<string, string> = {
   'honeywell aerospace': 'Honeywell Aerospace',
   'honeywell technology solutions': 'Honeywell Technology Solutions Lab',
   'honeywell technology solutions lab': 'Honeywell Technology Solutions Lab',
+  'valuelabs': 'Value Labs',
+  'value labs': 'Value Labs',
+  'cummins': 'Cummins',
+  'cummins india': 'Cummins',
+  'tekion': 'Tekion',
+  'tekion india': 'Tekion',
+  'pocket fm': 'Pocket FM',
+  'pocketfm': 'Pocket FM',
+  'prodapt': 'Prodapt',
+  'intel': 'Intel',
+  'intel india': 'Intel',
+  'toshiba': 'Toshiba',
+  'lseg': 'London Stock Exchange Group (LSEG)',
   'q2': 'Q2 Software',
   'q2 software': 'Q2 Software',
   'ion': 'ION Group',
@@ -493,9 +506,11 @@ export function normalizeCompanyName(name: string): string {
     return COMPANY_ALIASES[lower];
   }
 
-  // Check if any alias key is contained in the name
+  // Check if any alias key is contained in the name (with word boundaries to avoid false positives like 'ion' in 'registration')
   for (const [alias, canonical] of Object.entries(COMPANY_ALIASES)) {
-    if (lower.includes(alias)) {
+    const escaped = alias.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const regex = new RegExp(`(?:^|[^a-z0-9])${escaped}(?:[^a-z0-9]|$)`, 'i');
+    if (regex.test(lower)) {
       return canonical;
     }
   }

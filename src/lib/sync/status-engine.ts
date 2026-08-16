@@ -157,6 +157,11 @@ export async function processEmailForEventsAndStatus(
   // Hoist extractedEvents so the status computation block can reference it
   const extractedEvents = extractEvents(email);
 
+  const isShortlistEmail =
+    /shortlist|selection\s+list|selected\s+candidates|students\s+list|shortlisted\s+students/i.test(subjLower) ||
+    /shortlist|shortlisted candidates|initial shortlist|selection list|students list|shortlisted students|attached list of students/i.test(fullText) ||
+    (email.hasAttachments && email.attachments.some((a) => /shortlist|selection|students|eligible/i.test(a.filename)));
+
   // Check if candidate is withdrawn or opted out
   const isWithdrawn =
     existingApp?.status === 'withdrawn' ||
@@ -176,10 +181,10 @@ export async function processEmailForEventsAndStatus(
     await supabase.from('events').delete().eq('user_id', userId).eq('company_id', companyId);
   } else {
     for (const event of extractedEvents) {
-      // RULE: For tests and interviews, ONLY add to user's schedule if candidate is shortlisted!
+      // RULE: For tests and interviews, or if this is a shortlist email, ONLY add to user's schedule if candidate is shortlisted!
       const isTestOrInterview = ['online_test', 'coding_test', 'technical_interview', 'hr_interview', 'final_interview'].includes(event.eventType);
-      if (isTestOrInterview && !isNeoMatched && matchType !== 'excel_attachment') {
-        // User was not shortlisted for this test — do not add to personal schedule
+      if ((isTestOrInterview || isShortlistEmail) && !isNeoMatched && matchType !== 'excel_attachment') {
+        // User was not shortlisted for this test/event — do not add to personal schedule
         continue;
       }
 
@@ -323,16 +328,16 @@ export async function processEmailForEventsAndStatus(
     }
   } else if (
     // E. A shortlist was officially released but candidate was NOT in it
-    /shortlist|selection\s+list|selected\s+candidates/i.test(subjLower) ||
-    /shortlist|shortlisted candidates|initial shortlist|selection list/i.test(fullText) ||
-    (email.hasAttachments && /test|assessment|coding|selection|shortlist|interview|round/i.test(subjLower)) ||
-    (email.hasAttachments && email.attachments.some((a) => /shortlist|selection|eligible|test/i.test(a.filename)))
+    isShortlistEmail
   ) {
     // RULE: Only downgrade if candidate actually APPLIED or was in the process!
     const currentStatus = existingApp?.status || 'not_applied';
-    const isDowngradable = ['applied', 'ppt_scheduled', 'test_scheduled', 'shortlisted'].includes(currentStatus);
-
-    if (isDowngradable) {
+    
+    if (['test_scheduled', 'interview_scheduled', 'shortlisted'].includes(currentStatus)) {
+      // User cleared initial screening but failed a subsequent round (e.g. Test -> Interview)
+      newStatus = 'rejected';
+    } else if (['applied', 'ppt_scheduled'].includes(currentStatus)) {
+      // User never cleared the initial screening
       newStatus = 'not_shortlisted';
     }
   } else if (

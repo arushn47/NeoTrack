@@ -68,6 +68,7 @@ const STATUS_FILTERS = [
   { id: 'applied', label: 'Applied' },
   { id: 'not_applied', label: 'Not Registered' },
   { id: 'not_shortlisted', label: 'Not Shortlisted' },
+  { id: 'rejected', label: 'Rejected' },
   { id: 'selected', label: 'Selected 🎉' },
   { id: 'withdrawn', label: 'Opted Out' },
   { id: 'all', label: 'All Companies' },

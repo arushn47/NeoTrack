@@ -112,7 +112,7 @@ export async function POST() {
     // Candidate Matches (Neo ID matched in Excel or email body)
     const { data: candidateMatches } = await supabase
       .from('candidate_matches')
-      .select('id, match_type')
+      .select('id, match_type, email_id')
       .eq('user_id', userId);
 
     const emailIds = new Set(companyEmails.map((e) => e.id));
@@ -138,8 +138,9 @@ export async function POST() {
     const hasExplicitShortlistSignal = companyEmails.some((e) => {
       const subj = (e.subject || '').toLowerCase();
       const full = subj + ' ' + (e.body_snippet || '').toLowerCase();
-      const isExplicitShortlist = /shortlist|selection\s+list|selected\s+candidates/i.test(subj) ||
-                                  /shortlist|shortlisted candidates|initial shortlist|selection list/i.test(full);
+      const isExplicitShortlist =
+        /shortlist|selection\s+list|selected\s+candidates|students\s+list|shortlisted\s+students/i.test(subj) ||
+        /shortlist|shortlisted candidates|initial shortlist|selection list|students list|shortlisted students|attached list of students/i.test(full);
       const isShortlistClass = e.classification === 'shortlist';
       return isExplicitShortlist || isShortlistClass;
     });
@@ -164,7 +165,13 @@ export async function POST() {
     } else if (hasConfirmedRegistration) {
       if (hasExplicitShortlistSignal) {
         // User applied, but a shortlist occurred and they are NOT matched
-        computedStatus = 'not_shortlisted';
+        if (hasTestEvent || hasInterviewEvent) {
+          // User progressed to test/interview but failed subsequent round
+          computedStatus = 'rejected';
+        } else {
+          // User never cleared initial screening
+          computedStatus = 'not_shortlisted';
+        }
       } else if (hasInterviewEvent) {
         computedStatus = 'interview_scheduled';
       } else if (hasTestEvent) {
@@ -177,6 +184,20 @@ export async function POST() {
     } else {
       // User NEVER applied to this company — keep as not_applied
       computedStatus = 'not_applied';
+    }
+
+    // ── Priority guard: never let reprocess overwrite a terminal state with a weaker one ──
+    const isTerminal = (s: string) =>
+      ['withdrawn', 'declined', 'rejected', 'not_shortlisted', 'selected'].includes(s);
+    if (!app?.manual_override && currentStatus && computedStatus !== currentStatus) {
+      const existingPriority = STATUS_PRIORITY[currentStatus] ?? 0;
+      const newPriority = STATUS_PRIORITY[computedStatus] ?? 0;
+      if (isTerminal(currentStatus) && !isTerminal(computedStatus)) {
+        // Never downgrade from a terminal state during reprocess
+        computedStatus = currentStatus;
+      } else if (!isTerminal(computedStatus) && newPriority < existingPriority) {
+        computedStatus = currentStatus;
+      }
     }
 
     // Determine final status (respect manual_override if present)

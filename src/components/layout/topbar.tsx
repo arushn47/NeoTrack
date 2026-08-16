@@ -112,9 +112,10 @@ export default function Topbar({ userName, userAvatar, lastSyncAt }: TopbarProps
                   newEmails: r.newEmails,
                   newCompanies: r.newCompanies,
                 });
-                // Re-evaluate all stored emails against the latest classification rules
-                // to fix any stale statuses (e.g. not_applied → applied for confirmed registrations)
-                fetch('/api/sync/reprocess', { method: 'POST' })
+                // Step 1: Relink any orphaned emails (company_id=null) to companies
+                // Step 2: Re-evaluate all stored emails against latest classification rules
+                fetch('/api/sync/relink-orphans', { method: 'POST' })
+                  .then(() => fetch('/api/sync/reprocess', { method: 'POST' }))
                   .then(() => router.refresh())
                   .catch(() => router.refresh());
                 // Auto-hide after 5 seconds

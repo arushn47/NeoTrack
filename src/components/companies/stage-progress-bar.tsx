@@ -59,16 +59,88 @@ export default function StageProgressBar({
     );
   }
 
-  if (status === 'rejected') {
+  // 2. Event Analysis (Checking if PPT or Test already occurred)
+  const now = new Date();
+  const testEvent = events.find((e) =>
+    ['online_test', 'coding_test', 'assessment', 'test_scheduled'].includes(getEventType(e))
+  );
+  const pptEvent = events.find((e) => ['ppt', 'ppt_scheduled'].includes(getEventType(e)));
+  const interviewEvent = events.find((e) =>
+    ['interview', 'technical_interview', 'hr_interview', 'final_interview', 'interview_scheduled'].includes(
+      getEventType(e)
+    )
+  );
+
+  if (status === 'rejected' || status === 'not_shortlisted') {
+    const furthestIdx = interviewEvent ? 3 : testEvent ? 2 : pptEvent ? 1 : 0;
+    
+    let eliminatedIdx = 0;
+    let eliminatedText = '';
+
+    if (status === 'rejected') {
+      // Failed the round they actually took
+      eliminatedIdx = furthestIdx;
+      if (eliminatedIdx <= 2) eliminatedText = 'Wrote Test · Did Not Qualify';
+      if (eliminatedIdx === 3) eliminatedText = 'Interviewed · Not Selected';
+      if (eliminatedIdx === 4) eliminatedText = 'Not Selected';
+    } else {
+      // not_shortlisted - Failed to reach the next round
+      eliminatedIdx = Math.min(furthestIdx + 1, 4);
+      if (eliminatedIdx <= 1) eliminatedText = 'Out at Shortlist Round';
+      if (eliminatedIdx === 2) eliminatedText = 'Attended PPT · Out at Test Round';
+      if (eliminatedIdx >= 3) eliminatedText = 'Out at Shortlist Round';
+    }
+
     return (
-      <div className={cn('p-2.5 rounded-xl bg-red-500/10 border border-red-500/20 text-xs flex items-center justify-between', className)}>
-        <span className="flex items-center gap-1.5 font-semibold text-red-400">
-          <XCircle className="w-4 h-4 text-red-400 flex-shrink-0" />
-          Not Selected
-        </span>
-        <span className="text-[11px] text-red-400/80 font-medium">
-          Process Concluded
-        </span>
+      <div className={cn('space-y-2 py-1', className)}>
+        {/* Visual Stepper Bar with Red X at Elimination Stage */}
+        <div className="relative flex items-center justify-between px-1">
+          <div className="absolute left-3 right-3 top-1/2 -translate-y-1/2 h-1 bg-border-default rounded-full z-0" />
+          <div
+            className="absolute left-3 top-1/2 -translate-y-1/2 h-1 bg-rose-500/80 rounded-full z-0"
+            style={{ width: `${(eliminatedIdx) * 25}%` }}
+          />
+
+          {STAGES.map((stage, idx) => {
+            const isEliminated = idx === eliminatedIdx;
+            const isPassed = idx <= furthestIdx && !isEliminated;
+
+            return (
+              <div key={stage.id} className="relative z-10 flex flex-col items-center group">
+                <div
+                  className={cn(
+                    'w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold transition-all',
+                    isPassed && 'bg-emerald-500 text-white shadow-sm shadow-emerald-500/30',
+                    isEliminated
+                      ? 'bg-rose-500 text-white ring-4 ring-rose-500/20 scale-110 shadow-sm shadow-rose-500/50'
+                      : !isPassed && 'bg-bg-elevated text-text-tertiary border border-border-default'
+                  )}
+                  title={stage.label}
+                >
+                  {isPassed ? '✓' : isEliminated ? '✕' : idx + 1}
+                </div>
+                <span
+                  className={cn(
+                    'text-[9px] font-semibold mt-1 whitespace-nowrap',
+                    isPassed ? 'text-emerald-400' : isEliminated ? 'text-rose-400 font-bold' : 'text-text-tertiary'
+                  )}
+                >
+                  {stage.label}
+                </span>
+              </div>
+            );
+          })}
+        </div>
+
+        <div className="flex items-center justify-between text-[11px] pt-1.5 border-t border-border-default/40">
+          <span className="text-rose-400 font-semibold flex items-center gap-1">
+            <XCircle className="w-3.5 h-3.5" />
+            {status === 'rejected' ? 'Not Selected' : 'Not Shortlisted'}
+          </span>
+          <span className="text-[11px] text-text-secondary font-medium">
+            {eliminatedText}
+          </span>
+        </div>
       </div>
     );
   }
@@ -86,79 +158,6 @@ export default function StageProgressBar({
       </div>
     );
   }
-
-  const hasPptEvent = events.some((e) => ['ppt', 'ppt_scheduled'].includes(getEventType(e)));
-
-  if (status === 'not_shortlisted') {
-    return (
-      <div className={cn('space-y-2 py-1', className)}>
-        {/* Visual Stepper Bar with Red X at Elimination Stage */}
-        <div className="relative flex items-center justify-between px-1">
-          <div className="absolute left-3 right-3 top-1/2 -translate-y-1/2 h-1 bg-border-default rounded-full z-0" />
-          <div
-            className="absolute left-3 top-1/2 -translate-y-1/2 h-1 bg-rose-500/80 rounded-full z-0"
-            style={{ width: hasPptEvent ? '50%' : '25%' }}
-          />
-
-          {STAGES.map((stage, idx) => {
-            const isApplied = idx === 0;
-            const isPpt = idx === 1;
-            const isTest = idx === 2;
-
-            const isPassed = isApplied || (isPpt && hasPptEvent);
-            const isEliminated = hasPptEvent ? isTest : isPpt || isTest;
-
-            return (
-              <div key={stage.id} className="relative z-10 flex flex-col items-center group">
-                <div
-                  className={cn(
-                    'w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold transition-all',
-                    isPassed && 'bg-emerald-500 text-white shadow-sm shadow-emerald-500/30',
-                    isEliminated && idx === (hasPptEvent ? 2 : 1)
-                      ? 'bg-rose-500 text-white ring-4 ring-rose-500/20 scale-110 shadow-sm shadow-rose-500/50'
-                      : !isPassed && 'bg-bg-elevated text-text-tertiary border border-border-default'
-                  )}
-                  title={stage.label}
-                >
-                  {isPassed ? '✓' : idx === (hasPptEvent ? 2 : 1) ? '✕' : idx + 1}
-                </div>
-                <span
-                  className={cn(
-                    'text-[9px] font-semibold mt-1 whitespace-nowrap',
-                    isPassed ? 'text-emerald-400' : idx === (hasPptEvent ? 2 : 1) ? 'text-rose-400 font-bold' : 'text-text-tertiary'
-                  )}
-                >
-                  {stage.label}
-                </span>
-              </div>
-            );
-          })}
-        </div>
-
-        <div className="flex items-center justify-between text-[11px] pt-1.5 border-t border-border-default/40">
-          <span className="text-rose-400 font-semibold flex items-center gap-1">
-            <XCircle className="w-3.5 h-3.5" />
-            Not Shortlisted
-          </span>
-          <span className="text-[11px] text-text-secondary font-medium">
-            {hasPptEvent ? 'Attended PPT · Out at Test Round' : 'Out at Shortlist Round'}
-          </span>
-        </div>
-      </div>
-    );
-  }
-
-  // 2. Event Analysis (Checking if PPT or Test already occurred)
-  const now = new Date();
-  const testEvent = events.find((e) =>
-    ['online_test', 'coding_test', 'assessment', 'test_scheduled'].includes(getEventType(e))
-  );
-  const pptEvent = events.find((e) => ['ppt', 'ppt_scheduled'].includes(getEventType(e)));
-  const interviewEvent = events.find((e) =>
-    ['interview', 'technical_interview', 'hr_interview', 'final_interview', 'interview_scheduled'].includes(
-      getEventType(e)
-    )
-  );
 
   const rawTestTime = testEvent ? getStartTime(testEvent) : null;
   const testStartTime = rawTestTime ? new Date(rawTestTime) : null;

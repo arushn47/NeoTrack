@@ -161,7 +161,7 @@ export async function runSync(
 
         const afterDate = account.last_sync_at ? new Date(account.last_sync_at) : undefined;
         const query = getPlacementSearchQuery(account.account_type as 'personal' | 'college', afterDate);
-        const maxLimit = account.account_type === 'personal' ? 500 : 300;
+        const maxLimit = account.account_type === 'personal' ? 1500 : 1000;
         messageIds = await fetchMessageIds(gmail, query, maxLimit);
         nextHistoryId = await getProfileHistoryId(gmail);
       }
@@ -194,8 +194,7 @@ export async function runSync(
       for (let i = 0; i < newMsgIds.length; i += BATCH_SIZE) {
         const batch = newMsgIds.slice(i, i + BATCH_SIZE);
 
-        await Promise.all(
-          batch.map(async (msgId) => {
+        for (const msgId of batch) {
             try {
               // Stage 1: Cheap metadata inspection
               let shouldFetchFull = true;
@@ -212,7 +211,7 @@ export async function runSync(
               }
 
               if (!shouldFetchFull) {
-                return;
+                continue;
               }
 
               // Stage 2: Full message detail & attachments
@@ -379,8 +378,7 @@ export async function runSync(
               progress.errors.push(`Error processing message: ${errMsg.slice(0, 80)}`);
               result.errors.push(errMsg);
             }
-          })
-        );
+        }
 
         progress.processedMessages = Math.min(i + batch.length, newMsgIds.length);
         onProgress?.(progress);
