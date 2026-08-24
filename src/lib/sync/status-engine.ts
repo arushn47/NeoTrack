@@ -194,10 +194,17 @@ export async function processEmailForEventsAndStatus(
     await supabase.from('events').delete().eq('user_id', userId).eq('company_id', companyId);
   } else {
     for (const event of extractedEvents) {
-      // RULE: For tests and interviews, or if this is a shortlist email, ONLY add to user's schedule if candidate is shortlisted!
+      // RULE: For tests, interviews, and PPTs: ONLY add to user's schedule if candidate is shortlisted or actively participating!
+      const currentAppStatus = existingApp?.status || 'not_applied';
+      const isEliminated = ['not_shortlisted', 'rejected', 'withdrawn', 'declined', 'not_applied'].includes(currentAppStatus);
       const isTestOrInterview = ['online_test', 'coding_test', 'technical_interview', 'hr_interview', 'final_interview'].includes(event.eventType);
+
+      if (isEliminated && !isNeoMatched) {
+        continue; // Do not add events for companies where user is not registered or not shortlisted
+      }
+
       if ((isTestOrInterview || isShortlistEmail) && !isNeoMatched && matchType !== 'excel_attachment') {
-        // User was not shortlisted for this test/event — do not add to personal schedule
+        // User was not shortlisted for this test/event/PPT — do not add to personal schedule
         continue;
       }
 
@@ -425,6 +432,11 @@ export async function processEmailForEventsAndStatus(
     appUpdate.status = newStatus;
     appUpdate.status_source = matchType === 'excel_attachment' ? 'excel_attachment' : 'sync_engine';
     appUpdate.status_confidence = 'high';
+
+    // If candidate withdrew, declined, or was not shortlisted/rejected, purge scheduled events
+    if (['withdrawn', 'declined', 'rejected', 'not_shortlisted'].includes(newStatus)) {
+      await supabase.from('events').delete().eq('user_id', userId).eq('company_id', companyId);
+    }
 
     // Only notify if canonical status actually changed!
     if (newStatus !== existingApp?.status) {

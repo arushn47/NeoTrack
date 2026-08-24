@@ -272,6 +272,11 @@ export async function POST() {
       .from('applications')
       .upsert(updatePayload, { onConflict: 'user_id,company_id' });
 
+    // Purge events if user is not shortlisted, rejected, withdrawn, or not applied
+    if (['withdrawn', 'declined', 'rejected', 'not_shortlisted', 'not_applied'].includes(finalStatus)) {
+      await supabase.from('events').delete().eq('user_id', userId).eq('company_id', companyId);
+    }
+
     fixed++;
     details.push({
       companyId,
