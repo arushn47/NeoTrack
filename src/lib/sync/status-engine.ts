@@ -164,9 +164,16 @@ export async function processEmailForEventsAndStatus(
   const extractedEvents = extractEvents(email);
 
   const isShortlistEmail =
-    /shortlist|selection\s+list|selected\s+candidates|students\s+list|shortlisted\s+students/i.test(subjLower) ||
-    /shortlist|shortlisted candidates|initial shortlist|selection list|students list|shortlisted students|attached list of students/i.test(fullText) ||
-    (email.hasAttachments && email.attachments.some((a) => /shortlist|selection|students|eligible/i.test(a.filename)));
+    /shortlist|selection\s+list|selected\s+candidates|students\s+list|shortlisted\s+students|next\s+round\s+of\s+selection|selection\s+process\s+is\s+scheduled/i.test(
+      subjLower
+    ) ||
+    /shortlist|shortlisted candidates|initial shortlist|selection list|students list|shortlisted students|attached list of students|find the below shortlist|below is the shortlist/i.test(
+      fullText
+    ) ||
+    (email.hasAttachments &&
+      email.attachments.some((a) =>
+        /shortlist|selection|students|eligible/i.test(a.filename)
+      ));
 
   // Check if candidate is withdrawn or opted out
   const isWithdrawn =
@@ -301,7 +308,7 @@ export async function processEmailForEventsAndStatus(
     newStatus = existingApp.status;
   } else if (isNeoMatched) {
     // B. Candidate is confirmed in an actual shortlist / test / interview Excel or body match
-    if (/interview/i.test(subjLower)) {
+    if (/interview|next\s+round|selection\s+process/i.test(subjLower)) {
       newStatus = 'interview_scheduled';
     } else if (/ppt|pre[\s-]*placement/i.test(subjLower)) {
       newStatus = 'ppt_scheduled';

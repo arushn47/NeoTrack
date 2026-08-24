@@ -46,10 +46,12 @@ const CLASSIFICATION_RULES: ClassificationRule[] = [
     classification: 'shortlist',
     confidence: 'high',
     match: (s, b) =>
-      /shortlist(ed)?/i.test(s) &&
-      !/not\s+shortlist/i.test(s) &&
-      !/un-?shortlist/i.test(s),
-    reason: 'Subject contains "shortlisted"',
+      (/shortlist(ed)?/i.test(s) &&
+        !/not\s+shortlist/i.test(s) &&
+        !/un-?shortlist/i.test(s)) ||
+      /(?:find\s+the\s+below\s+shortlist|below\s+is\s+the\s+shortlist|find\s+the\s+shortlist|shortlisted\s+candidates|shortlist\s+for\s+next\s+round)/i.test(b) ||
+      /next\s+round\s+of\s+selection/i.test(s),
+    reason: 'Email announces candidate shortlist or next round selection',
   },
   {
     classification: 'result',
@@ -69,11 +71,12 @@ const CLASSIFICATION_RULES: ClassificationRule[] = [
   {
     classification: 'interview',
     confidence: 'high',
-    match: (s) =>
-      /interview/i.test(s) &&
-      (/(schedule|invite|call|round|panel|virtual|onsite)/i.test(s) ||
-        /technical\s+interview|hr\s+interview|final\s+interview/i.test(s)),
-    reason: 'Subject contains interview schedule/invite',
+    match: (s, b) =>
+      (/interview/i.test(s) &&
+        (/(schedule|invite|call|round|panel|virtual|onsite)/i.test(s) ||
+          /technical\s+interview|hr\s+interview|final\s+interview/i.test(s))) ||
+      /selection\s+process\s+is\s+scheduled|next\s+round\s+of\s+selection\s+process/i.test(s),
+    reason: 'Subject contains interview or selection process schedule',
   },
   {
     classification: 'test',
@@ -178,7 +181,7 @@ const CLASSIFICATION_RULES: ClassificationRule[] = [
  */
 export function classifyEmail(email: ParsedEmail): ClassificationResult {
   const subject = email.subject.toLowerCase();
-  const body = (email.bodySnippet || email.bodyPlain || '').toLowerCase().slice(0, 500);
+  const body = (email.bodySnippet || email.bodyPlain || '').toLowerCase().slice(0, 1000);
   const sender = email.senderEmail.toLowerCase();
 
   for (const rule of CLASSIFICATION_RULES) {
@@ -217,7 +220,7 @@ const COMPANY_NOISE_WORDS = [
 /**
  * Known company aliases to normalize different names to a single canonical name.
  */
-const COMPANY_ALIASES: Record<string, string> = {
+export const COMPANY_ALIASES: Record<string, string> = {
   'tcs': 'TCS',
   'tata consultancy': 'TCS',
   'tata consultancy services': 'TCS',
@@ -273,6 +276,8 @@ const COMPANY_ALIASES: Record<string, string> = {
   'mufg': 'MUFG',
   'mitsubishi ufj': 'MUFG',
   'mitsubishi ufj financial group': 'MUFG',
+  'mitsubishi': 'MUFG',
+  'zluri': 'Zluri',
   'nielsen': 'NielsenIQ',
   'nielseniq': 'NielsenIQ',
   'fischerjordan': 'FischerJordan',
@@ -310,6 +315,11 @@ const COMPANY_ALIASES: Record<string, string> = {
   'q2 software': 'Q2 Software',
   'ion': 'ION Group',
   'ion group': 'ION Group',
+  'eulermotors': 'Euler Motors',
+  'euler motors': 'Euler Motors',
+  'wakefit': 'Wakefit',
+  'procdna': 'ProcDNA',
+  'blubridge': 'BluBridge Technologies',
 };
 
 /**
@@ -320,10 +330,10 @@ const SUBJECT_COMPANY_PATTERNS: RegExp[] = [
   // NeoPAT Eligibility & Registration:
   // "Congratulations! You're Eligible for M/s.Value Labs Placement Drive"
   // "Confirmed: Your Registration for Sabre Placement Drive"
-  /(?:congratulations!{1,3}\s*(?:you'?re\s+)?eligible\s+for\s+|confirmed:\s*(?:your\s+registration\s+for\s+)?)(?:m\/s\.?\s*)?([A-Za-z0-9&\s\-\.]+?)\s+placement\s+drive/i,
+  /(?:congratulations!{1,3}\s*(?:you'?re\s+)?eligible\s+for\s+|confirmed:\s*(?:your\s+registration\s+for\s+)?)(?:m\/s\.?\s*)?([A-Za-z0-9&\s\-\.]+?)\s*(?:\([^)]+\))?\s+placement\s+drive/i,
   // "Congratulations!! Zluri Super Dream Internship Selection List - 2027 Batch"
   // "Congratulations!! Flipkart Super Dream Internship Selection list 2027 Batch"
-  /(?:congratulations!{1,3}\s*)(?:for\s+)?([A-Za-z0-9&\s\-\.]+?)\s+(?:super\s+dream|dream|regular|summer)?\s*(?:internship|placement|ppo)?\s*(?:selection\s+list|shortlist)/i,
+  /(?:congratulations!{1,3}\s*)(?:for\s+)?([A-Za-z0-9&\s\-\.]+?)\s*(?:\([^)]+\))?\s+(?:super\s+dream|dream|regular|summer)?\s*(?:internship|placement|ppo)?\s*(?:selection\s+list|shortlist)/i,
   // "Important: Date Change for Value Labs Placement Drive"
   // "Important: Date Change for Infosy 2027 batch Placement Drive"
   /date\s+change\s+for\s+(?:m\/s\.?\s*)?([A-Za-z0-9&\s\-\.]+?)(?:\s+(?:2026|2027|2028)\s+batch|\s+placement|\s+drive|$)/i,
@@ -332,16 +342,17 @@ const SUBJECT_COMPANY_PATTERNS: RegExp[] = [
   // "Confirmation: Euler Motors Drive Registration Update"
   /(?:confirmation:\s*)?([A-Za-z0-9&\s\-\.]+?)\s+drive\s+registration\s+update/i,
   // "Zluri Super Dream Internship Selection List..."
-  /^([A-Za-z0-9&\s\-\.]+?)\s+(?:super\s+dream|dream|regular)?\s*(?:internship|placement|ppo)?\s*(?:selection\s+list|shortlist)/i,
+  /^([A-Za-z0-9&\s\-\.]+?)\s*(?:\([^)]+\))?\s+(?:super\s+dream|dream|regular)?\s*(?:internship|placement|ppo)?\s*(?:selection\s+list|shortlist)/i,
   // "M/s.Value Labs Placement Drive"
   /(?:m\/s\.?\s*)([A-Za-z0-9&\s\-\.]+?)\s+placement\s+drive/i,
   // "Company Name Placement Drive" / "Company Name Campus Drive"
-  /^([A-Za-z0-9&\s\-\.]+?)\s+(?:placement\s+drive|campus\s+drive)\b/i,
+  /^([A-Za-z0-9&\s\-\.]+?)\s*(?:\([^)]+\))?\s+(?:placement\s+drive|campus\s+drive)\b/i,
+  // "MUFG (Mitsubishi UFJ Financial Group) next round of selection process is scheduled on..."
   // "Euler Motors - Online test is scheduled on..."
   // "Amazon PPT & online test is scheduled on..."
   // "BluBridge Technologies Pvt. Ltd Physical selection process is scheduled on..."
   // "Wakefit next round of selection process is scheduled on..."
-  /^([A-Za-z0-9&\s\-\.]+?)\s*[-–—]?\s*(?:online\s+test|assessment|coding\s+test|physical\s+selection|selection\s+process|next\s+round|ppt)/i,
+  /^([A-Za-z0-9&\s\-\.]+?)\s*(?:\([^)]+\))?\s*[-–—]?\s*(?:online\s+test|assessment|coding\s+test|physical\s+selection|selection\s+process|next\s+round|ppt|interview|selection\s+list)/i,
   // "Company Name Super Dream Internship..."
   /^([A-Za-z0-9&\s\-\.]+?)\s+(?:super\s+dream|dream|regular)\s+(?:internship|placement)/i,
   // "Report Immediately : MUFG PPT"
@@ -351,9 +362,9 @@ const SUBJECT_COMPANY_PATTERNS: RegExp[] = [
   // "Urgent : MUFG (Mitsubishi UFJ Financial Group) : Registration..."
   /^(?:urgent\s*:\s*)?(?:kind\s+attention!!?\s*)?([A-Za-z0-9&\s\-\.]+?)\s*(?:\([^)]+\))?\s*:\s*(?:registration|ppt|test|interview|shortlist|super\s+dream|dream|regular|placement|hiring|drive)/i,
   // "Urgent : Kind Attention!! MUFG Applied candidates!!"
-  /^(?:urgent\s*:\s*)?(?:kind\s+attention!!?\s*)?([A-Za-z0-9&\s\-\.]+?)\s+(?:applied|shortlisted|registered|selected)\s+(?:candidates|students|list)/i,
+  /^(?:urgent\s*:\s*)?(?:kind\s+attention!!?\s*)?([A-Za-z0-9&\s\-\.]+?)\s*(?:\([^)]+\))?\s+(?:applied|shortlisted|registered|selected)\s+(?:candidates|students|list)/i,
   // "Fwd: MUFG (Mitsubishi UFJ Financial Group) Pre-placement talk..."
-  /^(?:urgent\s*:\s*)?([A-Za-z0-9&\s\-\.]+?)\s*(?:\([^)]+\))?\s+(?:pre-placement|ppt|online\s+test|coding\s+test|interview|placement\s+drive)/i,
+  /^(?:urgent\s*:\s*)?([A-Za-z0-9&\s\-\.]+?)\s*(?:\([^)]+\))?\s+(?:pre-placement|ppt|online\s+test|coding\s+test|interview|placement\s+drive|next\s+round)/i,
   // "Campus Placement | Company Name | Role"
   /(?:campus\s+)?placement\s*(?:\||[-–—]|:)\s*([A-Za-z0-9&\s\-\.]+?)(?:\s*(?:\||[-–—]|:)\s*.+)?$/i,
   // "Registration: Company Name"
@@ -425,10 +436,20 @@ export function extractCompanyName(
     return null;
   }
 
-  // First clean the subject to remove prefixes like "Confirmed: Your Registration for"
+  // Clean the subject to remove prefixes like "Confirmed: Your Registration for"
   const cleanedSubject = cleanSubjectNoise(subject);
 
-  // Try subject patterns
+  // Try known company aliases directly in the subject (highest precision match)
+  const lowerCleaned = cleanedSubject.toLowerCase();
+  for (const [alias, canonical] of Object.entries(COMPANY_ALIASES)) {
+    const escaped = alias.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const regex = new RegExp(`(?:^|[^a-z0-9])${escaped}(?:[^a-z0-9]|$)`, 'i');
+    if (regex.test(lowerCleaned)) {
+      return canonical;
+    }
+  }
+
+  // Try regex subject patterns
   for (const pattern of SUBJECT_COMPANY_PATTERNS) {
     const match = cleanedSubject.match(pattern);
     if (match && match[1]) {

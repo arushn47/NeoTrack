@@ -191,19 +191,27 @@ export function extractEvents(email: ParsedEmail): ExtractedEvent[] {
     });
   }
 
-  // 3. Check for Interview
-  if (/interview/i.test(fullText)) {
+  // 3. Check for Interview / Next Selection Round
+  if (/interview|next\s+round|selection\s+process/i.test(fullText)) {
     const isTech = /technical/i.test(fullText);
     const isHr = /hr|human\s+resource/i.test(fullText);
-    const interviewMatch = fullText.match(/interview\s*[:\-–—]?\s*(.{1,100})/i);
+    const interviewMatch = fullText.match(
+      /(?:interview|next\s+round(?:\s+of\s+selection\s+process)?|selection\s+process)\s*(?:is\s+scheduled)?\s*[:\-–—]?\s*(?:on\s+)?\(?(.{1,120})/i
+    );
     const date = parseDateTime(interviewMatch ? interviewMatch[0] : fullText);
     const venue = extractVenue(fullText);
 
     events.push({
       eventType: isTech ? 'technical_interview' : isHr ? 'hr_interview' : 'technical_interview',
-      title: isTech ? 'Technical Interview' : isHr ? 'HR Interview' : 'Interview Round',
+      title: isTech
+        ? 'Technical Interview'
+        : isHr
+        ? 'HR Interview'
+        : /next\s+round|selection\s+process/i.test(email.subject)
+        ? 'Next Round of Selection'
+        : 'Interview Round',
       startTime: date,
-      endTime: date ? new Date(date.getTime() + 45 * 60 * 1000) : null,
+      endTime: date ? new Date(date.getTime() + 60 * 60 * 1000) : null,
       venue,
       mode: determineMode(fullText, venue),
       confidence: date ? 'high' : 'medium',

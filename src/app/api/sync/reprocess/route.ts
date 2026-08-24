@@ -109,6 +109,14 @@ export async function POST() {
       );
     });
 
+    // Fetch user's configured Neo ID
+    const { data: userData } = await supabase
+      .from('users')
+      .select('neo_id')
+      .eq('id', userId)
+      .single();
+    const userNeoId = userData?.neo_id || null;
+
     // Candidate Matches (Neo ID matched in Excel or email body)
     const { data: candidateMatches } = await supabase
       .from('candidate_matches')
@@ -116,9 +124,30 @@ export async function POST() {
       .eq('user_id', userId);
 
     const emailIds = new Set(companyEmails.map((e) => e.id));
-    const isCompanyCandidateMatched = (candidateMatches || []).some((cm) =>
+    let isCompanyCandidateMatched = (candidateMatches || []).some((cm) =>
       emailIds.has((cm as unknown as { email_id: string }).email_id)
     );
+
+    // Also check if userNeoId appears directly in any email subject or body_snippet
+    if (!isCompanyCandidateMatched && userNeoId && userNeoId.length >= 4) {
+      const cleanNeo = userNeoId.toUpperCase().trim();
+      for (const e of companyEmails) {
+        const text = `${e.subject || ''} ${e.body_snippet || ''}`.toUpperCase();
+        if (text.includes(cleanNeo)) {
+          isCompanyCandidateMatched = true;
+          // Persist candidate match
+          await supabase.from('candidate_matches').insert({
+            user_id: userId,
+            email_id: e.id,
+            neo_id: userNeoId,
+            match_type: 'email_body',
+            matched_value: `Found ${userNeoId} in email body`,
+            confidence: 'high',
+          });
+          break;
+        }
+      }
+    }
 
     // Stored Events (PPT, Test, Interview)
     const { data: storedEvents } = await supabase
