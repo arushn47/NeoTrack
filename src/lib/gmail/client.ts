@@ -144,6 +144,31 @@ export async function createGmailClient(
         .from('gmail_accounts')
         .update({ is_connected: false })
         .eq('id', account.id);
+
+      // Trigger in-app and browser push notification so the user is aware immediately
+      try {
+        let userId = (account as any).user_id;
+        if (!userId) {
+          const { data: accData } = await supabase
+            .from('gmail_accounts')
+            .select('user_id')
+            .eq('id', account.id)
+            .single();
+          userId = accData?.user_id;
+        }
+
+        if (userId) {
+          const { notifyAccountDisconnected } = await import('@/lib/notifications/service');
+          await notifyAccountDisconnected({
+            userId,
+            email: account.email,
+            accountType: account.account_type,
+          });
+        }
+      } catch (notifErr) {
+        console.error('Failed to dispatch disconnect notification:', notifErr);
+      }
+
       throw new Error(
         `Token expired and refresh failed for ${account.email}. Please reconnect.`
       );

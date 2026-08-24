@@ -47,3 +47,51 @@ export async function requireSession(): Promise<SessionPayload> {
   }
   return session;
 }
+
+/**
+ * Resolves the base URL / origin of the incoming request.
+ * Handles reverse proxy headers (e.g., Vercel, Cloudflare).
+ */
+export function getBaseUrl(request: Request): string {
+  const url = new URL(request.url);
+  const host = request.headers.get('x-forwarded-host') || request.headers.get('host') || url.host;
+  const proto = request.headers.get('x-forwarded-proto') || (url.protocol.replace(':', '')) || 'https';
+  return `${proto}://${host}`;
+}
+
+/**
+ * Gets the Google OAuth redirect URI to use for the authorization request.
+ * Automatically avoids localhost redirect URIs when running on a live deployed domain.
+ */
+export function getOAuthRedirectUri(request: Request): string {
+  const origin = getBaseUrl(request);
+  const configuredUri = process.env.GOOGLE_REDIRECT_URI;
+
+  if (configuredUri) {
+    // If GOOGLE_REDIRECT_URI is set to localhost but request is on a deployed/production domain, use dynamic origin
+    if (configuredUri.includes('localhost') && !origin.includes('localhost')) {
+      return `${origin}/api/auth/callback`;
+    }
+    return configuredUri;
+  }
+
+  return `${origin}/api/auth/callback`;
+}
+
+/**
+ * Gets the application URL for redirects after authentication or error handling.
+ * Automatically avoids localhost URLs when running on a live deployed domain.
+ */
+export function getAppUrl(request: Request): string {
+  const origin = getBaseUrl(request);
+  const configuredAppUrl = process.env.NEXT_PUBLIC_APP_URL;
+
+  if (configuredAppUrl) {
+    if (configuredAppUrl.includes('localhost') && !origin.includes('localhost')) {
+      return origin;
+    }
+    return configuredAppUrl;
+  }
+
+  return origin;
+}

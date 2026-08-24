@@ -274,3 +274,33 @@ export async function notifyEventScheduled(params: {
     dedupeKey,
   });
 }
+
+/**
+ * Notifies user when a connected Gmail account is disconnected or its token expires.
+ */
+export async function notifyAccountDisconnected(params: {
+  userId: string;
+  email: string;
+  accountType: 'personal' | 'college';
+}) {
+  const { userId, email, accountType } = params;
+  const accountLabel = accountType === 'college' ? 'College (VIT)' : 'Personal';
+  const dedupeKey = `disconnect:${userId}:${email}`;
+
+  return sendNotification({
+    userId,
+    type: 'general',
+    title: `⚠️ ${accountLabel} Gmail Disconnected`,
+    body: `Your ${accountLabel} Gmail (${email}) was disconnected or token expired. Reconnect in Settings to keep receiving placement updates!`,
+    link: '/settings',
+    dedupeKey,
+    pushPayload: {
+      title: `⚠️ ${accountLabel} Gmail Disconnected`,
+      body: `Your ${email} connection expired. Please reconnect in Settings to keep placement sync active.`,
+      data: {
+        url: '/settings',
+        type: 'general',
+      },
+    },
+  });
+}

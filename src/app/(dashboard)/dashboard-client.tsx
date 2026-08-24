@@ -15,6 +15,7 @@ import {
   Fingerprint,
   Calendar,
   ChevronRight,
+  AlertTriangle,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { formatDateTime } from '@/lib/utils';
@@ -36,6 +37,11 @@ interface DashboardClientProps {
     mode: string | null;
   }>;
   hasAccounts: boolean;
+  disconnectedAccounts?: Array<{
+    id: string;
+    email: string;
+    account_type: string;
+  }>;
   hasNeoId: boolean;
   neoId: string | null;
 }
@@ -95,11 +101,36 @@ export default function DashboardClient({
   stats,
   upcomingEvents,
   hasAccounts,
+  disconnectedAccounts,
   hasNeoId,
   neoId,
 }: DashboardClientProps) {
   return (
     <div className="max-w-7xl mx-auto space-y-6 animate-fade-in">
+      {/* Disconnected Accounts Alert Banner */}
+      {disconnectedAccounts && disconnectedAccounts.length > 0 && (
+        <div className="flex items-center gap-4 p-4 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-300">
+          <div className="w-10 h-10 rounded-lg bg-amber-500/20 flex items-center justify-center flex-shrink-0">
+            <AlertTriangle className="w-5 h-5 text-amber-400" />
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-semibold text-amber-200">
+              Action Required: {disconnectedAccounts.map(a => a.account_type === 'college' ? 'College (VIT)' : 'Personal').join(' & ')} Gmail Disconnected
+            </p>
+            <p className="text-xs text-amber-300/80 mt-0.5">
+              Your session expired for {disconnectedAccounts.map(a => a.email).join(', ')}. Placement email sync is paused.
+            </p>
+          </div>
+          <Link
+            href="/settings"
+            className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-gray-950 text-xs font-semibold transition-all flex-shrink-0"
+          >
+            Reconnect Now
+            <ArrowRight className="w-3.5 h-3.5" />
+          </Link>
+        </div>
+      )}
+
       {/* Onboarding prompts */}
       {(!hasAccounts || !hasNeoId) && (
         <div className="space-y-3">

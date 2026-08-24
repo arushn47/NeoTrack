@@ -1,5 +1,6 @@
 import { google } from 'googleapis';
 import { NextResponse } from 'next/server';
+import { getOAuthRedirectUri } from '@/lib/auth';
 
 /**
  * GET /api/auth/google
@@ -11,11 +12,7 @@ export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const accountType = searchParams.get('type') || 'personal';
 
-  const url = new URL(request.url);
-  const host = request.headers.get('x-forwarded-host') || url.host;
-  const proto = request.headers.get('x-forwarded-proto') || (url.protocol.replace(':', ''));
-  const origin = `${proto}://${host}`;
-  const redirectUri = process.env.GOOGLE_REDIRECT_URI || `${origin}/api/auth/callback`;
+  const redirectUri = getOAuthRedirectUri(request);
 
   const oauth2Client = new google.auth.OAuth2(
     process.env.GOOGLE_CLIENT_ID,

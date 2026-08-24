@@ -3,6 +3,7 @@ import { NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
 import { encrypt } from '@/lib/crypto/tokens';
 import { createAdminClient } from '@/lib/supabase/admin';
+import { getOAuthRedirectUri, getAppUrl } from '@/lib/auth';
 import * as jose from 'jose';
 
 /**
@@ -18,12 +19,8 @@ export async function GET(request: Request) {
   const stateStr = searchParams.get('state');
   const error = searchParams.get('error');
 
-  const url = new URL(request.url);
-  const host = request.headers.get('x-forwarded-host') || url.host;
-  const proto = request.headers.get('x-forwarded-proto') || (url.protocol.replace(':', ''));
-  const origin = `${proto}://${host}`;
-  const appUrl = process.env.NEXT_PUBLIC_APP_URL || origin;
-  const redirectUri = process.env.GOOGLE_REDIRECT_URI || `${origin}/api/auth/callback`;
+  const appUrl = getAppUrl(request);
+  const redirectUri = getOAuthRedirectUri(request);
 
   if (error) {
     return NextResponse.redirect(
@@ -139,7 +136,7 @@ export async function GET(request: Request) {
         if (userError || !user) {
           console.error('Failed to upsert user:', userError);
           return NextResponse.redirect(
-            `${process.env.NEXT_PUBLIC_APP_URL}/login?error=db_error`
+            `${appUrl}/login?error=db_error`
           );
         }
         userId = user.id;

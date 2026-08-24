@@ -215,14 +215,18 @@ function AccountRow({
   disconnecting: string | null;
 }) {
   const isConnected = account?.is_connected;
+  const isDisconnected = account && !account.is_connected;
 
   return (
     <div className="flex items-center gap-4 px-5 py-4">
       <div className={cn(
         'w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0',
-        isConnected ? 'bg-success/10' : 'bg-bg-surface-hover'
+        isConnected ? 'bg-success/10' : isDisconnected ? 'bg-amber-500/10' : 'bg-bg-surface-hover'
       )}>
-        <Mail className={cn('w-5 h-5', isConnected ? 'text-success' : 'text-text-tertiary')} />
+        <Mail className={cn(
+          'w-5 h-5',
+          isConnected ? 'text-success' : isDisconnected ? 'text-amber-400' : 'text-text-tertiary'
+        )} />
       </div>
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2">
@@ -233,10 +237,19 @@ function AccountRow({
               Connected
             </span>
           )}
+          {isDisconnected && (
+            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium bg-amber-500/10 text-amber-400 border border-amber-500/20">
+              Session Expired
+            </span>
+          )}
         </div>
         {isConnected && account ? (
           <p className="text-xs text-text-secondary mt-0.5 truncate">
             {account.email} · Last synced {timeAgo(account.last_sync_at)}
+          </p>
+        ) : isDisconnected && account ? (
+          <p className="text-xs text-amber-400/90 mt-0.5 truncate">
+            {account.email} · Token expired, click Reconnect to resume sync
           </p>
         ) : (
           <p className="text-xs text-text-secondary mt-0.5">{description}</p>
@@ -255,6 +268,14 @@ function AccountRow({
           )}
           Disconnect
         </button>
+      ) : isDisconnected ? (
+        <a
+          href={connectUrl}
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs text-white bg-amber-600 hover:bg-amber-500 transition-all font-medium"
+        >
+          <Link2 className="w-3.5 h-3.5" />
+          Reconnect
+        </a>
       ) : (
         <a
           href={connectUrl}

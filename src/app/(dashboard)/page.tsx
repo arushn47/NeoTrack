@@ -100,6 +100,7 @@ export default async function DashboardPage() {
   const topUpcomingEvents = uniqueUpcomingEvents.slice(0, 6);
 
   const hasAccounts = accounts && accounts.some((a) => a.is_connected);
+  const disconnectedAccounts = (accounts || []).filter((a) => !a.is_connected);
   const hasNeoId = !!user?.neo_id;
 
   return (
@@ -107,6 +108,7 @@ export default async function DashboardPage() {
       stats={stats}
       upcomingEvents={topUpcomingEvents}
       hasAccounts={hasAccounts || false}
+      disconnectedAccounts={disconnectedAccounts}
       hasNeoId={hasNeoId}
       neoId={user?.neo_id || null}
     />
