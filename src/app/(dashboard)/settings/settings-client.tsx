@@ -10,6 +10,11 @@ import {
   Fingerprint,
   Save,
   Loader2,
+  Shield,
+  Sparkles,
+  User,
+  Check,
+  RefreshCw,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { timeAgo } from '@/lib/utils';
@@ -87,27 +92,27 @@ export default function SettingsClient({ accounts, neoId: initialNeoId, userEmai
   };
 
   return (
-    <div className="max-w-2xl mx-auto space-y-8 animate-fade-in">
+    <div className="max-w-3xl mx-auto space-y-8 animate-fade-in selection:bg-indigo-500/20">
       <div>
-        <h1 className="text-2xl font-bold text-text-primary">Settings</h1>
-        <p className="text-sm text-text-secondary mt-1">
-          Manage your Gmail accounts, Neo ID, and preferences.
+        <h1 className="text-2xl sm:text-3xl font-extrabold text-white tracking-tight">System Settings</h1>
+        <p className="text-xs sm:text-sm text-zinc-400 mt-1">
+          Manage your connected Gmail accounts, Neo ID registration, and notification preferences.
         </p>
       </div>
 
       {/* Neo ID Section */}
-      <section className="rounded-xl bg-bg-surface border border-border-default overflow-hidden">
-        <div className="px-5 py-4 border-b border-border-default">
-          <h2 className="text-sm font-semibold text-text-primary flex items-center gap-2">
+      <section className="rounded-3xl bg-[#101018]/90 backdrop-blur-2xl border border-zinc-800/80 overflow-hidden shadow-xl shadow-black/20">
+        <div className="px-6 py-5 border-b border-zinc-800/80">
+          <h2 className="text-sm font-bold text-white flex items-center gap-2">
             <Fingerprint className="w-4 h-4 text-violet-400" />
-            Neo ID
+            NeoPAT Candidate Registration ID
           </h2>
-          <p className="text-xs text-text-secondary mt-1">
-            Your NeoPAT identification number used to match you in candidate shortlists.
+          <p className="text-xs text-zinc-400 mt-1">
+            Your unique campus Neo ID used to automatically detect your name in official shortlisted attachments.
           </p>
         </div>
-        <div className="px-5 py-4">
-          <div className="flex gap-3">
+        <div className="p-6">
+          <div className="flex flex-col sm:flex-row gap-3">
             <input
               type="text"
               value={neoId}
@@ -118,26 +123,26 @@ export default function SettingsClient({ accounts, neoId: initialNeoId, userEmai
               }}
               placeholder="e.g. A6S2A7G9"
               maxLength={12}
-              className="flex-1 px-3 py-2 rounded-lg bg-bg-primary border border-border-default text-text-primary text-sm font-mono tracking-wider placeholder:text-text-tertiary placeholder:font-sans placeholder:tracking-normal focus:outline-none focus:ring-2 focus:ring-accent/50 focus:border-accent/50"
+              className="flex-1 px-4 py-2.5 rounded-2xl bg-zinc-950/80 border border-zinc-800 text-white text-sm font-mono tracking-wider placeholder:text-zinc-600 placeholder:font-sans placeholder:tracking-normal focus:outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 uppercase"
             />
             <button
               onClick={handleSaveNeoId}
               disabled={savingNeoId}
-              className="flex items-center gap-2 px-4 py-2 rounded-lg bg-accent text-white text-sm font-medium hover:bg-accent-hover transition-all disabled:opacity-50"
+              className="flex items-center justify-center gap-2 px-5 py-2.5 rounded-2xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold transition-all shadow-md shadow-indigo-600/30 disabled:opacity-50 active:scale-95"
             >
               {savingNeoId ? (
                 <Loader2 className="w-4 h-4 animate-spin" />
               ) : neoIdSaved ? (
-                <CheckCircle2 className="w-4 h-4" />
+                <CheckCircle2 className="w-4 h-4 text-emerald-300" />
               ) : (
                 <Save className="w-4 h-4" />
               )}
-              {neoIdSaved ? 'Saved!' : 'Save'}
+              {neoIdSaved ? 'Saved Successfully!' : 'Save ID'}
             </button>
           </div>
           {neoIdError && (
-            <p className="text-xs text-error mt-2 flex items-center gap-1">
-              <AlertCircle className="w-3 h-3" />
+            <p className="text-xs text-red-400 mt-2.5 flex items-center gap-1 font-medium">
+              <AlertCircle className="w-3.5 h-3.5" />
               {neoIdError}
             </p>
           )}
@@ -145,21 +150,21 @@ export default function SettingsClient({ accounts, neoId: initialNeoId, userEmai
       </section>
 
       {/* Gmail Accounts Section */}
-      <section className="rounded-xl bg-bg-surface border border-border-default overflow-hidden">
-        <div className="px-5 py-4 border-b border-border-default">
-          <h2 className="text-sm font-semibold text-text-primary flex items-center gap-2">
-            <Mail className="w-4 h-4 text-blue-400" />
-            Gmail Accounts
+      <section className="rounded-3xl bg-[#101018]/90 backdrop-blur-2xl border border-zinc-800/80 overflow-hidden shadow-xl shadow-black/20">
+        <div className="px-6 py-5 border-b border-zinc-800/80">
+          <h2 className="text-sm font-bold text-white flex items-center gap-2">
+            <Mail className="w-4 h-4 text-indigo-400" />
+            Connected Gmail Accounts
           </h2>
-          <p className="text-xs text-text-secondary mt-1">
-            Connect your personal and VIT college Gmail for placement email sync.
+          <p className="text-xs text-zinc-400 mt-1">
+            Connect both your personal and VIT college Gmail accounts to pull full placement feeds and official announcements.
           </p>
         </div>
-        <div className="divide-y divide-border-subtle">
+        <div className="divide-y divide-zinc-800/60">
           {/* Personal Gmail */}
           <AccountRow
             label="Personal Gmail"
-            description="NeoPAT notifications, application updates"
+            description="NeoPAT notifications, direct application confirmations"
             account={personalAccount}
             connectUrl="/api/auth/google?type=personal"
             onDisconnect={handleDisconnect}
@@ -169,7 +174,7 @@ export default function SettingsClient({ accounts, neoId: initialNeoId, userEmai
           {/* College Gmail */}
           <AccountRow
             label="College Gmail (VIT)"
-            description="Placement announcements, PPTs, tests, JDs"
+            description="Placement announcements, PPT links, tests, and JDs"
             account={collegeAccount}
             connectUrl="/api/auth/google?type=college"
             onDisconnect={handleDisconnect}
@@ -179,16 +184,22 @@ export default function SettingsClient({ accounts, neoId: initialNeoId, userEmai
       </section>
 
       {/* Account Info */}
-      <section className="rounded-xl bg-bg-surface border border-border-default overflow-hidden">
-        <div className="px-5 py-4 border-b border-border-default">
-          <h2 className="text-sm font-semibold text-text-primary">Account</h2>
+      <section className="rounded-3xl bg-[#101018]/90 backdrop-blur-2xl border border-zinc-800/80 overflow-hidden shadow-xl shadow-black/20">
+        <div className="px-6 py-5 border-b border-zinc-800/80">
+          <h2 className="text-sm font-bold text-white flex items-center gap-2">
+            <User className="w-4 h-4 text-zinc-400" />
+            Account Information
+          </h2>
         </div>
-        <div className="px-5 py-4">
+        <div className="p-6">
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-sm text-text-primary">{userEmail}</p>
-              <p className="text-xs text-text-secondary mt-0.5">Primary sign-in account</p>
+              <p className="text-sm font-semibold text-white">{userEmail}</p>
+              <p className="text-xs text-zinc-500 mt-0.5 font-mono">Primary Authenticated Session</p>
             </div>
+            <span className="text-[10px] font-semibold px-2.5 py-1 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+              Active
+            </span>
           </div>
         </div>
       </section>
@@ -218,48 +229,49 @@ function AccountRow({
   const isDisconnected = account && !account.is_connected;
 
   return (
-    <div className="flex items-center gap-4 px-5 py-4">
+    <div className="flex items-center gap-4 px-6 py-5 hover:bg-zinc-850/30 transition-all">
       <div className={cn(
-        'w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0',
-        isConnected ? 'bg-success/10' : isDisconnected ? 'bg-amber-500/10' : 'bg-bg-surface-hover'
+        'w-11 h-11 rounded-2xl flex items-center justify-center flex-shrink-0 border',
+        isConnected
+          ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400'
+          : isDisconnected
+          ? 'bg-amber-500/10 border-amber-500/20 text-amber-400'
+          : 'bg-zinc-900 border-zinc-800 text-zinc-500'
       )}>
-        <Mail className={cn(
-          'w-5 h-5',
-          isConnected ? 'text-success' : isDisconnected ? 'text-amber-400' : 'text-text-tertiary'
-        )} />
+        <Mail className="w-5 h-5" />
       </div>
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2">
-          <p className="text-sm font-medium text-text-primary">{label}</p>
+          <p className="text-sm font-bold text-white">{label}</p>
           {isConnected && (
-            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium bg-success/10 text-success">
+            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
               <CheckCircle2 className="w-2.5 h-2.5" />
               Connected
             </span>
           )}
           {isDisconnected && (
-            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium bg-amber-500/10 text-amber-400 border border-amber-500/20">
+            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-500/10 text-amber-400 border border-amber-500/20">
               Session Expired
             </span>
           )}
         </div>
         {isConnected && account ? (
-          <p className="text-xs text-text-secondary mt-0.5 truncate">
+          <p className="text-xs text-zinc-400 mt-1 truncate font-mono">
             {account.email} · Last synced {timeAgo(account.last_sync_at)}
           </p>
         ) : isDisconnected && account ? (
-          <p className="text-xs text-amber-400/90 mt-0.5 truncate">
+          <p className="text-xs text-amber-300/90 mt-1 truncate">
             {account.email} · Token expired, click Reconnect to resume sync
           </p>
         ) : (
-          <p className="text-xs text-text-secondary mt-0.5">{description}</p>
+          <p className="text-xs text-zinc-500 mt-1">{description}</p>
         )}
       </div>
       {isConnected && account ? (
         <button
           onClick={() => onDisconnect(account.id)}
           disabled={disconnecting === account.id}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs text-text-secondary border border-border-default hover:text-error hover:border-error/30 transition-all disabled:opacity-50"
+          className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-semibold text-zinc-400 border border-zinc-800 hover:text-red-400 hover:border-red-500/30 hover:bg-red-500/10 transition-all disabled:opacity-50"
         >
           {disconnecting === account.id ? (
             <Loader2 className="w-3.5 h-3.5 animate-spin" />
@@ -271,15 +283,15 @@ function AccountRow({
       ) : isDisconnected ? (
         <a
           href={connectUrl}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs text-white bg-amber-600 hover:bg-amber-500 transition-all font-medium"
+          className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold text-gray-950 bg-amber-500 hover:bg-amber-400 shadow-md shadow-amber-500/25 transition-all"
         >
-          <Link2 className="w-3.5 h-3.5" />
+          <RefreshCw className="w-3.5 h-3.5" />
           Reconnect
         </a>
       ) : (
         <a
           href={connectUrl}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs text-white bg-accent hover:bg-accent-hover transition-all"
+          className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-500 shadow-md shadow-indigo-600/30 transition-all"
         >
           <Link2 className="w-3.5 h-3.5" />
           Connect

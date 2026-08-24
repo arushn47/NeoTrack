@@ -17,6 +17,8 @@ import {
   ChevronDown,
   AlertCircle,
   FileText,
+  Briefcase,
+  Layers,
 } from 'lucide-react';
 import { cn, timeAgo } from '@/lib/utils';
 import StatusBadge from '@/components/shared/status-badge';
@@ -89,7 +91,7 @@ export default function CompanyDetailClient({ company }: CompanyDetailClientProp
   const [isUpdating, setIsUpdating] = useState(false);
   const [showStatusMenu, setShowStatusMenu] = useState(false);
   const [activeTab, setActiveTab] = useState<'timeline' | 'emails'>('timeline');
-  // Sync state if server component re-renders with new application status
+
   useEffect(() => {
     if (company.application?.status) {
       setStatus(company.application.status);
@@ -115,8 +117,6 @@ export default function CompanyDetailClient({ company }: CompanyDetailClientProp
     }
   };
 
-  const isNeoMatched = company.candidateMatches.length > 0;
-
   const displayRole = (() => {
     const r = company.application?.role;
     if (!r || /\byou\s*(?:are|have|re)\b|dear\s|greetings|eligible|registr/i.test(r)) {
@@ -126,28 +126,28 @@ export default function CompanyDetailClient({ company }: CompanyDetailClientProp
   })();
 
   return (
-    <div className="space-y-6 animate-fade-in max-w-5xl">
+    <div className="space-y-6 animate-fade-in max-w-5xl mx-auto selection:bg-indigo-500/20">
       {/* Back Button */}
       <Link
         href="/companies"
-        className="inline-flex items-center gap-2 text-sm text-text-tertiary hover:text-text-primary transition-colors"
+        className="inline-flex items-center gap-2 text-xs font-semibold text-zinc-400 hover:text-white transition-colors"
       >
-        <ArrowLeft className="w-4 h-4" />
-        Back to Companies
+        <ArrowLeft className="w-4 h-4 text-zinc-500" />
+        Back to Placement Drives
       </Link>
 
       {/* Header Card */}
-      <div className="p-6 bg-bg-surface border border-border-default rounded-2xl relative z-20">
+      <div className="p-6 sm:p-7 bg-[#101018]/90 backdrop-blur-2xl border border-zinc-800/80 rounded-3xl relative z-20 shadow-2xl shadow-black/30 space-y-6">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div className="flex items-center gap-4">
-            <div className="w-14 h-14 rounded-2xl bg-accent/10 border border-accent/20 flex items-center justify-center font-bold text-accent text-2xl">
+            <div className="w-14 h-14 rounded-2xl bg-gradient-to-tr from-indigo-600/20 to-violet-600/20 border border-indigo-500/30 flex items-center justify-center font-extrabold text-indigo-400 text-2xl shadow-lg shadow-indigo-500/10">
               {company.name.charAt(0).toUpperCase()}
             </div>
             <div>
               <div className="flex items-center gap-2.5">
-                <h1 className="text-2xl font-bold text-text-primary">{company.name}</h1>
+                <h1 className="text-2xl sm:text-3xl font-extrabold text-white tracking-tight">{company.name}</h1>
               </div>
-              <p className="text-sm text-text-secondary mt-0.5">
+              <p className="text-xs sm:text-sm text-zinc-400 mt-1 font-medium">
                 {displayRole}
                 {company.legalName && ` · ${company.legalName}`}
               </p>
@@ -159,10 +159,10 @@ export default function CompanyDetailClient({ company }: CompanyDetailClientProp
             <button
               onClick={() => setShowStatusMenu(!showStatusMenu)}
               disabled={isUpdating}
-              className="flex items-center gap-2.5 px-4 py-2 bg-bg-elevated border border-border-default hover:border-accent/40 rounded-xl text-sm font-medium transition-all"
+              className="flex items-center gap-3 px-4 py-2.5 bg-zinc-900/90 border border-zinc-800 hover:border-indigo-500/40 rounded-2xl text-xs font-semibold transition-all shadow-md active:scale-95"
             >
               <StatusBadge status={status} events={company.events} />
-              <ChevronDown className="w-4 h-4 text-text-tertiary" />
+              <ChevronDown className="w-3.5 h-3.5 text-zinc-500" />
             </button>
 
             {showStatusMenu && (
@@ -172,24 +172,28 @@ export default function CompanyDetailClient({ company }: CompanyDetailClientProp
                   onClick={() => setShowStatusMenu(false)}
                 />
                 <div
-                  className="absolute right-0 top-full mt-2 w-56 bg-bg-elevated border border-border-default rounded-xl shadow-2xl z-50 py-1 max-h-[min(24rem,80vh)] overflow-y-auto"
+                  className="absolute right-0 top-full mt-2 w-60 p-1.5 bg-[#12121c]/95 backdrop-blur-2xl border border-zinc-800 rounded-2xl shadow-2xl z-50 animate-fade-in max-h-[min(24rem,80vh)] overflow-y-auto divide-y divide-zinc-800/60"
                 >
-                  <div className="px-3 py-1.5 text-[11px] font-semibold text-text-tertiary uppercase tracking-wider">
-                    Override Status
+                  <div className="px-3 py-2 text-[10px] font-bold text-zinc-500 uppercase tracking-wider">
+                    Manual Status Override
                   </div>
-                  {ALL_STATUSES.map((s) => (
-                    <button
-                      key={s.value}
-                      onClick={() => handleStatusChange(s.value)}
-                      className={cn(
-                        'flex items-center justify-between w-full px-3 py-2 text-xs font-medium hover:bg-bg-surface-hover transition-colors text-left',
-                        status === s.value ? 'text-accent font-semibold' : 'text-text-secondary'
-                      )}
-                    >
-                      <span>{s.label}</span>
-                      {status === s.value && <CheckCircle2 className="w-3.5 h-3.5 text-accent" />}
-                    </button>
-                  ))}
+                  <div className="space-y-0.5 pt-1">
+                    {ALL_STATUSES.map((s) => (
+                      <button
+                        key={s.value}
+                        onClick={() => handleStatusChange(s.value)}
+                        className={cn(
+                          'flex items-center justify-between w-full px-3 py-2 text-xs font-semibold rounded-xl transition-all text-left',
+                          status === s.value
+                            ? 'bg-indigo-500/15 text-indigo-300 font-bold'
+                            : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/50'
+                        )}
+                      >
+                        <span>{s.label}</span>
+                        {status === s.value && <CheckCircle2 className="w-3.5 h-3.5 text-indigo-400" />}
+                      </button>
+                    ))}
+                  </div>
                 </div>
               </>
             )}
@@ -197,70 +201,72 @@ export default function CompanyDetailClient({ company }: CompanyDetailClientProp
         </div>
 
         {/* Quick Metadata Bar */}
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-6 pt-4 border-t border-border-default/60">
-          <div className="p-3 bg-bg-elevated/50 rounded-xl border border-border-default/40">
-            <span className="text-[11px] text-text-tertiary font-medium uppercase tracking-wider block">CTC / Package</span>
-            <span className="text-sm font-semibold text-emerald-400 mt-0.5 block truncate">
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-2">
+          <div className="p-3.5 bg-zinc-950/60 rounded-2xl border border-zinc-800/80">
+            <span className="text-[10px] text-zinc-500 font-bold uppercase tracking-wider block">CTC / Package</span>
+            <span className="text-sm font-extrabold text-emerald-400 mt-1 block truncate">
               {company.application?.ctc ? company.application.ctc.replace(/\*/g, '').trim() : 'Not specified'}
             </span>
           </div>
 
-          <div className="p-3 bg-bg-elevated/50 rounded-xl border border-border-default/40">
-            <span className="text-[11px] text-text-tertiary font-medium uppercase tracking-wider block">Stipend</span>
-            <span className="text-sm font-semibold text-text-primary mt-0.5 block truncate">
+          <div className="p-3.5 bg-zinc-950/60 rounded-2xl border border-zinc-800/80">
+            <span className="text-[10px] text-zinc-500 font-bold uppercase tracking-wider block">Stipend</span>
+            <span className="text-sm font-bold text-zinc-200 mt-1 block truncate">
               {company.application?.stipend ? company.application.stipend.replace(/\*/g, '').trim() : 'Not specified'}
             </span>
           </div>
 
-          <div className="p-3 bg-bg-elevated/50 rounded-xl border border-border-default/40">
-            <span className="text-[11px] text-text-tertiary font-medium uppercase tracking-wider block">Location</span>
-            <span className="text-sm font-semibold text-text-primary mt-0.5 block truncate">
+          <div className="p-3.5 bg-zinc-950/60 rounded-2xl border border-zinc-800/80">
+            <span className="text-[10px] text-zinc-500 font-bold uppercase tracking-wider block">Job Location</span>
+            <span className="text-sm font-bold text-zinc-200 mt-1 block truncate">
               {company.application?.location ? company.application.location.replace(/\*/g, '').trim() : 'Pan India / Remote'}
             </span>
           </div>
 
-          <div className="p-3 bg-bg-elevated/50 rounded-xl border border-border-default/40">
-            <span className="text-[11px] text-text-tertiary font-medium uppercase tracking-wider block">Synced Emails</span>
-            <span className="text-sm font-semibold text-accent mt-0.5 block">
-              {company.emails.length} emails
+          <div className="p-3.5 bg-zinc-950/60 rounded-2xl border border-zinc-800/80">
+            <span className="text-[10px] text-zinc-500 font-bold uppercase tracking-wider block">Synced Circulars</span>
+            <span className="text-sm font-bold text-indigo-400 mt-1 block font-mono">
+              {company.emails.length} emails linked
             </span>
           </div>
         </div>
       </div>
 
       {/* Hiring Process Pipeline Stepper */}
-      <div className="p-5 bg-bg-surface border border-border-default rounded-2xl">
-        <h3 className="text-xs font-bold text-text-tertiary uppercase tracking-wider mb-3 flex items-center gap-2">
-          <Sparkles className="w-3.5 h-3.5 text-accent" />
+      <div className="p-6 bg-[#101018]/90 backdrop-blur-2xl border border-zinc-800/80 rounded-3xl shadow-xl shadow-black/20">
+        <h3 className="text-xs font-bold text-zinc-400 uppercase tracking-wider mb-3 flex items-center gap-2">
+          <Sparkles className="w-3.5 h-3.5 text-indigo-400" />
           Hiring Pipeline Progression
         </h3>
         <StageProgressBar status={status} events={company.events} className="py-2" />
       </div>
 
       {/* Tabs Header */}
-      <div className="flex items-center gap-4 border-b border-border-default">
+      <div className="flex items-center gap-6 border-b border-zinc-800/80 px-2">
         <button
           onClick={() => setActiveTab('timeline')}
           className={cn(
-            'pb-3 text-sm font-medium transition-colors border-b-2 -mb-px',
+            'pb-3 text-xs sm:text-sm font-bold transition-all border-b-2 -mb-px flex items-center gap-2',
             activeTab === 'timeline'
-              ? 'border-accent text-accent'
-              : 'border-transparent text-text-secondary hover:text-text-primary'
+              ? 'border-indigo-500 text-indigo-400'
+              : 'border-transparent text-zinc-500 hover:text-zinc-300'
           )}
         >
+          <Calendar className="w-4 h-4" />
           Placement Timeline & Events ({company.events.length})
         </button>
 
         <button
           onClick={() => setActiveTab('emails')}
           className={cn(
-            'pb-3 text-sm font-medium transition-colors border-b-2 -mb-px',
+            'pb-3 text-xs sm:text-sm font-bold transition-all border-b-2 -mb-px flex items-center gap-2',
             activeTab === 'emails'
-              ? 'border-accent text-accent'
-              : 'border-transparent text-text-secondary hover:text-text-primary'
+              ? 'border-indigo-500 text-indigo-400'
+              : 'border-transparent text-zinc-500 hover:text-zinc-300'
           )}
         >
-          Synced Emails ({company.emails.length})
+          <Mail className="w-4 h-4" />
+          Synced CDC Emails ({company.emails.length})
         </button>
       </div>
 
@@ -268,25 +274,27 @@ export default function CompanyDetailClient({ company }: CompanyDetailClientProp
       {activeTab === 'timeline' && (
         <div className="space-y-4">
           {company.events.length === 0 && company.emails.length === 0 ? (
-            <div className="p-8 text-center bg-bg-surface border border-border-default rounded-2xl">
-              <Calendar className="w-10 h-10 text-text-tertiary opacity-40 mx-auto mb-2" />
-              <p className="text-sm text-text-secondary font-medium">No events recorded yet</p>
-              <p className="text-xs text-text-tertiary mt-1">Sync your email inbox to discover test schedules, interview dates, and PPTs.</p>
+            <div className="p-12 text-center bg-[#101018]/90 border border-zinc-800/80 rounded-3xl">
+              <Calendar className="w-10 h-10 text-zinc-600 mx-auto mb-2" />
+              <p className="text-sm text-zinc-300 font-semibold">No timeline events detected yet</p>
+              <p className="text-xs text-zinc-500 mt-1 max-w-sm mx-auto">
+                Any upcoming test links, PPT schedules, and interview invitations will be extracted automatically.
+              </p>
             </div>
           ) : (
-            <div className="relative pl-6 border-l-2 border-border-default space-y-6 ml-3 py-2">
+            <div className="relative pl-6 border-l-2 border-zinc-800 space-y-6 ml-3 py-2">
               {company.events.map((evt) => (
                 <div key={evt.id} className="relative group">
                   {/* Timeline dot */}
-                  <div className="absolute -left-[31px] top-1.5 w-4 h-4 rounded-full bg-accent border-4 border-bg-surface ring-2 ring-accent/30" />
+                  <div className="absolute -left-[31px] top-1.5 w-4 h-4 rounded-full bg-indigo-500 border-4 border-[#0a0a10] ring-2 ring-indigo-500/30" />
 
-                  <div className="p-4 bg-bg-surface border border-border-default rounded-xl hover:border-accent/30 transition-all">
+                  <div className="p-4 bg-[#101018]/90 border border-zinc-800/80 rounded-2xl hover:border-indigo-500/30 transition-all shadow-md">
                     <div className="flex items-center justify-between gap-2">
-                      <span className="text-xs font-semibold uppercase tracking-wider text-accent">
+                      <span className="text-[11px] font-bold uppercase tracking-wider text-indigo-400">
                         {evt.eventType.replace('_', ' ')}
                       </span>
                       {evt.startTime && (
-                        <span className="text-xs text-text-tertiary">
+                        <span className="text-xs text-zinc-500 font-mono">
                           {new Date(evt.startTime).toLocaleDateString('en-IN', {
                             day: 'numeric',
                             month: 'short',
@@ -298,13 +306,13 @@ export default function CompanyDetailClient({ company }: CompanyDetailClientProp
                       )}
                     </div>
 
-                    <h4 className="font-semibold text-text-primary text-sm mt-1">
+                    <h4 className="font-bold text-white text-sm mt-1">
                       {evt.title || evt.eventType}
                     </h4>
 
                     {evt.venue && (
-                      <p className="text-xs text-text-secondary mt-1 flex items-center gap-1.5">
-                        <MapPin className="w-3.5 h-3.5 text-text-tertiary" />
+                      <p className="text-xs text-zinc-400 mt-1.5 flex items-center gap-1.5">
+                        <MapPin className="w-3.5 h-3.5 text-zinc-500" />
                         {evt.venue}
                       </p>
                     )}
@@ -316,13 +324,13 @@ export default function CompanyDetailClient({ company }: CompanyDetailClientProp
               {company.events.length === 0 &&
                 company.emails.map((em) => (
                   <div key={em.id} className="relative group">
-                    <div className="absolute -left-[31px] top-1.5 w-4 h-4 rounded-full bg-border-default border-4 border-bg-surface" />
-                    <div className="p-4 bg-bg-surface border border-border-default rounded-xl">
-                      <span className="text-xs font-medium text-text-tertiary">
+                    <div className="absolute -left-[31px] top-1.5 w-4 h-4 rounded-full bg-zinc-700 border-4 border-[#0a0a10]" />
+                    <div className="p-4 bg-[#101018]/90 border border-zinc-800/80 rounded-2xl">
+                      <span className="text-[11px] font-mono text-zinc-500">
                         {new Date(em.receivedAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}
                       </span>
-                      <h4 className="font-medium text-text-primary text-sm mt-0.5">{em.subject}</h4>
-                      <p className="text-xs text-text-tertiary mt-1 line-clamp-2">{em.snippet}</p>
+                      <h4 className="font-semibold text-white text-sm mt-0.5">{em.subject}</h4>
+                      <p className="text-xs text-zinc-400 mt-1 line-clamp-2">{em.snippet}</p>
                     </div>
                   </div>
                 ))}
@@ -335,19 +343,19 @@ export default function CompanyDetailClient({ company }: CompanyDetailClientProp
       {activeTab === 'emails' && (
         <div className="space-y-3">
           {company.emails.length === 0 ? (
-            <div className="p-8 text-center bg-bg-surface border border-border-default rounded-2xl">
-              <Mail className="w-10 h-10 text-text-tertiary opacity-40 mx-auto mb-2" />
-              <p className="text-sm text-text-secondary font-medium">No emails linked to this company</p>
+            <div className="p-12 text-center bg-[#101018]/90 border border-zinc-800/80 rounded-3xl">
+              <Mail className="w-10 h-10 text-zinc-600 mx-auto mb-2" />
+              <p className="text-sm text-zinc-300 font-semibold">No emails linked to this company</p>
             </div>
           ) : (
             company.emails.map((em) => (
-              <div key={em.id} className="p-4 bg-bg-surface border border-border-default rounded-xl hover:border-accent/30 transition-all">
-                <div className="flex items-center justify-between gap-2 mb-1">
-                  <span className="text-xs font-semibold text-accent">{em.sender}</span>
-                  <span className="text-xs text-text-tertiary">{timeAgo(em.receivedAt)}</span>
+              <div key={em.id} className="p-4 bg-[#101018]/90 border border-zinc-800/80 rounded-2xl hover:border-indigo-500/30 transition-all">
+                <div className="flex items-center justify-between gap-2 mb-1.5">
+                  <span className="text-xs font-semibold text-indigo-400 truncate">{em.sender}</span>
+                  <span className="text-[11px] text-zinc-500 font-mono flex-shrink-0">{timeAgo(em.receivedAt)}</span>
                 </div>
-                <h4 className="text-sm font-semibold text-text-primary">{em.subject}</h4>
-                <p className="text-xs text-text-tertiary mt-1 line-clamp-3">{em.snippet}</p>
+                <h4 className="text-sm font-bold text-white">{em.subject}</h4>
+                <p className="text-xs text-zinc-400 mt-1.5 line-clamp-3 leading-relaxed">{em.snippet}</p>
               </div>
             ))
           )}

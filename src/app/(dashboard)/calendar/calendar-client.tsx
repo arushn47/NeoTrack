@@ -11,6 +11,7 @@ import {
   Building2,
   ExternalLink,
   X,
+  Sparkles,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
@@ -59,7 +60,6 @@ export default function CalendarClient({ events }: CalendarClientProps) {
     // Current month days
     for (let i = 1; i <= daysInMonth; i++) {
       const currDate = new Date(year, month, i);
-      // Local date YYYY-MM-DD
       const yyyy = currDate.getFullYear();
       const mm = String(currDate.getMonth() + 1).padStart(2, '0');
       const dd = String(currDate.getDate()).padStart(2, '0');
@@ -90,7 +90,6 @@ export default function CalendarClient({ events }: CalendarClientProps) {
 
   const [selectedEventType, setSelectedEventType] = useState<'all' | 'test' | 'interview' | 'ppt' | 'deadline'>('all');
 
-  // Filter events by selected category
   const filteredEvents = useMemo(() => {
     if (selectedEventType === 'all') return events;
     if (selectedEventType === 'test') {
@@ -108,7 +107,6 @@ export default function CalendarClient({ events }: CalendarClientProps) {
     return events;
   }, [events, selectedEventType]);
 
-  // Events map by YYYY-MM-DD
   const eventsByDate = useMemo(() => {
     const map = new Map<string, CalendarEvent[]>();
     for (const evt of filteredEvents) {
@@ -145,31 +143,34 @@ export default function CalendarClient({ events }: CalendarClientProps) {
   const getEventBadgeColor = (type: string) => {
     switch (type) {
       case 'ppt':
-        return 'bg-blue-500/15 text-blue-400 border-blue-500/30';
+        return 'bg-blue-500/15 text-blue-400 border-blue-500/30 hover:bg-blue-500/25';
       case 'online_test':
       case 'coding_test':
-        return 'bg-amber-500/15 text-amber-400 border-amber-500/30';
+        return 'bg-amber-500/15 text-amber-300 border-amber-500/30 hover:bg-amber-500/25';
       case 'technical_interview':
       case 'hr_interview':
       case 'final_interview':
-        return 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30';
+        return 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30 hover:bg-emerald-500/25';
       case 'registration_deadline':
-        return 'bg-rose-500/15 text-rose-400 border-rose-500/30';
+        return 'bg-rose-500/15 text-rose-300 border-rose-500/30 hover:bg-rose-500/25';
       default:
-        return 'bg-purple-500/15 text-purple-400 border-purple-500/30';
+        return 'bg-purple-500/15 text-purple-300 border-purple-500/30 hover:bg-purple-500/25';
     }
   };
 
   const todayStr = new Date().toISOString().split('T')[0];
 
   return (
-    <div className="space-y-6 animate-fade-in">
+    <div className="space-y-6 max-w-7xl mx-auto animate-fade-in selection:bg-indigo-500/20">
       {/* Header & Month Nav */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold text-text-primary tracking-tight">Placement Calendar</h1>
-          <p className="text-sm text-text-secondary mt-1">
-            Scheduled PPTs, online assessments, interviews, and deadlines.
+          <h1 className="text-2xl sm:text-3xl font-extrabold text-white tracking-tight flex items-center gap-2.5">
+            <CalendarIcon className="w-6 h-6 text-indigo-400" />
+            <span>Placement Schedule</span>
+          </h1>
+          <p className="text-xs sm:text-sm text-zinc-400 mt-1">
+            Visual calendar of online tests, interviews, PPT sessions, and registration deadlines.
           </p>
         </div>
 
@@ -177,25 +178,25 @@ export default function CalendarClient({ events }: CalendarClientProps) {
         <div className="flex items-center gap-3">
           <button
             onClick={handleToday}
-            className="px-3 py-1.5 rounded-xl bg-bg-surface border border-border-default hover:bg-bg-surface-hover text-xs font-semibold text-text-secondary hover:text-text-primary transition-all"
+            className="px-3.5 py-1.5 rounded-xl bg-[#101018] border border-zinc-800 hover:bg-zinc-800 text-xs font-semibold text-zinc-300 hover:text-white transition-all shadow-sm"
           >
             Today
           </button>
 
-          <div className="flex items-center gap-1 bg-bg-surface border border-border-default rounded-xl p-1">
+          <div className="flex items-center gap-1 bg-[#101018] border border-zinc-800 rounded-xl p-1 shadow-sm">
             <button
               onClick={handlePrevMonth}
-              className="p-1.5 rounded-lg hover:bg-bg-surface-hover text-text-secondary hover:text-text-primary transition-all"
+              className="p-1.5 rounded-lg hover:bg-zinc-800 text-zinc-400 hover:text-white transition-all"
               aria-label="Previous month"
             >
               <ChevronLeft className="w-4 h-4" />
             </button>
-            <span className="text-sm font-semibold text-text-primary px-3 min-w-[140px] text-center">
+            <span className="text-xs sm:text-sm font-bold text-white px-3 min-w-[140px] text-center font-mono">
               {monthNames[month]} {year}
             </span>
             <button
               onClick={handleNextMonth}
-              className="p-1.5 rounded-lg hover:bg-bg-surface-hover text-text-secondary hover:text-text-primary transition-all"
+              className="p-1.5 rounded-lg hover:bg-zinc-800 text-zinc-400 hover:text-white transition-all"
               aria-label="Next month"
             >
               <ChevronRight className="w-4 h-4" />
@@ -206,7 +207,7 @@ export default function CalendarClient({ events }: CalendarClientProps) {
 
       {/* Filter Tabs & Event Legend */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-1">
-        <div className="flex items-center gap-1.5 overflow-x-auto pb-1 sm:pb-0">
+        <div className="flex items-center gap-2 overflow-x-auto pb-1 sm:pb-0 scrollbar-none">
           {[
             { id: 'all' as const, label: 'All Events' },
             { id: 'test' as const, label: 'Online Tests' },
@@ -220,10 +221,10 @@ export default function CalendarClient({ events }: CalendarClientProps) {
                 key={tab.id}
                 onClick={() => setSelectedEventType(tab.id)}
                 className={cn(
-                  'px-3 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition-all',
+                  'px-3.5 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition-all duration-200 active:scale-95',
                   isSelected
-                    ? 'bg-accent text-white shadow-sm shadow-accent/20'
-                    : 'bg-bg-surface hover:bg-bg-surface-hover text-text-secondary hover:text-text-primary border border-border-default'
+                    ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/30'
+                    : 'bg-[#101018] hover:bg-[#141420] text-zinc-400 hover:text-zinc-200 border border-zinc-800'
                 )}
               >
                 {tab.label}
@@ -234,15 +235,15 @@ export default function CalendarClient({ events }: CalendarClientProps) {
 
         {/* Legend dots */}
         <div className="flex flex-wrap items-center gap-3 text-xs">
-          <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-blue-500/10 text-blue-400 border border-blue-500/20">
+          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-blue-500/10 text-blue-400 border border-blue-500/20 font-medium">
             <span className="w-1.5 h-1.5 rounded-full bg-blue-400" />
             PPT
           </span>
-          <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-amber-500/10 text-amber-400 border border-amber-500/20">
+          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-amber-500/10 text-amber-300 border border-amber-500/20 font-medium">
             <span className="w-1.5 h-1.5 rounded-full bg-amber-400" />
-            Test
+            Assessment
           </span>
-          <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-emerald-500/10 text-emerald-300 border border-emerald-500/20 font-medium">
             <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
             Interview
           </span>
@@ -250,9 +251,9 @@ export default function CalendarClient({ events }: CalendarClientProps) {
       </div>
 
       {/* Calendar Grid Container */}
-      <div className="bg-bg-surface border border-border-default rounded-2xl overflow-hidden shadow-sm">
+      <div className="bg-[#101018]/90 backdrop-blur-2xl border border-zinc-800/80 rounded-3xl overflow-hidden shadow-2xl shadow-black/30">
         {/* Day of Week Headers */}
-        <div className="grid grid-cols-7 border-b border-border-default bg-bg-elevated/40 text-center py-2.5 text-xs font-semibold text-text-tertiary uppercase tracking-wider">
+        <div className="grid grid-cols-7 border-b border-zinc-800 bg-zinc-950/80 text-center py-3 text-xs font-bold text-zinc-400 uppercase tracking-wider">
           <span>Sun</span>
           <span>Mon</span>
           <span>Tue</span>
@@ -263,7 +264,7 @@ export default function CalendarClient({ events }: CalendarClientProps) {
         </div>
 
         {/* Days Grid */}
-        <div className="grid grid-cols-7 auto-rows-fr divide-x divide-y divide-border-default/60">
+        <div className="grid grid-cols-7 auto-rows-fr divide-x divide-y divide-zinc-800/60">
           {calendarDays.map((d, index) => {
             const dayEvents = eventsByDate.get(d.dateString) || [];
             const isToday = d.dateString === todayStr;
@@ -272,36 +273,36 @@ export default function CalendarClient({ events }: CalendarClientProps) {
               <div
                 key={index}
                 className={cn(
-                  'min-h-[110px] p-2 flex flex-col justify-between transition-colors',
-                  d.isCurrentMonth ? 'bg-bg-surface hover:bg-bg-surface-hover/50' : 'bg-bg-elevated/20 opacity-40',
-                  isToday && 'ring-2 ring-inset ring-accent/60 bg-accent/5'
+                  'min-h-[120px] p-2.5 flex flex-col justify-between transition-colors',
+                  d.isCurrentMonth ? 'bg-[#101018] hover:bg-zinc-900/60' : 'bg-zinc-950/40 opacity-30',
+                  isToday && 'ring-2 ring-inset ring-indigo-500/80 bg-indigo-500/5'
                 )}
               >
                 {/* Date Number Header */}
                 <div className="flex items-center justify-between">
                   <span
                     className={cn(
-                      'text-xs font-semibold w-6 h-6 rounded-full flex items-center justify-center',
-                      isToday ? 'bg-accent text-white' : 'text-text-secondary'
+                      'text-xs font-bold w-6 h-6 rounded-full flex items-center justify-center font-mono',
+                      isToday ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/40' : 'text-zinc-400'
                     )}
                   >
                     {d.dayNumber}
                   </span>
                   {dayEvents.length > 0 && (
-                    <span className="text-[10px] text-text-tertiary font-medium">
+                    <span className="text-[10px] text-zinc-500 font-bold font-mono">
                       {dayEvents.length} {dayEvents.length === 1 ? 'event' : 'events'}
                     </span>
                   )}
                 </div>
 
                 {/* Day Events List */}
-                <div className="space-y-1 mt-1.5 overflow-hidden">
+                <div className="space-y-1.5 mt-2 overflow-hidden">
                   {dayEvents.slice(0, 3).map((evt) => (
                     <button
                       key={evt.id}
                       onClick={() => setSelectedEvent(evt)}
                       className={cn(
-                        'w-full text-left px-2 py-1 rounded-md border text-[11px] font-medium truncate block transition-transform hover:scale-[1.02]',
+                        'w-full text-left px-2 py-1 rounded-lg border text-[11px] font-semibold truncate block transition-all hover:scale-[1.02] shadow-sm',
                         getEventBadgeColor(evt.eventType)
                       )}
                     >
@@ -310,7 +311,7 @@ export default function CalendarClient({ events }: CalendarClientProps) {
                     </button>
                   ))}
                   {dayEvents.length > 3 && (
-                    <span className="text-[10px] text-text-tertiary pl-1 block font-medium">
+                    <span className="text-[10px] text-indigo-400 pl-1 block font-bold">
                       +{dayEvents.length - 3} more
                     </span>
                   )}
@@ -323,18 +324,18 @@ export default function CalendarClient({ events }: CalendarClientProps) {
 
       {/* Selected Event Modal */}
       {selectedEvent && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fade-in">
-          <div className="bg-bg-surface border border-border-default rounded-2xl max-w-md w-full p-6 shadow-2xl space-y-4">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-md animate-fade-in">
+          <div className="bg-[#12121c]/95 border border-zinc-800 rounded-3xl max-w-md w-full p-6 sm:p-7 shadow-2xl space-y-5">
             <div className="flex items-start justify-between">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-xl bg-accent/10 border border-accent/20 flex items-center justify-center text-accent font-bold">
+              <div className="flex items-center gap-3.5">
+                <div className="w-11 h-11 rounded-2xl bg-gradient-to-tr from-indigo-500/20 to-violet-500/20 border border-indigo-500/30 flex items-center justify-center text-indigo-400 font-extrabold text-lg">
                   {selectedEvent.companyName.charAt(0)}
                 </div>
                 <div>
-                  <h3 className="text-base font-bold text-text-primary">{selectedEvent.companyName}</h3>
+                  <h3 className="text-lg font-bold text-white">{selectedEvent.companyName}</h3>
                   <span
                     className={cn(
-                      'inline-block px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider mt-0.5 border',
+                      'inline-block px-2.5 py-0.5 rounded-md text-[10px] font-bold uppercase tracking-wider mt-1 border',
                       getEventBadgeColor(selectedEvent.eventType)
                     )}
                   >
@@ -344,19 +345,19 @@ export default function CalendarClient({ events }: CalendarClientProps) {
               </div>
               <button
                 onClick={() => setSelectedEvent(null)}
-                className="p-1 rounded-lg text-text-tertiary hover:text-text-primary transition-colors"
+                className="p-1.5 rounded-xl text-zinc-500 hover:text-white hover:bg-zinc-800 transition-colors"
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
 
-            <div className="space-y-2.5 pt-2 text-xs">
-              <h4 className="text-sm font-semibold text-text-primary">{selectedEvent.title}</h4>
+            <div className="space-y-3 pt-2 text-xs bg-zinc-950/60 p-4 rounded-2xl border border-zinc-800/80">
+              <h4 className="text-sm font-bold text-zinc-200">{selectedEvent.title}</h4>
 
               {selectedEvent.startTime && (
-                <div className="flex items-center gap-2 text-text-secondary">
-                  <Clock className="w-4 h-4 text-text-tertiary" />
-                  <span>
+                <div className="flex items-center gap-2.5 text-zinc-400">
+                  <Clock className="w-4 h-4 text-indigo-400 flex-shrink-0" />
+                  <span className="font-mono text-zinc-300">
                     {new Date(selectedEvent.startTime).toLocaleString('en-IN', {
                       dateStyle: 'full',
                       timeStyle: 'short',
@@ -366,28 +367,41 @@ export default function CalendarClient({ events }: CalendarClientProps) {
               )}
 
               {selectedEvent.venue && (
-                <div className="flex items-center gap-2 text-text-secondary">
-                  <MapPin className="w-4 h-4 text-text-tertiary" />
+                <div className="flex items-center gap-2.5 text-zinc-400">
+                  <MapPin className="w-4 h-4 text-emerald-400 flex-shrink-0" />
                   <span>{selectedEvent.venue}</span>
                 </div>
               )}
             </div>
 
-            <div className="pt-3 border-t border-border-default flex items-center justify-between">
+            <div className="pt-2 flex items-center justify-between gap-3">
               <Link
                 href={`/companies/${selectedEvent.companyId}`}
-                className="inline-flex items-center gap-1.5 text-xs font-semibold text-accent hover:underline"
+                className="inline-flex items-center gap-1.5 text-xs font-semibold text-indigo-400 hover:text-indigo-300 transition-colors"
               >
                 View Company Profile
                 <ExternalLink className="w-3.5 h-3.5" />
               </Link>
 
-              <button
-                onClick={() => setSelectedEvent(null)}
-                className="px-3 py-1.5 rounded-xl bg-bg-elevated hover:bg-bg-surface-hover text-xs font-medium text-text-secondary"
-              >
-                Close
-              </button>
+              <div className="flex items-center gap-2">
+                {selectedEvent.startTime && (
+                  <a
+                    href={`https://calendar.google.com/calendar/render?action=TEMPLATE&text=${encodeURIComponent(selectedEvent.title || 'Placement Event')}&dates=${new Date(selectedEvent.startTime).toISOString().replace(/-|:|\.\d+/g, '')}/${new Date(new Date(selectedEvent.startTime).getTime() + 3600000).toISOString().replace(/-|:|\.\d+/g, '')}&location=${encodeURIComponent(selectedEvent.venue || 'VIT Campus / Online')}`}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="px-3 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold shadow-md shadow-indigo-600/25 transition-all flex items-center gap-1.5"
+                  >
+                    <CalendarIcon className="w-3.5 h-3.5" />
+                    Add to Calendar
+                  </a>
+                )}
+                <button
+                  onClick={() => setSelectedEvent(null)}
+                  className="px-3 py-1.5 rounded-xl bg-zinc-900 hover:bg-zinc-800 text-xs font-semibold text-zinc-400 hover:text-zinc-200 transition-all border border-zinc-800"
+                >
+                  Close
+                </button>
+              </div>
             </div>
           </div>
         </div>
