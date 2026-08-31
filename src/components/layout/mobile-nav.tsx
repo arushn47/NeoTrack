@@ -14,10 +14,9 @@ import {
 
 const navItems = [
   { label: 'Home', href: '/', icon: LayoutDashboard },
-  { label: 'Analytics', href: '/analytics', icon: PieChart },
   { label: 'Companies', href: '/companies', icon: Building2 },
   { label: 'Calendar', href: '/calendar', icon: Calendar },
-  { label: 'Search', href: '/search', icon: Search },
+  { label: 'Analytics', href: '/analytics', icon: PieChart },
   { label: 'Settings', href: '/settings', icon: Settings },
 ];
 

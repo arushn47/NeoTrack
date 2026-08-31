@@ -1,10 +1,11 @@
+import type { Metadata } from 'next';
 import { requireSession } from '@/lib/auth';
 import { createAdminClient } from '@/lib/supabase/admin';
 import SettingsClient from './settings-client';
 
-export const metadata = {
-  title: 'Settings — NeoTrack',
-  description: 'Manage your Gmail accounts, Neo ID, and preferences.',
+export const metadata: Metadata = {
+  title: 'Settings & Preferences',
+  description: 'Manage connected Gmail accounts, Neo ID matching rules, and notification preferences in NeoTrack.',
 };
 
 export default async function SettingsPage() {

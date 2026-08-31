@@ -15,7 +15,7 @@ export const maxDuration = 120;
  * Tier 2: College circulars (@vitbhopal.ac.in) ONLY enrich existing NeoPAT drives with CTC, JDs,
  *         test dates, and shortlist verification. Non-NeoPAT drives (e.g. Datagrokr) are discarded.
  */
-async function performReprocess(userId: string) {
+export async function performReprocess(userId: string) {
   const supabase = createAdminClient();
 
   // Fetch user details
@@ -55,13 +55,33 @@ async function performReprocess(userId: string) {
     }
   }
 
-  // 2. Fetch ALL stored emails for this user
-  const { data: emails, error: emailsError } = await supabase
-    .from('emails')
-    .select('id, subject, sender, body_snippet, classification, company_id, received_at')
-    .eq('user_id', userId);
+  // 2. Fetch ALL stored emails for this user with automatic pagination
+  const emails: Array<{
+    id: string;
+    subject: string | null;
+    sender: string | null;
+    body_snippet: string | null;
+    classification: string | null;
+    company_id: string | null;
+    received_at: string | null;
+  }> = [];
 
-  if (emailsError || !emails || emails.length === 0) {
+  const pageSize = 1000;
+  let page = 0;
+  while (true) {
+    const { data: chunk, error: chunkErr } = await supabase
+      .from('emails')
+      .select('id, subject, sender, body_snippet, classification, company_id, received_at')
+      .eq('user_id', userId)
+      .range(page * pageSize, (page + 1) * pageSize - 1);
+
+    if (chunkErr || !chunk || chunk.length === 0) break;
+    emails.push(...chunk);
+    if (chunk.length < pageSize) break;
+    page++;
+  }
+
+  if (emails.length === 0) {
     return { success: true, message: 'No emails found to reprocess', fixed: 0 };
   }
 
@@ -71,10 +91,11 @@ async function performReprocess(userId: string) {
   const neoPatEmails = emails.filter((e) => isNeoPatSender(e.sender || ''));
   const collegeEmails = emails.filter((e) => !isNeoPatSender(e.sender || ''));
 
-  // 3. Phase 1: Establish Official NeoPAT Companies
-  // ONLY NeoPAT emails define the drives in NeoTrack!
+  // 3. Phase 1: Establish Official NeoPAT Companies ONLY
+  // ONLY emails from noreply.cdcinfo@vitstudent.ac.in define the company drives in NeoTrack!
   const validCompanyMap = new Map<string, { id: string; canonicalName: string }>(); // name -> { id, canonicalName }
   const validCompanyIdSet = new Set<string>();
+  const emailUpdates: Array<{ id: string; company_id: string | null; classification: string; is_relevant: boolean }> = [];
 
   for (const email of neoPatEmails) {
     const subject = email.subject || '';
@@ -146,34 +167,26 @@ async function performReprocess(userId: string) {
             }
           }
         }
-
-        if (comp) {
-          validCompanyMap.set(normalized.toLowerCase(), comp);
-          validCompanyIdSet.add(comp.id);
-        }
       }
 
-      // Link this NeoPAT email to the company
       if (comp) {
-        await supabase
-          .from('emails')
-          .update({
-            company_id: comp.id,
-            classification: classification.classification,
-            is_relevant: true,
-          })
-          .eq('id', email.id);
+        validCompanyMap.set(normalized.toLowerCase(), comp);
+        validCompanyIdSet.add(comp.id);
+
+        emailUpdates.push({
+          id: email.id,
+          company_id: comp.id,
+          classification: classification.classification,
+          is_relevant: true,
+        });
       }
     } else {
-      // Unlink non-company NeoPAT emails (e.g. general portal links)
-      await supabase
-        .from('emails')
-        .update({
-          company_id: null,
-          classification: classification.classification,
-          is_relevant: false,
-        })
-        .eq('id', email.id);
+      emailUpdates.push({
+        id: email.id,
+        company_id: null,
+        classification: classification.classification,
+        is_relevant: false,
+      });
     }
   }
 
@@ -230,18 +243,29 @@ async function performReprocess(userId: string) {
       if (validCompanyMap.has(normalized)) {
         matchedCompanyId = validCompanyMap.get(normalized)!.id;
       } else {
-        // 2. Substring match with distinct company guards
-        for (const [neoName, comp] of validCompanyMap.entries()) {
-          // Guard: Never merge EY GDS and EY SAP
+        // 2. Substring match with distinct company guards (longest name first)
+        const sortedValid = Array.from(validCompanyMap.entries()).sort((a, b) => b[0].length - a[0].length);
+        for (const [neoName, comp] of sortedValid) {
+          // Guard: Never cross-match EY GDS and EY SAP
           if (
             (neoName.includes('gds') && normalized.includes('sap')) ||
-            (neoName.includes('sap') && normalized.includes('gds'))
+            (neoName.includes('sap') && normalized.includes('gds')) ||
+            (!neoName.includes('sap') && !neoName.includes('gds') && (normalized.includes('sap') || normalized.includes('gds'))) ||
+            (!normalized.includes('sap') && !normalized.includes('gds') && (neoName.includes('sap') || neoName.includes('gds')))
+          ) {
+            continue;
+          }
+
+          // Guard: Never cross-match Honeywell Aerospace and Honeywell Technology Solutions Lab
+          if (
+            (neoName.includes('aerospace') && normalized.includes('technology')) ||
+            (neoName.includes('technology') && normalized.includes('aerospace'))
           ) {
             continue;
           }
 
           if (neoName.length >= 4 && normalized.length >= 4) {
-            if (neoName.includes(normalized) || normalized.includes(neoName)) {
+            if (neoName === normalized || neoName.includes(normalized) || normalized.includes(neoName)) {
               matchedCompanyId = comp.id;
               break;
             }
@@ -251,29 +275,47 @@ async function performReprocess(userId: string) {
     }
 
     if (matchedCompanyId) {
-      // Link college circular to legitimate NeoPAT company
-      await supabase
-        .from('emails')
-        .update({
-          company_id: matchedCompanyId,
-          classification: classification.classification,
-          is_relevant: true,
-        })
-        .eq('id', email.id);
-
+      emailUpdates.push({
+        id: email.id,
+        company_id: matchedCompanyId,
+        classification: classification.classification,
+        is_relevant: true,
+      });
       collegeLinkedCount++;
     } else {
-      // Discard non-NeoPAT college email (e.g. Datagrokr, MBA drives, etc.)
+      emailUpdates.push({
+        id: email.id,
+        company_id: null,
+        classification: classification.classification,
+        is_relevant: false,
+      });
+      collegeDiscardedCount++;
+    }
+  }
+
+  // Fast Batch Update emails in grouped chunks
+  const groupedUpdates = new Map<string, string[]>();
+  for (const u of emailUpdates) {
+    const key = `${u.company_id || 'null'}|${u.classification}|${u.is_relevant}`;
+    if (!groupedUpdates.has(key)) groupedUpdates.set(key, []);
+    groupedUpdates.get(key)!.push(u.id);
+  }
+
+  for (const [key, ids] of groupedUpdates.entries()) {
+    const [compIdStr, cls, isRelStr] = key.split('|');
+    const compId = compIdStr === 'null' ? null : compIdStr;
+    const isRel = isRelStr === 'true';
+
+    for (let i = 0; i < ids.length; i += 500) {
+      const chunk = ids.slice(i, i + 500);
       await supabase
         .from('emails')
         .update({
-          company_id: null,
-          classification: classification.classification,
-          is_relevant: false,
+          company_id: compId,
+          classification: cls as any,
+          is_relevant: isRel,
         })
-        .eq('id', email.id);
-
-      collegeDiscardedCount++;
+        .in('id', chunk);
     }
   }
 
@@ -385,23 +427,27 @@ async function performReprocess(userId: string) {
       // Final selection list is out!
       if (isMatchedInSelectionList) {
         computedStatus = 'selected';
-      } else if (isMatchedInTest || isMatchedInNextRound || hasConfirmedRegistration) {
+      } else if (isMatchedInTest || isMatchedInNextRound) {
         // Candidate reached the test/interview stage, but was not selected in final list -> rejected
         computedStatus = 'rejected';
-      } else {
-        // Candidate was never shortlisted for test -> not_shortlisted
+      } else if (hasConfirmedRegistration) {
+        // Candidate applied, but was never shortlisted for test -> not_shortlisted
         computedStatus = 'not_shortlisted';
+      } else {
+        computedStatus = 'not_applied';
       }
     } else if (nextRoundEmails.length > 0) {
       // Next round / interview announcement is out!
       if (isMatchedInNextRound) {
         computedStatus = 'interview_scheduled';
-      } else if (isMatchedInTest || hasConfirmedRegistration) {
-        // Candidate took the test, but was not shortlisted for interview -> rejected (failed test)
+      } else if (isMatchedInTest) {
+        // Candidate took the test, but was not shortlisted for interview -> rejected (eliminated in test)
         computedStatus = 'rejected';
-      } else {
-        // Candidate was never shortlisted for test -> not_shortlisted
+      } else if (hasConfirmedRegistration) {
+        // Candidate applied, but was never shortlisted for test -> not_shortlisted
         computedStatus = 'not_shortlisted';
+      } else {
+        computedStatus = 'not_applied';
       }
     } else if (testShortlistEmails.length > 0) {
       // Initial test schedule / screening shortlist
@@ -422,7 +468,7 @@ async function performReprocess(userId: string) {
           computedStatus = 'test_scheduled';
         }
       } else {
-        computedStatus = 'not_shortlisted';
+        computedStatus = 'not_applied';
       }
     } else if (hasConfirmedRegistration) {
       if (hasPptEvent) {
@@ -465,35 +511,32 @@ async function performReprocess(userId: string) {
       { onConflict: 'user_id,company_id' }
     );
 
-    // Manage events: purge if eliminated
-    if (['withdrawn', 'declined', 'rejected', 'not_shortlisted', 'not_applied'].includes(finalStatus)) {
-      await supabase.from('events').delete().eq('user_id', userId).eq('company_id', comp.id);
-    } else {
-      for (const evt of allExtractedEvents) {
-        if (!evt.startTime) continue;
-        const startTimeIso = evt.startTime.toISOString();
+    // Manage events: wipe existing events for this company and re-insert fresh ones
+    await supabase.from('events').delete().eq('user_id', userId).eq('company_id', comp.id);
 
-        const { data: existingEvts } = await supabase
-          .from('events')
-          .select('id')
-          .eq('user_id', userId)
-          .eq('company_id', comp.id)
-          .eq('event_type', evt.eventType)
-          .limit(1);
+    const isEliminated = ['rejected', 'not_shortlisted', 'not_applied'].includes(finalStatus);
+    const now = new Date();
 
-        if (!existingEvts || existingEvts.length === 0) {
-          await supabase.from('events').insert({
-            user_id: userId,
-            company_id: comp.id,
-            event_type: evt.eventType,
-            title: `${comp.name} - ${evt.title}`,
-            start_time: startTimeIso,
-            end_time: evt.endTime ? evt.endTime.toISOString() : null,
-            venue: evt.venue,
-            mode: evt.mode,
-            confidence: evt.confidence,
-          });
-        }
+    for (const evt of allExtractedEvents) {
+      if (!evt.startTime) continue;
+      const isUpcoming = evt.startTime >= now;
+
+      // Only insert if company is active, or if candidate is matched in a future test/event
+      if (!isEliminated || isMatchedInTest || isUpcoming) {
+        // Skip past events for withdrawn/eliminated companies
+        if (!isUpcoming && isEliminated) continue;
+
+        await supabase.from('events').insert({
+          user_id: userId,
+          company_id: comp.id,
+          event_type: evt.eventType,
+          title: `${comp.name} - ${evt.title}`,
+          start_time: evt.startTime.toISOString(),
+          end_time: evt.endTime ? evt.endTime.toISOString() : null,
+          venue: evt.venue,
+          mode: evt.mode,
+          confidence: evt.confidence,
+        });
       }
     }
 

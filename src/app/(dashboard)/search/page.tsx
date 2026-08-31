@@ -1,10 +1,11 @@
+import type { Metadata } from 'next';
 import { requireSession } from '@/lib/auth';
 import { createAdminClient } from '@/lib/supabase/admin';
 import SearchClient, { type SearchData } from './search-client';
 
-export const metadata = {
-  title: 'Search — NeoTrack',
-  description: 'Search across companies, emails, job roles, tests, and interview schedules.',
+export const metadata: Metadata = {
+  title: 'Global Search',
+  description: 'Search across campus drives, company emails, job descriptions, test links, and shortlist records.',
 };
 
 export default async function SearchPage() {

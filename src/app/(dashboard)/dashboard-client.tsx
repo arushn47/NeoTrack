@@ -17,7 +17,6 @@ import {
   ChevronRight,
   AlertTriangle,
   Sparkles,
-  ExternalLink,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { formatDateTime } from '@/lib/utils';
@@ -25,6 +24,18 @@ import { EVENT_TYPE_LABELS, EVENT_TYPE_COLORS } from '@/constants/event-types';
 import type { DashboardStats, UpcomingEvent } from '@/types';
 import type { EventType } from '@/constants/event-types';
 import Link from 'next/link';
+
+export interface ActiveApplicationItem {
+  id: string;
+  companyId: string;
+  companyName: string;
+  companyLogo: string | null;
+  status: string;
+  role: string | null;
+  ctc: string | null;
+  stipend: string | null;
+  lastUpdated: string | null;
+}
 
 interface DashboardClientProps {
   stats: DashboardStats;
@@ -38,6 +49,7 @@ interface DashboardClientProps {
     venue: string | null;
     mode: string | null;
   }>;
+  activeApplications?: ActiveApplicationItem[];
   hasAccounts: boolean;
   hasPersonalAccount?: boolean;
   hasCollegeAccount?: boolean;
@@ -297,80 +309,97 @@ export default function DashboardClient({
         })}
       </div>
 
-      {/* Upcoming Events Section */}
-      <div className="rounded-2xl bg-[#101018]/90 backdrop-blur-2xl border border-zinc-800/80 overflow-hidden shadow-xl shadow-black/20">
-        <div className="flex items-center justify-between px-6 py-4 border-b border-zinc-800/80">
-          <h2 className="text-sm font-bold text-white flex items-center gap-2">
-            <Clock className="w-4 h-4 text-indigo-400" />
-            Upcoming Placement Schedule
-          </h2>
-          {upcomingEvents.length > 0 && (
-            <Link href="/calendar" className="text-xs font-semibold text-indigo-400 hover:text-indigo-300 transition-colors flex items-center gap-1">
-              Full Calendar <ArrowRight className="w-3 h-3" />
-            </Link>
-          )}
+      {/* Upcoming Placement Schedule Card */}
+      <div className="rounded-3xl bg-[#101018]/95 backdrop-blur-2xl border border-zinc-800/80 overflow-hidden shadow-2xl shadow-black/40">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-zinc-800/80 bg-zinc-950/40">
+          <div className="flex items-center gap-3">
+            <div className="w-9 h-9 rounded-xl bg-indigo-500/10 border border-indigo-500/25 flex items-center justify-center text-indigo-400 flex-shrink-0 shadow-sm shadow-indigo-500/10">
+              <Calendar className="w-4 h-4" />
+            </div>
+            <div>
+              <h2 className="text-sm font-bold text-white flex items-center gap-2">
+                <span>Upcoming Placement Schedule</span>
+                <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 font-mono">
+                  {upcomingEvents.length}
+                </span>
+              </h2>
+              <p className="text-xs text-zinc-400 mt-0.5">
+                Next tests, interviews, and pre-placement talks synced from CDC emails
+              </p>
+            </div>
+          </div>
+
+          <Link
+            href="/calendar"
+            className="flex items-center gap-1 text-xs font-semibold text-indigo-400 hover:text-indigo-300 transition-colors bg-indigo-500/10 hover:bg-indigo-500/20 px-3.5 py-1.5 rounded-xl border border-indigo-500/20"
+          >
+            <span>View Calendar</span>
+            <ChevronRight className="w-3.5 h-3.5" />
+          </Link>
         </div>
 
-        {upcomingEvents.length === 0 ? (
-          <div className="py-14 text-center">
-            <div className="w-12 h-12 rounded-2xl bg-zinc-900/80 border border-zinc-800 flex items-center justify-center mx-auto mb-3 text-zinc-500">
-              <Calendar className="w-6 h-6 text-zinc-500" />
+        <div className="p-5 sm:p-6">
+          {upcomingEvents.length === 0 ? (
+            <div className="py-12 text-center">
+              <div className="w-12 h-12 rounded-2xl bg-zinc-900/80 border border-zinc-800 flex items-center justify-center mx-auto mb-3 text-zinc-500">
+                <Calendar className="w-6 h-6 text-zinc-500" />
+              </div>
+              <p className="text-sm font-semibold text-zinc-300">No upcoming tests or interviews scheduled</p>
+              <p className="text-xs text-zinc-500 mt-1 max-w-sm mx-auto">
+                {hasAccounts ? 'All upcoming PPTs, assessments, and interview rounds will appear here automatically.' : 'Connect your college Gmail in Settings to extract CDC schedules.'}
+              </p>
             </div>
-            <p className="text-sm font-semibold text-zinc-300">No upcoming tests or interviews scheduled</p>
-            <p className="text-xs text-zinc-500 mt-1 max-w-sm mx-auto">
-              {hasAccounts ? 'All upcoming PPTs, assessments, and interview rounds will appear here automatically.' : 'Connect your college Gmail in Settings to extract CDC schedules.'}
-            </p>
-          </div>
-        ) : (
-          <div className="divide-y divide-zinc-800/60">
-            {upcomingEvents.map((event) => {
-              const eventColors = EVENT_TYPE_COLORS[event.event_type as EventType] || EVENT_TYPE_COLORS.other;
-              return (
-                <div
-                  key={event.id}
-                  className="flex items-center gap-4 px-6 py-4 hover:bg-zinc-800/30 transition-all group"
-                >
-                  <div className={cn('w-2.5 h-2.5 rounded-full flex-shrink-0', eventColors.dot)} />
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-semibold text-white truncate group-hover:text-indigo-300 transition-colors">
-                      {event.title || EVENT_TYPE_LABELS[event.event_type as EventType] || event.event_type}
-                    </p>
-                    <div className="flex items-center gap-2 text-xs text-zinc-400 mt-1">
-                      {event.venue && <span>{event.venue}</span>}
-                      {event.venue && <span>·</span>}
-                      {event.mode && event.mode !== 'unknown' && (
-                        <span className="capitalize">{event.mode} · </span>
-                      )}
-                      <span className={cn('font-medium', eventColors.text)}>
-                        {EVENT_TYPE_LABELS[event.event_type as EventType]}
-                      </span>
-                    </div>
-                  </div>
-
-                  <div className="flex items-center gap-3 text-right flex-shrink-0">
-                    <div>
-                      <p className="text-xs font-semibold text-zinc-200">
-                        {event.start_time ? formatDateTime(event.start_time) : '—'}
+          ) : (
+            <div className="divide-y divide-zinc-800/60">
+              {upcomingEvents.map((event) => {
+                const eventColors = EVENT_TYPE_COLORS[event.event_type as EventType] || EVENT_TYPE_COLORS.other;
+                return (
+                  <div
+                    key={event.id}
+                    className="flex items-center gap-4 py-3.5 hover:bg-zinc-900/40 transition-all group rounded-xl px-2"
+                  >
+                    <div className={cn('w-2.5 h-2.5 rounded-full flex-shrink-0', eventColors.dot)} />
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-semibold text-white truncate group-hover:text-indigo-300 transition-colors">
+                        {event.title || EVENT_TYPE_LABELS[event.event_type as EventType] || event.event_type}
                       </p>
+                      <div className="flex items-center gap-2 text-xs text-zinc-400 mt-1">
+                        {event.venue && <span>{event.venue}</span>}
+                        {event.venue && <span>·</span>}
+                        {event.mode && event.mode !== 'unknown' && (
+                          <span className="capitalize">{event.mode} · </span>
+                        )}
+                        <span className={cn('font-medium', eventColors.text)}>
+                          {EVENT_TYPE_LABELS[event.event_type as EventType]}
+                        </span>
+                      </div>
                     </div>
-                    {event.start_time && (
-                      <a
-                        href={`https://calendar.google.com/calendar/render?action=TEMPLATE&text=${encodeURIComponent(event.title || 'Placement Event')}&dates=${new Date(event.start_time).toISOString().replace(/-|:|\.\d+/g, '')}/${new Date(new Date(event.start_time).getTime() + 3600000).toISOString().replace(/-|:|\.\d+/g, '')}&location=${encodeURIComponent(event.venue || 'VIT Campus / Online')}`}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="p-2 rounded-xl text-zinc-400 hover:text-indigo-300 hover:bg-indigo-500/10 border border-transparent hover:border-indigo-500/20 transition-all"
-                        title="Add to Google Calendar"
-                        aria-label="Add to Google Calendar"
-                      >
-                        <Calendar className="w-4 h-4" />
-                      </a>
-                    )}
+
+                    <div className="flex items-center gap-3 text-right flex-shrink-0">
+                      <div>
+                        <p className="text-xs font-semibold text-zinc-200">
+                          {event.start_time ? formatDateTime(event.start_time) : '—'}
+                        </p>
+                      </div>
+                      {event.start_time && (
+                        <a
+                          href={`https://calendar.google.com/calendar/render?action=TEMPLATE&text=${encodeURIComponent(event.title || 'Placement Event')}&dates=${new Date(event.start_time).toISOString().replace(/-|:|\.\d+/g, '')}/${new Date(new Date(event.start_time).getTime() + 3600000).toISOString().replace(/-|:|\.\d+/g, '')}&location=${encodeURIComponent(event.venue || 'VIT Campus / Online')}`}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="p-2 rounded-xl text-zinc-400 hover:text-indigo-300 hover:bg-indigo-500/10 border border-transparent hover:border-indigo-500/20 transition-all"
+                          title="Add to Google Calendar"
+                          aria-label="Add to Google Calendar"
+                        >
+                          <Calendar className="w-4 h-4" />
+                        </a>
+                      )}
+                    </div>
                   </div>
-                </div>
-              );
-            })}
-          </div>
-        )}
+                );
+              })}
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Quick stats footer */}

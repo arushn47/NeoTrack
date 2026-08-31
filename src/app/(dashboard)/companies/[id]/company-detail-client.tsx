@@ -158,72 +158,76 @@ export default function CompanyDetailClient({ company }: CompanyDetailClientProp
             </div>
           </div>
 
-          {/* Status Override Selector */}
-          <div className="relative">
+          {/* Actions on the right: Status Override + Delete */}
+          <div className="flex items-center gap-2.5 self-start sm:self-center">
+            {/* Status Override Selector */}
+            <div className="relative">
+              <button
+                onClick={() => setShowStatusMenu(!showStatusMenu)}
+                disabled={isUpdating}
+                className="flex items-center gap-3 px-4 py-2.5 bg-zinc-900/90 border border-zinc-800 hover:border-indigo-500/40 rounded-2xl text-xs font-semibold transition-all shadow-md active:scale-95"
+              >
+                <StatusBadge status={status} events={company.events} />
+                <ChevronDown className="w-3.5 h-3.5 text-zinc-500" />
+              </button>
+
+              {showStatusMenu && (
+                <>
+                  <div
+                    className="fixed inset-0 z-40"
+                    onClick={() => setShowStatusMenu(false)}
+                  />
+                  <div
+                    className="absolute right-0 top-full mt-2 w-60 p-1.5 bg-[#12121c]/95 backdrop-blur-2xl border border-zinc-800 rounded-2xl shadow-2xl z-50 animate-fade-in max-h-[min(24rem,80vh)] overflow-y-auto divide-y divide-zinc-800/60"
+                  >
+                    <div className="px-3 py-2 text-[10px] font-bold text-zinc-500 uppercase tracking-wider">
+                      Manual Status Override
+                    </div>
+                    <div className="space-y-0.5 pt-1">
+                      {ALL_STATUSES.map((s) => (
+                        <button
+                          key={s.value}
+                          onClick={() => handleStatusChange(s.value)}
+                          className={cn(
+                            'flex items-center justify-between w-full px-3 py-2 text-xs font-semibold rounded-xl transition-all text-left',
+                            status === s.value
+                              ? 'bg-indigo-500/15 text-indigo-300 font-bold'
+                              : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/50'
+                          )}
+                        >
+                          <span>{s.label}</span>
+                          {status === s.value && <CheckCircle2 className="w-3.5 h-3.5 text-indigo-400" />}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </>
+              )}
+            </div>
+
+            {/* Delete Company */}
             <button
-              onClick={() => setShowStatusMenu(!showStatusMenu)}
-              disabled={isUpdating}
-              className="flex items-center gap-3 px-4 py-2.5 bg-zinc-900/90 border border-zinc-800 hover:border-indigo-500/40 rounded-2xl text-xs font-semibold transition-all shadow-md active:scale-95"
+              onClick={async () => {
+                if (!confirm(`Delete "${company.name}" and all its events, status, and linked data? This cannot be undone.`)) return;
+                setIsDeleting(true);
+                try {
+                  const res = await fetch(`/api/companies/${company.id}`, { method: 'DELETE' });
+                  if (res.ok) {
+                    router.push('/companies');
+                  } else {
+                    alert('Failed to delete company');
+                  }
+                } catch { alert('Failed to delete company'); }
+                finally { setIsDeleting(false); }
+              }}
+              disabled={isDeleting}
+              className="p-2.5 rounded-2xl bg-zinc-900/80 border border-zinc-800/80 text-zinc-500 hover:text-red-400 hover:border-red-500/30 hover:bg-red-500/10 transition-all shadow-md active:scale-95"
+              title="Delete company"
+              aria-label="Delete company"
             >
-              <StatusBadge status={status} events={company.events} />
-              <ChevronDown className="w-3.5 h-3.5 text-zinc-500" />
+              <Trash2 className="w-4 h-4" />
             </button>
-
-            {showStatusMenu && (
-              <>
-                <div
-                  className="fixed inset-0 z-40"
-                  onClick={() => setShowStatusMenu(false)}
-                />
-                <div
-                  className="absolute right-0 top-full mt-2 w-60 p-1.5 bg-[#12121c]/95 backdrop-blur-2xl border border-zinc-800 rounded-2xl shadow-2xl z-50 animate-fade-in max-h-[min(24rem,80vh)] overflow-y-auto divide-y divide-zinc-800/60"
-                >
-                  <div className="px-3 py-2 text-[10px] font-bold text-zinc-500 uppercase tracking-wider">
-                    Manual Status Override
-                  </div>
-                  <div className="space-y-0.5 pt-1">
-                    {ALL_STATUSES.map((s) => (
-                      <button
-                        key={s.value}
-                        onClick={() => handleStatusChange(s.value)}
-                        className={cn(
-                          'flex items-center justify-between w-full px-3 py-2 text-xs font-semibold rounded-xl transition-all text-left',
-                          status === s.value
-                            ? 'bg-indigo-500/15 text-indigo-300 font-bold'
-                            : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/50'
-                        )}
-                      >
-                        <span>{s.label}</span>
-                        {status === s.value && <CheckCircle2 className="w-3.5 h-3.5 text-indigo-400" />}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              </>
-            )}
           </div>
-
-          {/* Delete Company */}
-          <button
-            onClick={async () => {
-              if (!confirm(`Delete "${company.name}" and all its events, status, and linked data? This cannot be undone.`)) return;
-              setIsDeleting(true);
-              try {
-                const res = await fetch(`/api/companies/${company.id}`, { method: 'DELETE' });
-                if (res.ok) {
-                  router.push('/companies');
-                } else {
-                  alert('Failed to delete company');
-                }
-              } catch { alert('Failed to delete company'); }
-              finally { setIsDeleting(false); }
-            }}
-            disabled={isDeleting}
-            className="p-2.5 rounded-xl border border-zinc-800 hover:border-red-500/40 hover:bg-red-500/10 text-zinc-500 hover:text-red-400 transition-all active:scale-95 disabled:opacity-50"
-            title="Delete this company"
-          >
-            <Trash2 className="w-4 h-4" />
-          </button>
         </div>
 
         {/* Quick Metadata Bar */}

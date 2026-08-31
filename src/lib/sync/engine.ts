@@ -73,7 +73,11 @@ export async function runSync(
     .eq('user_id', userId)
     .eq('is_connected', true);
 
-  const connectedAccounts = (accounts || []).filter((a) => a.is_connected) as GmailAccount[];
+  if (accountsError) {
+    throw new Error(`Failed to fetch Gmail accounts: ${accountsError.message}`);
+  }
+
+  const connectedAccounts = (accounts || []) as GmailAccount[];
   const hasPersonal = connectedAccounts.some((a) => a.account_type === 'personal');
   const hasCollege = connectedAccounts.some((a) => a.account_type === 'college');
 
@@ -474,8 +478,7 @@ export async function runSync(
           for (const email of unlinkedEmails) {
             const compName = extractCompanyName(
               email.subject || '',
-              email.sender || '',
-              email.body_snippet || ''
+              email.sender || ''
             );
             if (compName) {
               const norm = normalizeCompanyName(compName).toLowerCase();

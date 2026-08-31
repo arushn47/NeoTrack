@@ -119,24 +119,36 @@ const CLASSIFICATION_RULES: ClassificationRule[] = [
     classification: 'venue_update',
     confidence: 'high',
     match: (s) =>
-      /(venue\s*(change|update)|change\s*(of|in)\s*venue|revised\s*schedule|reschedule)/i.test(s),
+      /(venue\s*(change|update)|change\s*(of|in)\s*venue|revised\s*schedule|reschedule|date\s+change)/i.test(s),
     reason: 'Subject mentions venue change or reschedule',
   },
 
   // --- MEDIUM CONFIDENCE ---
+  {
+    classification: 'registration_confirmation',
+    confidence: 'high',
+    match: (s, b) =>
+      /(successfully\s+registered|registration\s+confirmed|application\s+received|thank\s+you\s+for\s+(registering|applying)|confirmed:\s*(?:your\s+registration|.*placement\s+drive)|confirmation:\s*.*drive\s+registration)/i.test(s + ' ' + b),
+    reason: 'Confirmation language detected',
+  },
+  {
+    classification: 'registration',
+    confidence: 'high',
+    match: (s) =>
+      /(?:eligible\s+for|eligibility\s+for|placement\s+drive|campus\s+drive|optional\s+form|drive\s+information|drive\s+registration|drive\s+update)/i.test(
+        s
+      ) &&
+      !/course|assessment\s+course|mock\s+test|learning\s+contents|practice\s+assessment|nerd\s+season|codeathon/i.test(
+        s
+      ),
+    reason: 'Subject announces placement drive eligibility, update, or registration',
+  },
   {
     classification: 'registration',
     confidence: 'medium',
     match: (s) =>
       /(register|registration|apply\s+(now|here|for)|application\s+(open|link|form|deadline))/i.test(s),
     reason: 'Subject mentions registration or apply',
-  },
-  {
-    classification: 'registration_confirmation',
-    confidence: 'medium',
-    match: (s, b) =>
-      /(successfully\s+registered|registration\s+confirmed|application\s+received|thank\s+you\s+for\s+(registering|applying))/i.test(s + ' ' + b),
-    reason: 'Confirmation language detected',
   },
   {
     classification: 'application_status',
@@ -189,7 +201,12 @@ export function classifyEmail(email: ParsedEmail): ClassificationResult {
       return {
         classification: rule.classification,
         confidence: rule.confidence,
-        companyName: extractCompanyName(email.subject, email.senderEmail),
+        companyName: extractCompanyName(
+          email.subject,
+          email.senderEmail,
+          email.bodySnippet || email.bodyPlain,
+          email.receivedAt
+        ),
         reason: rule.reason,
       };
     }
@@ -198,7 +215,12 @@ export function classifyEmail(email: ParsedEmail): ClassificationResult {
   return {
     classification: 'unclassified',
     confidence: 'low',
-    companyName: extractCompanyName(email.subject, email.senderEmail),
+    companyName: extractCompanyName(
+      email.subject,
+      email.senderEmail,
+      email.bodySnippet || email.bodyPlain,
+      email.receivedAt
+    ),
     reason: 'No classification rule matched',
   };
 }
@@ -239,8 +261,9 @@ export const COMPANY_ALIASES: Record<string, string> = {
   'ey gds': 'EY GDS',
   'ey global delivery services': 'EY GDS',
   'ey-gds': 'EY GDS',
-  'ey': 'EY',
-  'ernst & young': 'EY',
+  'ey': 'EY GDS',
+  'ernst & young': 'EY GDS',
+  'ey (ernst & young)': 'EY GDS',
   'pwc': 'PwC',
   'pricewaterhousecoopers': 'PwC',
   'google': 'Google',
@@ -290,6 +313,7 @@ export const COMPANY_ALIASES: Record<string, string> = {
   'fischer jordan': 'FischerJordan',
   'playsimple': 'PlaySimple Games',
   'playsimple games': 'PlaySimple Games',
+  'play simple games': 'PlaySimple Games',
   'idfc': 'IDFC First Bank',
   'idfc bank': 'IDFC First Bank',
   'idfc first bank': 'IDFC First Bank',
@@ -317,15 +341,46 @@ export const COMPANY_ALIASES: Record<string, string> = {
   'intel india': 'Intel',
   'toshiba': 'Toshiba',
   'lseg': 'London Stock Exchange Group (LSEG)',
-  'q2': 'Q2 Software',
-  'q2 software': 'Q2 Software',
   'ion': 'ION Group',
   'ion group': 'ION Group',
   'eulermotors': 'Euler Motors',
-  'euler motors': 'Euler Motors',
   'wakefit': 'Wakefit',
   'procdna': 'ProcDNA',
   'blubridge': 'BluBridge Technologies',
+  'infosy': 'Infosys',
+  'infosy 2027 batch': 'Infosys',
+  'tredence': 'Tredence Analytics',
+  'tredence super dream': 'Tredence Analytics',
+  'tredence analytics': 'Tredence Analytics',
+  'unilever industries': 'Unilever',
+  'unilever': 'Unilever',
+  'societe generale global solution centre': 'Societe Generale',
+  'societe generale': 'Societe Generale',
+  'sandisk device design centre': 'SanDisk',
+  'sandisk': 'SanDisk',
+  'american express': 'American Express',
+  'amex': 'American Express',
+  'chubb': 'Chubb',
+  'colgate': 'Colgate-Palmolive',
+  'colgate-palmolive': 'Colgate-Palmolive',
+  'colgate palmolive': 'Colgate-Palmolive',
+  'exxonmobil': 'ExxonMobil',
+  'exxon mobil': 'ExxonMobil',
+  'exxon': 'ExxonMobil',
+  'foodhub': 'Foodhub',
+  'fractal': 'Fractal Analytics',
+  'fractal analytics': 'Fractal Analytics',
+  'palo alto': 'Palo Alto Networks',
+  'palo alto networks': 'Palo Alto Networks',
+  'spense': 'Spense',
+  'unthinkable': 'Unthinkable Solutions',
+  'unthinkable solutions': 'Unthinkable Solutions',
+  'veeva': 'Veeva Systems',
+  'veeva systems': 'Veeva Systems',
+  'whirlpool': 'Whirlpool',
+  'zensar': 'Zensar',
+  'zensar technologies': 'Zensar',
+  'honeywell': 'Honeywell',
 };
 
 /**
@@ -429,7 +484,7 @@ const NON_COMPANY_WORDS = [
   'congratulations', 'invitation', 'registration update', 'optional form',
   'complete today', 'complete', 'practice test', 'practice assessment',
   'mock test', 'top coders', 'nerd season', 'codeathon', 'course',
-  'learning contents', 'reminder',
+  'learning contents', 'reminder', 'q2', 'q2 software', '2027 batch', '2026 batch', 'batch',
   // Role titles / profiles that are never company names
   'ps associate software engineer', 'associate software engineer', 'ps associate engineer',
   'associate engineer', 'software engineer', 'software development engineer',
@@ -443,7 +498,9 @@ const NON_COMPANY_WORDS = [
  */
 export function extractCompanyName(
   subject: string,
-  _senderEmail: string
+  _senderEmail: string,
+  bodySnippet?: string,
+  receivedAt?: Date | string
 ): string | null {
   // 1. Ignore generic coursework, practice tests, mock tests, codeathons, portal invites
   if (
@@ -457,10 +514,49 @@ export function extractCompanyName(
 
   // Clean the subject to remove prefixes like "Confirmed: Your Registration for"
   const cleanedSubject = cleanSubjectNoise(subject);
-
-  // Try known company aliases directly in the subject (highest precision match)
-  // Sort aliases by length descending so "ey gds" matches before "ey", "tata consultancy services" before "tcs", etc.
   const lowerCleaned = cleanedSubject.toLowerCase();
+  const lowerBody = (bodySnippet || '').toLowerCase();
+
+  // Disambiguate EY SAP vs EY GDS
+  const isEyEmail =
+    /\b(?:ey|ernst\s*&\s*young|ernst\s+and\s+young)\b/i.test(lowerCleaned) ||
+    /\b(?:ey\s+sap|ey\s+gds|ey\s*\(ernst\s*&\s*young\))\b/i.test(lowerBody);
+
+  if (isEyEmail) {
+    if (lowerCleaned.includes('sap') || lowerBody.includes('ey sap')) {
+      return 'EY SAP';
+    }
+    if (lowerCleaned.includes('gds') || lowerBody.includes('ey gds') || lowerBody.includes('global delivery')) {
+      return 'EY GDS';
+    }
+    // Date-based disambiguation for identical NeoPAT email subjects:
+    // Aug 14-16, 2026 was the EY SAP drive
+    // Aug 20+ 2026 was the EY GDS drive
+    if (receivedAt) {
+      const d = new Date(receivedAt);
+      if (d < new Date('2026-08-18T00:00:00Z')) {
+        return 'EY SAP';
+      } else {
+        return 'EY GDS';
+      }
+    }
+    return 'EY GDS';
+  }
+
+  // Disambiguate Honeywell Aerospace vs Honeywell Technology Solutions Lab
+  if (lowerCleaned.includes('honeywell')) {
+    if (lowerCleaned.includes('aerospace') || lowerBody.includes('aerospace') || lowerBody.includes('1190')) {
+      return 'Honeywell Aerospace';
+    }
+    if (
+      lowerCleaned.includes('technology solutions') ||
+      lowerCleaned.includes('tsl') ||
+      lowerBody.includes('technology solutions') ||
+      lowerBody.includes('1135')
+    ) {
+      return 'Honeywell Technology Solutions Lab';
+    }
+  }
   const sortedAliases = Object.keys(COMPANY_ALIASES).sort((a, b) => b.length - a.length);
   for (const alias of sortedAliases) {
     const canonical = COMPANY_ALIASES[alias];

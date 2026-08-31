@@ -8,6 +8,7 @@ import {
   Search,
   CheckCircle2,
   XCircle,
+  X,
   Clock,
   ExternalLink,
   ChevronRight,
@@ -198,39 +199,70 @@ export default function CompaniesClient({ companies }: CompaniesClientProps) {
     const query = searchQuery.toLowerCase().trim();
 
     const filtered = companies.filter((c) => {
-      // Text search
+      // 1. Status category filter (if not 'all')
+      if (selectedFilter !== 'all') {
+        if (selectedFilter === 'active') {
+          const s = c.application?.status || 'not_applied';
+          if (['not_applied', 'withdrawn', 'declined', 'not_shortlisted', 'rejected', 'selected'].includes(s)) {
+            return false;
+          }
+        } else if (selectedFilter === 'not_applied') {
+          const s = c.application?.status;
+          if (s && s !== 'not_applied') return false;
+        } else if (selectedFilter === 'withdrawn') {
+          const s = c.application?.status || '';
+          if (s !== 'withdrawn' && s !== 'declined') return false;
+        } else if (selectedFilter === 'shortlisted') {
+          if (!SHORTLISTED_STAGE_STATUSES.includes(c.application?.status || '')) return false;
+        } else {
+          if ((c.application?.status || 'not_applied') !== selectedFilter) return false;
+        }
+      }
+
+      // 2. Text search query (with word boundary precision for short queries like 'ey')
       if (query) {
-        const nameMatch = c.name.toLowerCase().includes(query);
-        const roleMatch = c.application?.role?.toLowerCase().includes(query);
-        const locationMatch = c.application?.location?.toLowerCase().includes(query);
-        const aliasesMatch = c.aliases?.some((a) => a.toLowerCase().includes(query));
-        if (!nameMatch && !roleMatch && !locationMatch && !aliasesMatch) {
+        const isShort = query.length <= 2;
+        const nameLower = c.name.toLowerCase();
+        const roleLower = (c.application?.role || '').toLowerCase();
+        const locLower = (c.application?.location || '').toLowerCase();
+
+        const nameMatch = isShort
+          ? nameLower.startsWith(query) || new RegExp(`\\b${query}\\b`, 'i').test(nameLower)
+          : nameLower.includes(query);
+
+        const roleMatch = isShort
+          ? new RegExp(`\\b${query}\\b`, 'i').test(roleLower)
+          : roleLower.includes(query);
+
+        const locMatch = isShort
+          ? new RegExp(`\\b${query}\\b`, 'i').test(locLower)
+          : locLower.includes(query);
+
+        const aliasesMatch = c.aliases?.some((a) => {
+          const al = a.toLowerCase();
+          return isShort
+            ? al.startsWith(query) || new RegExp(`\\b${query}\\b`, 'i').test(al)
+            : al.includes(query);
+        });
+
+        if (!nameMatch && !roleMatch && !locMatch && !aliasesMatch) {
           return false;
         }
       }
 
-      // Status filter
-      if (selectedFilter === 'all') return true;
-      if (selectedFilter === 'active') {
-        const s = c.application?.status || 'not_applied';
-        return !['not_applied', 'withdrawn', 'declined', 'not_shortlisted', 'rejected', 'selected'].includes(s);
-      }
-      if (selectedFilter === 'not_applied') {
-        const s = c.application?.status;
-        return !s || s === 'not_applied';
-      }
-      if (selectedFilter === 'withdrawn') {
-        const s = c.application?.status || '';
-        return s === 'withdrawn' || s === 'declined';
-      }
-      if (selectedFilter === 'shortlisted') {
-        return SHORTLISTED_STAGE_STATUSES.includes(c.application?.status || '');
-      }
-      return (c.application?.status || 'not_applied') === selectedFilter;
+      return true;
     });
 
-    // Sort
+    // Sort: when query is present, rank prefix and word matches at the top
     return [...filtered].sort((a, b) => {
+      if (query) {
+        const aName = a.name.toLowerCase();
+        const bName = b.name.toLowerCase();
+        const aScore = aName.startsWith(query) ? 3 : (new RegExp(`\\b${query}\\b`, 'i').test(aName) ? 2 : (aName.includes(query) ? 1 : 0));
+        const bScore = bName.startsWith(query) ? 3 : (new RegExp(`\\b${query}\\b`, 'i').test(bName) ? 2 : (bName.includes(query) ? 1 : 0));
+        if (aScore !== bScore) return bScore - aScore;
+      }
+
       switch (sortMode) {
         case 'name':
           return a.name.localeCompare(b.name);
@@ -274,8 +306,18 @@ export default function CompaniesClient({ companies }: CompaniesClientProps) {
               placeholder="Search company, role, or city..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full pl-9 pr-4 py-2 bg-[#101018] border border-zinc-800 rounded-xl text-xs sm:text-sm text-white placeholder:text-zinc-500 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/30 transition-all"
+              className="w-full pl-9 pr-8 py-2 bg-[#101018] border border-zinc-800 rounded-xl text-xs sm:text-sm text-white placeholder:text-zinc-500 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/30 transition-all"
             />
+            {searchQuery && (
+              <button
+                type="button"
+                onClick={() => setSearchQuery('')}
+                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-zinc-300 p-0.5 rounded-full hover:bg-zinc-800 transition-colors"
+                title="Clear search"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            )}
           </div>
 
           {/* Custom Sort selector */}

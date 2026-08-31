@@ -12,8 +12,15 @@ import {
   ExternalLink,
   X,
   Sparkles,
+  LayoutGrid,
+  List,
+  Zap,
+  CalendarCheck,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { formatDateTime } from '@/lib/utils';
+import { EVENT_TYPE_LABELS, EVENT_TYPE_COLORS } from '@/constants/event-types';
+import type { EventType } from '@/constants/event-types';
 
 export interface CalendarEvent {
   id: string;
@@ -34,6 +41,8 @@ interface CalendarClientProps {
 export default function CalendarClient({ events }: CalendarClientProps) {
   const [currentDate, setCurrentDate] = useState(new Date());
   const [selectedEvent, setSelectedEvent] = useState<CalendarEvent | null>(null);
+  const [viewMode, setViewMode] = useState<'grid' | 'timeline'>('grid');
+  const [selectedEventType, setSelectedEventType] = useState<'all' | 'test' | 'interview' | 'ppt' | 'deadline'>('all');
 
   const year = currentDate.getFullYear();
   const month = currentDate.getMonth();
@@ -87,8 +96,6 @@ export default function CalendarClient({ events }: CalendarClientProps) {
 
     return days;
   }, [year, month]);
-
-  const [selectedEventType, setSelectedEventType] = useState<'all' | 'test' | 'interview' | 'ppt' | 'deadline'>('all');
 
   const filteredEvents = useMemo(() => {
     if (selectedEventType === 'all') return events;
@@ -159,10 +166,11 @@ export default function CalendarClient({ events }: CalendarClientProps) {
   };
 
   const todayStr = new Date().toISOString().split('T')[0];
+  const todayEvents = eventsByDate.get(todayStr) || [];
 
   return (
     <div className="space-y-6 max-w-7xl mx-auto animate-fade-in selection:bg-indigo-500/20">
-      {/* Header & Month Nav */}
+      {/* Header & Month Navigation */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl sm:text-3xl font-extrabold text-white tracking-tight flex items-center gap-2.5">
@@ -170,12 +178,40 @@ export default function CalendarClient({ events }: CalendarClientProps) {
             <span>Placement Schedule</span>
           </h1>
           <p className="text-xs sm:text-sm text-zinc-400 mt-1">
-            Visual calendar of online tests, interviews, PPT sessions, and registration deadlines.
+            Visual calendar and action timeline for upcoming tests, interview slots, and drive sessions.
           </p>
         </div>
 
-        {/* Month Selector Controls */}
-        <div className="flex items-center gap-3">
+        {/* View Switcher & Month Controls */}
+        <div className="flex items-center gap-2.5 flex-wrap">
+          {/* Grid vs Timeline View Toggle */}
+          <div className="flex items-center bg-[#101018] border border-zinc-800 rounded-xl p-1 shadow-sm">
+            <button
+              onClick={() => setViewMode('grid')}
+              className={cn(
+                'flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all',
+                viewMode === 'grid'
+                  ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/30'
+                  : 'text-zinc-400 hover:text-zinc-200'
+              )}
+            >
+              <LayoutGrid className="w-3.5 h-3.5" />
+              <span>Grid</span>
+            </button>
+            <button
+              onClick={() => setViewMode('timeline')}
+              className={cn(
+                'flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all',
+                viewMode === 'timeline'
+                  ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/30'
+                  : 'text-zinc-400 hover:text-zinc-200'
+              )}
+            >
+              <List className="w-3.5 h-3.5" />
+              <span>Timeline</span>
+            </button>
+          </div>
+
           <button
             onClick={handleToday}
             className="px-3.5 py-1.5 rounded-xl bg-[#101018] border border-zinc-800 hover:bg-zinc-800 text-xs font-semibold text-zinc-300 hover:text-white transition-all shadow-sm"
@@ -183,6 +219,7 @@ export default function CalendarClient({ events }: CalendarClientProps) {
             Today
           </button>
 
+          {/* Month Selector */}
           <div className="flex items-center gap-1 bg-[#101018] border border-zinc-800 rounded-xl p-1 shadow-sm">
             <button
               onClick={handlePrevMonth}
@@ -191,7 +228,7 @@ export default function CalendarClient({ events }: CalendarClientProps) {
             >
               <ChevronLeft className="w-4 h-4" />
             </button>
-            <span className="text-xs sm:text-sm font-bold text-white px-3 min-w-[140px] text-center font-mono">
+            <span className="text-xs sm:text-sm font-bold text-white px-3 min-w-[130px] text-center font-mono">
               {monthNames[month]} {year}
             </span>
             <button
@@ -250,77 +287,150 @@ export default function CalendarClient({ events }: CalendarClientProps) {
         </div>
       </div>
 
-      {/* Calendar Grid Container */}
-      <div className="bg-[#101018]/90 backdrop-blur-2xl border border-zinc-800/80 rounded-3xl overflow-hidden shadow-2xl shadow-black/30">
-        {/* Day of Week Headers */}
-        <div className="grid grid-cols-7 border-b border-zinc-800 bg-zinc-950/80 text-center py-3 text-xs font-bold text-zinc-400 uppercase tracking-wider">
-          <span>Sun</span>
-          <span>Mon</span>
-          <span>Tue</span>
-          <span>Wed</span>
-          <span>Thu</span>
-          <span>Fri</span>
-          <span>Sat</span>
-        </div>
+      {/* Mode 1: Month Grid View */}
+      {viewMode === 'grid' && (
+        <div className="bg-[#101018]/90 backdrop-blur-2xl border border-zinc-800/80 rounded-3xl overflow-hidden shadow-2xl shadow-black/30">
+          {/* Day of Week Headers */}
+          <div className="grid grid-cols-7 border-b border-zinc-800 bg-zinc-950/80 text-center py-3 text-xs font-bold text-zinc-400 uppercase tracking-wider">
+            <span>Sun</span>
+            <span>Mon</span>
+            <span>Tue</span>
+            <span>Wed</span>
+            <span>Thu</span>
+            <span>Fri</span>
+            <span>Sat</span>
+          </div>
 
-        {/* Days Grid */}
-        <div className="grid grid-cols-7 auto-rows-fr divide-x divide-y divide-zinc-800/60">
-          {calendarDays.map((d, index) => {
-            const dayEvents = eventsByDate.get(d.dateString) || [];
-            const isToday = d.dateString === todayStr;
+          {/* Days Grid */}
+          <div className="grid grid-cols-7 auto-rows-fr divide-x divide-y divide-zinc-800/60">
+            {calendarDays.map((d, index) => {
+              const dayEvents = eventsByDate.get(d.dateString) || [];
+              const isToday = d.dateString === todayStr;
 
-            return (
-              <div
-                key={index}
-                className={cn(
-                  'min-h-[120px] p-2.5 flex flex-col justify-between transition-colors',
-                  d.isCurrentMonth ? 'bg-[#101018] hover:bg-zinc-900/60' : 'bg-zinc-950/40 opacity-30',
-                  isToday && 'ring-2 ring-inset ring-indigo-500/80 bg-indigo-500/5'
-                )}
-              >
-                {/* Date Number Header */}
-                <div className="flex items-center justify-between">
-                  <span
-                    className={cn(
-                      'text-xs font-bold w-6 h-6 rounded-full flex items-center justify-center font-mono',
-                      isToday ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/40' : 'text-zinc-400'
-                    )}
-                  >
-                    {d.dayNumber}
-                  </span>
-                  {dayEvents.length > 0 && (
-                    <span className="text-[10px] text-zinc-500 font-bold font-mono">
-                      {dayEvents.length} {dayEvents.length === 1 ? 'event' : 'events'}
-                    </span>
+              return (
+                <div
+                  key={index}
+                  className={cn(
+                    'min-h-[120px] p-2.5 flex flex-col justify-between transition-colors',
+                    d.isCurrentMonth ? 'bg-[#101018] hover:bg-zinc-900/60' : 'bg-zinc-950/40 opacity-30',
+                    isToday && 'ring-2 ring-inset ring-indigo-500/80 bg-indigo-500/5'
                   )}
-                </div>
-
-                {/* Day Events List */}
-                <div className="space-y-1.5 mt-2 overflow-hidden">
-                  {dayEvents.slice(0, 3).map((evt) => (
-                    <button
-                      key={evt.id}
-                      onClick={() => setSelectedEvent(evt)}
+                >
+                  {/* Date Number Header */}
+                  <div className="flex items-center justify-between">
+                    <span
                       className={cn(
-                        'w-full text-left px-2 py-1 rounded-lg border text-[11px] font-semibold truncate block transition-all hover:scale-[1.02] shadow-sm',
-                        getEventBadgeColor(evt.eventType)
+                        'text-xs font-bold w-6 h-6 rounded-full flex items-center justify-center font-mono',
+                        isToday ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/40' : 'text-zinc-400'
                       )}
                     >
-                      <span className="font-bold mr-1">{evt.companyName}:</span>
-                      <span>{evt.title || evt.eventType}</span>
-                    </button>
-                  ))}
-                  {dayEvents.length > 3 && (
-                    <span className="text-[10px] text-indigo-400 pl-1 block font-bold">
-                      +{dayEvents.length - 3} more
+                      {d.dayNumber}
                     </span>
-                  )}
+                    {dayEvents.length > 0 && (
+                      <span className="text-[10px] text-zinc-500 font-bold font-mono">
+                        {dayEvents.length} {dayEvents.length === 1 ? 'event' : 'events'}
+                      </span>
+                    )}
+                  </div>
+
+                  {/* Day Events List */}
+                  <div className="space-y-1.5 mt-2 overflow-hidden">
+                    {dayEvents.slice(0, 3).map((evt) => (
+                      <button
+                        key={evt.id}
+                        onClick={() => setSelectedEvent(evt)}
+                        className={cn(
+                          'w-full text-left px-2 py-1 rounded-lg border text-[11px] font-semibold truncate block transition-all hover:scale-[1.02] shadow-sm',
+                          getEventBadgeColor(evt.eventType)
+                        )}
+                      >
+                        <span className="font-bold mr-1">{evt.companyName}:</span>
+                        <span>{evt.title || evt.eventType}</span>
+                      </button>
+                    ))}
+                    {dayEvents.length > 3 && (
+                      <span className="text-[10px] text-indigo-400 pl-1 block font-bold">
+                        +{dayEvents.length - 3} more
+                      </span>
+                    )}
+                  </div>
                 </div>
-              </div>
-            );
-          })}
+              );
+            })}
+          </div>
         </div>
-      </div>
+      )}
+
+      {/* Mode 2: Timeline / List View */}
+      {viewMode === 'timeline' && (
+        <div className="bg-[#101018]/90 backdrop-blur-2xl border border-zinc-800/80 rounded-3xl overflow-hidden shadow-2xl p-5 sm:p-6 space-y-4">
+          {filteredEvents.length === 0 ? (
+            <div className="py-16 text-center">
+              <CalendarCheck className="w-12 h-12 text-zinc-600 mx-auto mb-3" />
+              <h3 className="text-base font-bold text-white">No Scheduled Events</h3>
+              <p className="text-xs text-zinc-400 mt-1 max-w-sm mx-auto">
+                No active placement assessments or interview rounds found for the selected filter.
+              </p>
+            </div>
+          ) : (
+            <div className="divide-y divide-zinc-800/60">
+              {filteredEvents.map((evt) => {
+                const eventColors = EVENT_TYPE_COLORS[evt.eventType as EventType] || EVENT_TYPE_COLORS.other;
+                return (
+                  <div
+                    key={evt.id}
+                    className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 py-4 hover:bg-zinc-900/40 rounded-2xl px-3 transition-all group"
+                  >
+                    <div className="flex items-start gap-3.5">
+                      <div className={cn('w-3 h-3 rounded-full mt-1.5 flex-shrink-0', eventColors.dot)} />
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <Link
+                            href={`/companies/${evt.companyId}`}
+                            className="text-sm font-bold text-white hover:text-indigo-400 transition-colors"
+                          >
+                            {evt.companyName}
+                          </Link>
+                          <span className={cn('text-[10px] font-bold px-2 py-0.5 rounded-md uppercase tracking-wider', getEventBadgeColor(evt.eventType))}>
+                            {EVENT_TYPE_LABELS[evt.eventType as EventType] || evt.eventType}
+                          </span>
+                        </div>
+                        <p className="text-xs text-zinc-300 font-medium mt-1">
+                          {evt.title || 'Placement Session'}
+                        </p>
+                        <div className="flex items-center gap-2 text-xs text-zinc-500 mt-1 font-mono">
+                          {evt.venue && <span>📍 {evt.venue}</span>}
+                          {evt.mode && <span>· {evt.mode}</span>}
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-3 self-end sm:self-center flex-shrink-0">
+                      <div className="text-right">
+                        <p className="text-xs font-semibold text-zinc-200">
+                          {evt.startTime ? formatDateTime(evt.startTime) : 'Date TBA'}
+                        </p>
+                      </div>
+                      {evt.startTime && (
+                        <a
+                          href={`https://calendar.google.com/calendar/render?action=TEMPLATE&text=${encodeURIComponent(evt.title || 'Placement Event')}&dates=${new Date(evt.startTime).toISOString().replace(/-|:|\.\d+/g, '')}/${new Date(new Date(evt.startTime).getTime() + 3600000).toISOString().replace(/-|:|\.\d+/g, '')}&location=${encodeURIComponent(evt.venue || 'VIT Campus / Online')}`}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="p-2 rounded-xl bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 text-xs font-semibold transition-all flex items-center gap-1.5"
+                          title="Add to Google Calendar"
+                        >
+                          <CalendarIcon className="w-3.5 h-3.5" />
+                          <span>Sync</span>
+                        </a>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Selected Event Modal */}
       {selectedEvent && (

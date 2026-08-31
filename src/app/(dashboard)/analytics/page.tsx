@@ -1,10 +1,14 @@
+import type { Metadata } from 'next';
 import { requireSession } from '@/lib/auth';
 import { createAdminClient } from '@/lib/supabase/admin';
 import AnalyticsClient from './analytics-client';
 
-export const metadata = {
-  title: 'Analytics — NeoTrack',
-  description: 'Visualize your placement journey, conversion rates, and CTC trends.',
+export const metadata: Metadata = {
+  title: 'Placement Analytics & Funnel Insights',
+  description: 'Visualize your placement conversion funnel, shortlist ratios, interview progression, and CTC offer trends.',
+  alternates: {
+    canonical: '/analytics',
+  },
 };
 
 export default async function AnalyticsPage() {

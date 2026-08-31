@@ -1,11 +1,15 @@
+import type { Metadata } from 'next';
 import { Suspense } from 'react';
 import { requireSession } from '@/lib/auth';
 import { createAdminClient } from '@/lib/supabase/admin';
 import CompaniesClient, { type CompanyWithDetails } from './companies-client';
 
-export const metadata = {
-  title: 'Companies — NeoTrack',
-  description: 'View all tracked placement drives, application statuses, and roles.',
+export const metadata: Metadata = {
+  title: 'Companies & Recruitment Drives',
+  description: 'View and track all campus recruitment drives, company CTCs, stipends, job roles, and application statuses.',
+  alternates: {
+    canonical: '/companies',
+  },
 };
 
 export default async function CompaniesPage() {

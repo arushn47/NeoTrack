@@ -1,10 +1,14 @@
+import type { Metadata } from 'next';
 import { requireSession } from '@/lib/auth';
 import { createAdminClient } from '@/lib/supabase/admin';
 import CalendarClient, { type CalendarEvent } from './calendar-client';
 
-export const metadata = {
-  title: 'Calendar — NeoTrack',
-  description: 'View upcoming placement talks, online assessments, and interview schedules.',
+export const metadata: Metadata = {
+  title: 'Placement Calendar & Assessment Schedule',
+  description: 'View upcoming PPT sessions, online assessment (OA) test dates, coding challenges, and interview schedules in an interactive calendar.',
+  alternates: {
+    canonical: '/calendar',
+  },
 };
 
 export default async function CalendarPage() {

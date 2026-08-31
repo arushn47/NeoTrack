@@ -1,8 +1,9 @@
 'use client';
 
-import { Bell, RefreshCw, LogOut, CheckCircle, AlertCircle, X, Sparkles, User } from 'lucide-react';
+import { Bell, RefreshCw, LogOut, CheckCircle, AlertCircle, X, Sparkles, User, Settings, PieChart, Calendar, Search, Building2 } from 'lucide-react';
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
+import Link from 'next/link';
 import { cn } from '@/lib/utils';
 import { timeAgo } from '@/lib/utils';
 import NotificationBell from '@/components/notifications/notification-bell';
@@ -33,6 +34,7 @@ export default function Topbar({ userName, userAvatar, lastSyncAt }: TopbarProps
   const hasMountedAutoSyncRef = useRef(false);
 
   const [showUserMenu, setShowUserMenu] = useState(false);
+  const userMenuRef = useRef<HTMLDivElement>(null);
   const [syncProgress, setSyncProgress] = useState<SyncProgress | null>(null);
   const [syncResult, setSyncResult] = useState<{
     show: boolean;
@@ -41,6 +43,45 @@ export default function Topbar({ userName, userAvatar, lastSyncAt }: TopbarProps
     newEmails: number;
     newCompanies: number;
   } | null>(null);
+
+  // Close profile dropdown when clicking outside or pressing Escape
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent | TouchEvent) => {
+      if (userMenuRef.current && !userMenuRef.current.contains(event.target as Node)) {
+        setShowUserMenu(false);
+      }
+    };
+
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setShowUserMenu(false);
+      }
+    };
+
+    if (showUserMenu) {
+      document.addEventListener('mousedown', handleClickOutside);
+      document.addEventListener('touchstart', handleClickOutside);
+      document.addEventListener('keydown', handleEscape);
+    }
+
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+      document.removeEventListener('touchstart', handleClickOutside);
+      document.removeEventListener('keydown', handleEscape);
+    };
+  }, [showUserMenu]);
+
+  // Keyboard shortcut Cmd+K / Ctrl+K to jump to search
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        router.push('/search');
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [router]);
 
   const handleSync = useCallback(async (silent: boolean = false) => {
     if (isSyncingRef.current) return;
@@ -195,16 +236,22 @@ export default function Topbar({ userName, userAvatar, lastSyncAt }: TopbarProps
           </span>
         </div>
 
-        {/* Left spacer on desktop */}
-        <div className="hidden lg:flex items-center gap-2">
-          <div className="flex items-center gap-2 px-2.5 py-1 rounded-full bg-zinc-900/80 border border-zinc-800/80 text-[11px] text-zinc-400">
-            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-            <span className="text-zinc-300 font-medium">Placement Engine Active</span>
-          </div>
+        {/* Center: Quick Search Trigger */}
+        <div className="flex-1 max-w-xs md:max-w-md mx-3 hidden sm:block">
+          <Link
+            href="/search"
+            className="flex items-center gap-2.5 px-3 py-1.5 rounded-xl bg-zinc-900/70 border border-zinc-800/80 hover:border-indigo-500/30 text-xs text-zinc-400 hover:text-zinc-200 transition-all w-full group"
+          >
+            <Search className="w-3.5 h-3.5 text-zinc-500 group-hover:text-indigo-400 transition-colors flex-shrink-0" />
+            <span className="truncate">Search drives, tests, shortlists...</span>
+            <kbd className="ml-auto hidden md:inline-flex items-center gap-0.5 text-[10px] font-mono text-zinc-500 bg-zinc-800/80 px-1.5 py-0.5 rounded border border-zinc-700/50">
+              ⌘K
+            </kbd>
+          </Link>
         </div>
 
         {/* Right: Actions */}
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2.5 sm:gap-3">
           {/* Live Sync Button */}
           <button
             onClick={() => handleSync(false)}
@@ -255,7 +302,7 @@ export default function Topbar({ userName, userAvatar, lastSyncAt }: TopbarProps
           <NotificationBell />
 
           {/* User avatar & dropdown */}
-          <div className="relative">
+          <div className="relative" ref={userMenuRef}>
             <button
               onClick={() => setShowUserMenu(!showUserMenu)}
               className="flex items-center gap-2 p-0.5 rounded-full hover:ring-2 hover:ring-indigo-500/40 transition-all"
@@ -284,21 +331,39 @@ export default function Topbar({ userName, userAvatar, lastSyncAt }: TopbarProps
                   className="fixed inset-0 z-40"
                   onClick={() => setShowUserMenu(false)}
                 />
-                <div className="absolute right-0 top-full mt-2 w-56 bg-[#12121c]/95 backdrop-blur-2xl border border-zinc-800 rounded-2xl shadow-2xl z-50 py-1.5 animate-fade-in divide-y divide-zinc-800/80">
+                <div className="absolute right-0 top-full mt-2 w-64 bg-[#12121c]/95 backdrop-blur-2xl border border-zinc-800 rounded-2xl shadow-2xl z-50 py-1.5 animate-fade-in divide-y divide-zinc-800/80">
+                  {/* User Profile Header */}
                   <div className="px-4 py-3">
                     <p className="text-xs font-semibold text-white truncate">
                       {userName || 'Logged in User'}
                     </p>
-                    <p className="text-[10px] text-zinc-500 mt-0.5 font-mono">
-                      Primary Session Active
-                    </p>
+                    <div className="flex items-center gap-2 mt-1">
+                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
+                      <span className="text-[10px] text-zinc-400 font-mono">
+                        Active Campus Session
+                      </span>
+                    </div>
                   </div>
+
+                  {/* Navigation Links in Dropdown */}
+                  <div className="p-1.5 space-y-0.5">
+                    <Link
+                      href="/settings"
+                      onClick={() => setShowUserMenu(false)}
+                      className="flex items-center gap-2.5 w-full px-3 py-2 text-xs font-semibold text-zinc-300 hover:text-white hover:bg-zinc-800/60 rounded-xl transition-all group"
+                    >
+                      <Settings className="w-4 h-4 text-indigo-400 group-hover:rotate-45 transition-transform duration-200" />
+                      <span>Settings</span>
+                    </Link>
+                  </div>
+
+                  {/* Sign Out */}
                   <div className="p-1.5">
                     <button
                       onClick={handleLogout}
                       className="flex items-center gap-2.5 w-full px-3 py-2 text-xs font-semibold text-red-400 hover:text-red-300 hover:bg-red-500/10 rounded-xl transition-all"
                     >
-                      <LogOut className="w-3.5 h-3.5" />
+                      <LogOut className="w-4 h-4" />
                       Sign Out
                     </button>
                   </div>

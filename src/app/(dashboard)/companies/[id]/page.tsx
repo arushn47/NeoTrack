@@ -1,11 +1,31 @@
+import type { Metadata } from 'next';
 import { notFound } from 'next/navigation';
 import { requireSession } from '@/lib/auth';
 import { createAdminClient } from '@/lib/supabase/admin';
 import CompanyDetailClient, { type CompanyDetail } from './company-detail-client';
 
-export const metadata = {
-  title: 'Company Details — NeoTrack',
-};
+export async function generateMetadata({
+  params,
+}: {
+  params: Promise<{ id: string }>;
+}): Promise<Metadata> {
+  const { id } = await params;
+  const supabase = createAdminClient();
+  const { data: company } = await supabase
+    .from('companies')
+    .select('name')
+    .eq('id', id)
+    .single();
+
+  const name = company?.name || 'Company Details';
+  return {
+    title: name,
+    description: `Detailed recruitment drive history, schedule, test rounds, and email updates for ${name} on NeoTrack.`,
+    alternates: {
+      canonical: `/companies/${id}`,
+    },
+  };
+}
 
 export default async function CompanyDetailPage({
   params,

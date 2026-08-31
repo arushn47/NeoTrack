@@ -72,23 +72,26 @@ export default function StageProgressBar({
   );
 
   if (status === 'rejected' || status === 'not_shortlisted') {
-    const furthestIdx = interviewEvent ? 3 : testEvent ? 2 : pptEvent ? 1 : 0;
-    
-    let eliminatedIdx = 0;
+    let furthestIdx = 0;
+    let eliminatedIdx = 1;
     let eliminatedText = '';
 
     if (status === 'rejected') {
-      // Failed the round they actually took
-      eliminatedIdx = furthestIdx;
-      if (eliminatedIdx <= 2) eliminatedText = 'Wrote Test · Did Not Qualify';
-      if (eliminatedIdx === 3) eliminatedText = 'Interviewed · Not Selected';
-      if (eliminatedIdx === 4) eliminatedText = 'Not Selected';
+      // Reached and wrote test (or interview) -> failed that round
+      if (interviewEvent) {
+        furthestIdx = 2; // Passed applied, ppt, test
+        eliminatedIdx = 3; // Failed interview
+        eliminatedText = 'Interviewed · Not Selected';
+      } else {
+        furthestIdx = 1; // Passed applied & ppt
+        eliminatedIdx = 2; // Failed online test
+        eliminatedText = 'Wrote Test · Did Not Qualify';
+      }
     } else {
-      // not_shortlisted - Failed to reach the next round
-      eliminatedIdx = Math.min(furthestIdx + 1, 4);
-      if (eliminatedIdx <= 1) eliminatedText = 'Out at Shortlist Round';
-      if (eliminatedIdx === 2) eliminatedText = 'Attended PPT · Out at Test Round';
-      if (eliminatedIdx >= 3) eliminatedText = 'Out at Shortlist Round';
+      // not_shortlisted - Applied but cut at initial shortlist / screening round
+      furthestIdx = 0; // Passed applied only
+      eliminatedIdx = 1; // Screened out at shortlist / PPT round
+      eliminatedText = 'Out at Shortlist Round';
     }
 
     return (
@@ -97,8 +100,8 @@ export default function StageProgressBar({
         <div className="relative flex items-center justify-between px-1">
           <div className="absolute left-3 right-3 top-1/2 -translate-y-1/2 h-1 bg-border-default rounded-full z-0" />
           <div
-            className="absolute left-3 top-1/2 -translate-y-1/2 h-1 bg-rose-500/80 rounded-full z-0"
-            style={{ width: `${(eliminatedIdx) * 25}%` }}
+            className="absolute left-3 top-1/2 -translate-y-1/2 h-1 bg-rose-500/80 rounded-full z-0 transition-all duration-300"
+            style={{ width: `${eliminatedIdx * 25}%` }}
           />
 
           {STAGES.map((stage, idx) => {
@@ -122,7 +125,7 @@ export default function StageProgressBar({
                 <span
                   className={cn(
                     'text-[9px] font-semibold mt-1 whitespace-nowrap',
-                    isPassed ? 'text-emerald-400' : isEliminated ? 'text-rose-400 font-bold' : 'text-text-tertiary'
+                    isPassed ? 'text-emerald-400 font-medium' : isEliminated ? 'text-rose-400 font-bold' : 'text-text-tertiary'
                   )}
                 >
                   {stage.label}
@@ -135,7 +138,7 @@ export default function StageProgressBar({
         <div className="flex items-center justify-between text-[11px] pt-1.5 border-t border-border-default/40">
           <span className="text-rose-400 font-semibold flex items-center gap-1">
             <XCircle className="w-3.5 h-3.5" />
-            {status === 'rejected' ? 'Not Selected' : 'Not Shortlisted'}
+            {status === 'rejected' ? 'Eliminated in Test' : 'Not Shortlisted'}
           </span>
           <span className="text-[11px] text-text-secondary font-medium">
             {eliminatedText}

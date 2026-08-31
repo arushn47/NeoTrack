@@ -1,23 +1,28 @@
+import type { Metadata } from 'next';
 import { requireSession } from '@/lib/auth';
 import { createAdminClient } from '@/lib/supabase/admin';
 import DashboardClient from './dashboard-client';
 
-export const metadata = {
-  title: 'Dashboard — NeoTrack',
-  description: 'Your campus placement command center.',
+export const metadata: Metadata = {
+  title: 'Placement Command Center Dashboard',
+  description: 'Your central hub for campus placement drives, shortlist notifications, active stages, and upcoming test schedules.',
+  alternates: {
+    canonical: '/',
+  },
 };
 
 export default async function DashboardPage() {
   const session = await requireSession();
   const supabase = createAdminClient();
 
-  // Fetch stats
+  // Fetch stats and active applications
   const [
     { count: totalCompanies },
     { data: applications },
     { data: rawUpcomingEvents },
     { data: accounts },
     { data: user },
+    { data: candidateMatches },
   ] = await Promise.all([
     supabase
       .from('companies')
@@ -25,8 +30,9 @@ export default async function DashboardPage() {
       .eq('user_id', session.userId),
     supabase
       .from('applications')
-      .select('status, company_id')
-      .eq('user_id', session.userId),
+      .select('id, status, role, ctc, stipend, last_updated, company_id, companies(id, name)')
+      .eq('user_id', session.userId)
+      .order('last_updated', { ascending: false }),
     supabase
       .from('events')
       .select('id, company_id, event_type, title, start_time, end_time, venue, mode')
@@ -42,6 +48,10 @@ export default async function DashboardPage() {
       .select('neo_id')
       .eq('id', session.userId)
       .single(),
+    supabase
+      .from('candidate_matches')
+      .select('email_id, emails(company_id)')
+      .eq('user_id', session.userId),
   ]);
 
   const stats = {
@@ -73,15 +83,29 @@ export default async function DashboardPage() {
     }
   }
 
+  const shortlistedCompanyIds = new Set(
+    (candidateMatches || [])
+      .map((cm: any) => cm.emails?.company_id)
+      .filter(Boolean)
+  );
+
   // Deduplicate upcoming events by (company_id, event_type, date) and filter out eliminated companies
   const uniqueUpcomingEvents: NonNullable<typeof rawUpcomingEvents> = [];
   const seenEventKeys = new Set<string>();
+  const nowIso = new Date().toISOString();
 
   if (rawUpcomingEvents) {
     for (const event of rawUpcomingEvents) {
+      if (event.start_time && event.start_time < nowIso) continue;
+
       const companyStatus = appStatusMap.get(event.company_id) || 'unknown';
-      if (['not_shortlisted', 'rejected', 'withdrawn', 'declined'].includes(companyStatus)) {
-        continue; // Skip events for companies where the user is eliminated
+      const isShortlistedForDrive = shortlistedCompanyIds.has(event.company_id);
+
+      if (['not_shortlisted', 'rejected', 'not_applied'].includes(companyStatus) && !isShortlistedForDrive) {
+        continue;
+      }
+      if (['withdrawn', 'declined'].includes(companyStatus) && !isShortlistedForDrive) {
+        continue;
       }
 
       const dateKey = event.start_time ? event.start_time.split('T')[0] : 'no-date';
@@ -99,6 +123,20 @@ export default async function DashboardPage() {
   // Only pass top 6 to DashboardClient to avoid UI clutter
   const topUpcomingEvents = uniqueUpcomingEvents.slice(0, 6);
 
+  const activeAppsList = (applications || [])
+    .filter((a) => ['applied', 'shortlisted', 'test_scheduled', 'interview_scheduled', 'ppt_scheduled'].includes(a.status))
+    .map((a: any) => ({
+      id: a.id,
+      companyId: a.company_id,
+      companyName: a.companies?.name || 'Company',
+      companyLogo: null,
+      status: a.status,
+      role: a.role,
+      ctc: a.ctc,
+      stipend: a.stipend,
+      lastUpdated: a.last_updated,
+    }));
+
   const connectedAccounts = (accounts || []).filter((a) => a.is_connected);
   const hasPersonalAccount = connectedAccounts.some((a) => a.account_type === 'personal');
   const hasCollegeAccount = connectedAccounts.some((a) => a.account_type === 'college');
@@ -109,6 +147,7 @@ export default async function DashboardPage() {
     <DashboardClient
       stats={stats}
       upcomingEvents={topUpcomingEvents}
+      activeApplications={activeAppsList}
       hasAccounts={hasPersonalAccount && hasCollegeAccount}
       hasPersonalAccount={hasPersonalAccount}
       hasCollegeAccount={hasCollegeAccount}
