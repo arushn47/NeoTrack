@@ -68,11 +68,11 @@ const SHORTLISTED_STAGE_STATUSES = ['shortlisted', 'test_scheduled', 'interview_
 
 const STATUS_FILTERS = [
   { id: 'active', label: 'In Progress' },
-  { id: 'shortlisted', label: 'Shortlisted' },
+  { id: 'shortlisted', label: 'Shortlisted for Test' },
   { id: 'applied', label: 'Applied' },
   { id: 'not_applied', label: 'Not Registered' },
   { id: 'not_shortlisted', label: 'Not Shortlisted' },
-  { id: 'rejected', label: 'Rejected' },
+  { id: 'rejected', label: 'Eliminated in Test' },
   { id: 'selected', label: 'Selected 🎉' },
   { id: 'withdrawn', label: 'Opted Out' },
   { id: 'all', label: 'All Drives' },

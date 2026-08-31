@@ -340,11 +340,16 @@ const SUBJECT_COMPANY_PATTERNS: RegExp[] = [
   /(?:congratulations!{1,3}\s*)(?:for\s+)?([A-Za-z0-9&\s\-\.]+?)\s*(?:\([^)]+\))?\s+(?:super\s+dream|dream|regular|summer)?\s*(?:internship|placement|ppo)?\s*(?:selection\s+list|shortlist)/i,
   // "Important: Date Change for Value Labs Placement Drive"
   // "Important: Date Change for Infosy 2027 batch Placement Drive"
-  /date\s+change\s+for\s+(?:m\/s\.?\s*)?([A-Za-z0-9&\s\-\.]+?)(?:\s+(?:2026|2027|2028)\s+batch|\s+placement|\s+drive|$)/i,
+  // "Important : Date change : Sandisk Device Design Centre Placement Drive"
+  /(?:important|urgent)\s*:\s*date\s+change\s*(?:for|:)\s*(?:m\/s\.?\s*)?([A-Za-z0-9&\s\-\.]+?)(?:\s+(?:2026|2027|2028)\s+batch|\s+placement|\s+drive|$)/i,
   // "Updated Optional Form Available - Value Labs Drive"
-  /updated\s+optional\s+form\s+available\s*[-–—]\s*(?:m\/s\.?\s*)?([A-Za-z0-9&\s\-\.]+?)\s+drive/i,
+  // "Optional Form Available - Epsilon Drive"
+  /(?:updated\s+)?optional\s+form\s+(?:available\s*)?[-–—:]\s*(?:m\/s\.?\s*)?([A-Za-z0-9&\s\-\.]+?)\s+drive/i,
   // "Confirmation: Euler Motors Drive Registration Update"
-  /(?:confirmation:\s*)?([A-Za-z0-9&\s\-\.]+?)\s+drive\s+registration\s+update/i,
+  // "Euler Motors Drive Registration Update"
+  /(?:confirmation:\s*)?([A-Za-z0-9&\s\-\.]+?)\s+drive\s+registration\s*(?:update|$)/i,
+  // "Company Name - Drive Registration"
+  /^([A-Za-z0-9&\s\-\.]+?)\s*[-–—]\s*drive\s+registration/i,
   // "Zluri Super Dream Internship Selection List..."
   /^([A-Za-z0-9&\s\-\.]+?)\s*(?:\([^)]+\))?\s+(?:super\s+dream|dream|regular)?\s*(?:internship|placement|ppo)?\s*(?:selection\s+list|shortlist)/i,
   // "M/s.Value Labs Placement Drive"
@@ -373,6 +378,8 @@ const SUBJECT_COMPANY_PATTERNS: RegExp[] = [
   /(?:campus\s+)?placement\s*(?:\||[-–—]|:)\s*([A-Za-z0-9&\s\-\.]+?)(?:\s*(?:\||[-–—]|:)\s*.+)?$/i,
   // "Registration: Company Name"
   /(?:registration|register)\s*(?:\||[-–—]|:|\s+for)\s*([A-Za-z0-9&\s\-\.]+?)(?:\s*(?:\||[-–—])\s*.+)?$/i,
+  // "Eligible for Company Name"
+  /(?:eligible|eligibility)\s*(?:for|:)\s*(?:m\/s\.?\s*)?([A-Za-z0-9&\s\-\.]+?)(?:\s+placement|\s+drive|$)/i,
 ];
 
 /**
