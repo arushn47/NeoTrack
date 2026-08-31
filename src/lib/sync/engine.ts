@@ -150,7 +150,7 @@ export async function runSync(
           // Fall back to targeted search if history expired (>30 days)
           const afterDate = account.last_sync_at ? new Date(account.last_sync_at) : undefined;
           const query = getPlacementSearchQuery(account.account_type as 'personal' | 'college', afterDate);
-          const maxLimit = account.account_type === 'personal' ? 500 : 300;
+          const maxLimit = account.account_type === 'personal' ? 1000 : 2500;
           messageIds = await fetchMessageIds(gmail, query, maxLimit);
           nextHistoryId = historyResult.latestHistoryId || (await getProfileHistoryId(gmail));
         }
@@ -161,7 +161,7 @@ export async function runSync(
 
         const afterDate = account.last_sync_at ? new Date(account.last_sync_at) : undefined;
         const query = getPlacementSearchQuery(account.account_type as 'personal' | 'college', afterDate);
-        const maxLimit = account.account_type === 'personal' ? 1500 : 1000;
+        const maxLimit = account.account_type === 'personal' ? 2500 : 5000;
         messageIds = await fetchMessageIds(gmail, query, maxLimit);
         nextHistoryId = await getProfileHistoryId(gmail);
       }
