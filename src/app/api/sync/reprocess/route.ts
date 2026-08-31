@@ -1,170 +1,268 @@
 import { NextResponse } from 'next/server';
 import { getSession } from '@/lib/auth';
 import { createAdminClient } from '@/lib/supabase/admin';
-import { extractJobDetails } from '@/lib/sync/events';
+import { classifyEmail, extractCompanyName, normalizeCompanyName } from '@/lib/sync/classifier';
+import { extractEvents, extractJobDetails } from '@/lib/sync/events';
 
 export const dynamic = 'force-dynamic';
-export const maxDuration = 60;
+export const maxDuration = 120;
 
 /**
- * POST /api/sync/reprocess
- * Re-evaluates ALL stored emails for the current user against current extraction & classification
- * rules to fix:
- * 1. Stale application statuses (e.g. not_applied -> applied for confirmed registrations, applied -> ppt_scheduled if PPT event exists)
- * 2. Missing or corrupted Job Details (role, category, CTC, stipend, location)
+ * Re-indexes all stored emails, cleans up invalid companies (e.g. Google, PS Associate Engineer),
+ * fixes company names (e.g. EY -> EY GDS), and recalculates exact application statuses and events.
  */
-export async function POST() {
-  const session = await getSession();
-  if (!session) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-  }
-
+async function performReprocess(userId: string) {
   const supabase = createAdminClient();
-  const userId = session.userId;
 
-  // 1. Fetch all stored emails that are linked to a company
-  const { data: emails, error } = await supabase
+  // Fetch user details
+  const { data: userData } = await supabase
+    .from('users')
+    .select('neo_id, email')
+    .eq('id', userId)
+    .single();
+
+  const userNeoId = userData?.neo_id || null;
+  const userEmail = userData?.email || '';
+
+  // 1. Clean invalid candidate matches where match was merely the recipient email address
+  if (userEmail) {
+    const regMatch = userEmail.match(/([0-9]{2}[a-z]{3}[0-9]{4,5})/i);
+    const regNo = regMatch ? regMatch[1].toUpperCase() : '';
+    
+    // Delete email_body matches that matched the recipient email or had no valid Neo ID
+    const { data: allMatches } = await supabase
+      .from('candidate_matches')
+      .select('id, match_type, matched_value')
+      .eq('user_id', userId);
+
+    const matchesToDelete = (allMatches || []).filter((m) => {
+      if (m.match_type === 'xlsx_cell') return false; // Keep verified Excel matches
+      const val = (m.matched_value || '').toUpperCase();
+      // If the match was just the user's registration number or email in headers, delete it
+      if (regNo && val.includes(regNo) && !val.includes(userNeoId || '___NO_NEO___')) {
+        return true;
+      }
+      return false;
+    });
+
+    if (matchesToDelete.length > 0) {
+      await supabase
+        .from('candidate_matches')
+        .delete()
+        .in('id', matchesToDelete.map((m) => m.id));
+    }
+  }
+
+  // 2. Fetch ALL emails for this user
+  const { data: emails, error: emailsError } = await supabase
     .from('emails')
-    .select('id, company_id, subject, body_snippet, classification')
-    .eq('user_id', userId)
-    .not('company_id', 'is', null);
+    .select('id, subject, sender, body_snippet, classification, company_id, received_at')
+    .eq('user_id', userId);
 
-  if (error || !emails || emails.length === 0) {
-    return NextResponse.json({ message: 'No emails to reprocess', fixed: 0 });
+  if (emailsError || !emails || emails.length === 0) {
+    return { success: true, message: 'No emails found to reprocess', fixed: 0 };
   }
 
-  const STATUS_PRIORITY: Record<string, number> = {
-    unknown: 0,
-    not_applied: 1,
-    applied: 2,
-    shortlisted: 3,
-    ppt_scheduled: 4,
-    test_scheduled: 5,
-    interview_scheduled: 6,
-    offer_received: 7,
-    selected: 8,
-    not_shortlisted: 9,
-    declined: 9,
-    withdrawn: 10,
-    rejected: 10,
-  };
+  // 3. Re-evaluate company extraction & classification for EVERY email
+  const companyNameToId = new Map<string, string>();
+  let unlinkedCount = 0;
+  let reclassifiedCount = 0;
 
-  let fixed = 0;
-  const details: { companyId: string; subject: string; newStatus: string; role?: string | null; ctc?: string | null }[] = [];
-
-  // 2. Group emails by company_id
-  const byCompany = new Map<string, typeof emails>();
   for (const email of emails) {
-    if (!email.company_id) continue;
-    if (!byCompany.has(email.company_id)) byCompany.set(email.company_id, []);
-    byCompany.get(email.company_id)!.push(email);
+    const subject = email.subject || '';
+    const sender = email.sender || '';
+    const bodySnippet = email.body_snippet || '';
+
+    // Classify email with updated rules
+    const classification = classifyEmail({
+      gmailMessageId: email.id,
+      threadId: null,
+      sender,
+      senderEmail: sender.match(/<([^>]+)>/)?.[1] || sender,
+      subject,
+      receivedAt: email.received_at ? new Date(email.received_at) : new Date(),
+      bodySnippet,
+      bodyPlain: bodySnippet,
+      bodyHtml: '',
+      hasAttachments: false,
+      attachments: [],
+      labels: [],
+    });
+
+    const companyName = classification.companyName;
+    const isPlacementRelevant = !['irrelevant', 'unclassified', 'general'].includes(
+      classification.classification
+    );
+
+    if (companyName && isPlacementRelevant) {
+      const normalized = normalizeCompanyName(companyName);
+
+      // Get or create company
+      let compId = companyNameToId.get(normalized);
+      if (!compId) {
+        const { data: existingComp } = await supabase
+          .from('companies')
+          .select('id')
+          .eq('user_id', userId)
+          .eq('name', normalized)
+          .single();
+
+        if (existingComp) {
+          compId = existingComp.id;
+        } else {
+          // Check aliases match
+          const { data: aliasMatch } = await supabase
+            .from('companies')
+            .select('id')
+            .eq('user_id', userId)
+            .contains('aliases', [normalized.toLowerCase()])
+            .single();
+
+          if (aliasMatch) {
+            compId = aliasMatch.id;
+            // Update name to canonical (e.g. EY -> EY GDS)
+            await supabase
+              .from('companies')
+              .update({ name: normalized })
+              .eq('id', compId);
+          } else {
+            // Insert clean company
+            const { data: newComp } = await supabase
+              .from('companies')
+              .insert({
+                user_id: userId,
+                name: normalized,
+                aliases: [normalized.toLowerCase(), companyName.toLowerCase()],
+              })
+              .select('id')
+              .single();
+            compId = newComp?.id;
+          }
+        }
+        if (compId) companyNameToId.set(normalized, compId);
+      }
+
+      // Link email to clean company
+      await supabase
+        .from('emails')
+        .update({
+          company_id: compId || null,
+          classification: classification.classification,
+          is_relevant: true,
+        })
+        .eq('id', email.id);
+
+      reclassifiedCount++;
+    } else {
+      // Unlink non-company / irrelevant emails (e.g. Google security notifications, role links)
+      await supabase
+        .from('emails')
+        .update({
+          company_id: null,
+          classification: classification.classification,
+          is_relevant: false,
+        })
+        .eq('id', email.id);
+
+      unlinkedCount++;
+    }
   }
 
-  for (const [companyId, companyEmails] of byCompany.entries()) {
-    // Get current application record
-    const { data: app } = await supabase
-      .from('applications')
-      .select('status, manual_override, role, ctc, stipend, location, applied_at')
+  // 4. Delete Fake / Orphan Companies (e.g. Google, PS Associate Engineer)
+  const { data: allCompanies } = await supabase
+    .from('companies')
+    .select('id, name')
+    .eq('user_id', userId);
+
+  const deletedCompanies: string[] = [];
+  const INVALID_COMPANY_NAMES = [
+    'google', 'ps associate engineer', 'ps associate software engineer',
+    'associate engineer', 'associate software engineer', 'software engineer',
+    'data scientist', 'data analyst', 'placement drive',
+  ];
+
+  for (const comp of allCompanies || []) {
+    const isExplicitlyInvalid = INVALID_COMPANY_NAMES.some(
+      (inv) => comp.name.toLowerCase().trim() === inv
+    );
+
+    const { count } = await supabase
+      .from('emails')
+      .select('id', { count: 'exact', head: true })
       .eq('user_id', userId)
-      .eq('company_id', companyId)
-      .single();
+      .eq('company_id', comp.id);
 
-    const currentStatus = app?.status || 'not_applied';
-    const currentPriority = STATUS_PRIORITY[currentStatus] ?? 0;
+    if (isExplicitlyInvalid || count === 0) {
+      // Delete events, applications, candidate matches, and company
+      await supabase.from('events').delete().eq('user_id', userId).eq('company_id', comp.id);
+      await supabase.from('applications').delete().eq('user_id', userId).eq('company_id', comp.id);
+      await supabase.from('notifications').delete().eq('user_id', userId).eq('company_id', comp.id);
+      await supabase.from('companies').delete().eq('user_id', userId).eq('id', comp.id);
+      deletedCompanies.push(comp.name);
+    }
+  }
 
-    let bestNewStatus: string | null = null;
-    let bestPriority = currentPriority;
+  // 5. Fetch updated list of remaining legitimate companies
+  const { data: validCompanies } = await supabase
+    .from('companies')
+    .select('id, name')
+    .eq('user_id', userId);
 
-    // Combine all email text for comprehensive job detail extraction
+  // Fetch updated candidate matches
+  const { data: candidateMatches } = await supabase
+    .from('candidate_matches')
+    .select('id, match_type, email_id')
+    .eq('user_id', userId);
+
+  let updatedAppsCount = 0;
+  const applicationResults: Array<{ company: string; status: string; role?: string | null }> = [];
+
+  for (const comp of validCompanies || []) {
+    const { data: companyEmails } = await supabase
+      .from('emails')
+      .select('id, subject, body_snippet, classification, received_at')
+      .eq('user_id', userId)
+      .eq('company_id', comp.id);
+
+    if (!companyEmails || companyEmails.length === 0) continue;
+
+    const emailIds = new Set(companyEmails.map((e) => e.id));
+    const matchedEmailIds = new Set(
+      (candidateMatches || [])
+        .filter((cm) => emailIds.has((cm as unknown as { email_id: string }).email_id))
+        .map((cm) => (cm as unknown as { email_id: string }).email_id)
+    );
+
+    // Combine email text for details
     const combinedEmailText = companyEmails
       .map((e) => `${e.subject || ''}\n${e.body_snippet || ''}`)
       .join('\n\n');
 
-    // Extract updated role, CTC, stipend, location
-    const extracted = extractJobDetails(combinedEmailText);
+    const extractedJob = extractJobDetails(combinedEmailText);
 
-    // ─── Status Computation from Emails & Events ────────────────────────
+    // Identify email types
+    const isWithdrawn = companyEmails.some((e) => {
+      const full = `${e.subject || ''} ${e.body_snippet || ''}`.toLowerCase();
+      return (
+        e.classification === 'withdrawal' ||
+        e.classification === 'decline' ||
+        /registration.*withdrawn|your registration.*withdrawn|declined\s+drive/i.test(full) ||
+        /confirmation.*drive\s+registration\s+update.*withdrawn/i.test(full)
+      );
+    });
+
     const hasConfirmedRegistration = companyEmails.some((e) => {
       const subj = (e.subject || '').toLowerCase();
-      const body = (e.body_snippet || '').toLowerCase();
-      const full = subj + ' ' + body;
+      const full = `${subj} ${e.body_snippet || ''}`.toLowerCase();
       return (
         e.classification === 'registration_confirmation' ||
         /confirmed:\s*your\s+registration/i.test(subj) ||
         /registration\s+(confirmed|successful|received)/i.test(full) ||
-        /successfully\s+registered|thank\s+you\s+for\s+(registering|applying)/i.test(full) ||
-        /confirms?\s+(that\s+)?(you(r|'re)|your)\s+(successful\s+)?(registration|application)/i.test(full)
+        /successfully\s+registered|thank\s+you\s+for\s+(registering|applying)/i.test(full)
       );
     });
 
-    const isWithdrawn = companyEmails.some((e) => {
-      const subj = (e.subject || '').toLowerCase();
-      const body = (e.body_snippet || '').toLowerCase();
-      const full = subj + ' ' + body;
-      return (
-        e.classification === 'withdrawal' ||
-        e.classification === 'decline' ||
-        /registration.*has been withdrawn|your registration.*withdrawn/i.test(full) ||
-        (/confirmation.*drive\s+registration\s+update/i.test(subj) && /withdrawn/i.test(full))
-      );
-    });
-
-    // Fetch user's configured Neo ID
-    const { data: userData } = await supabase
-      .from('users')
-      .select('neo_id')
-      .eq('id', userId)
-      .single();
-    const userNeoId = userData?.neo_id || null;
-
-    // Candidate Matches (Neo ID matched in Excel or email body)
-    const { data: candidateMatches } = await supabase
-      .from('candidate_matches')
-      .select('id, match_type, email_id')
-      .eq('user_id', userId);
-
-    const emailIds = new Set(companyEmails.map((e) => e.id));
-    let isCompanyCandidateMatched = (candidateMatches || []).some((cm) =>
-      emailIds.has((cm as unknown as { email_id: string }).email_id)
-    );
-
-    // Also check if userNeoId appears directly in any email subject or body_snippet
-    if (!isCompanyCandidateMatched && userNeoId && userNeoId.length >= 4) {
-      const cleanNeo = userNeoId.toUpperCase().trim();
-      for (const e of companyEmails) {
-        const text = `${e.subject || ''} ${e.body_snippet || ''}`.toUpperCase();
-        if (text.includes(cleanNeo)) {
-          isCompanyCandidateMatched = true;
-          // Persist candidate match
-          await supabase.from('candidate_matches').insert({
-            user_id: userId,
-            email_id: e.id,
-            neo_id: userNeoId,
-            match_type: 'email_body',
-            matched_value: `Found ${userNeoId} in email body`,
-            confidence: 'high',
-          });
-          break;
-        }
-      }
-    }
-
-    // Stored Events (PPT, Test, Interview)
-    const { data: storedEvents } = await supabase
-      .from('events')
-      .select('event_type')
-      .eq('user_id', userId)
-      .eq('company_id', companyId);
-
-    const hasTestEvent = (storedEvents || []).some((e) =>
-      ['online_test', 'coding_test'].includes(e.event_type)
-    );
-    const hasPptEvent = (storedEvents || []).some((e) => e.event_type === 'ppt');
-    const hasInterviewEvent = (storedEvents || []).some((e) =>
-      ['technical_interview', 'hr_interview', 'final_interview'].includes(e.event_type)
-    );
-
-    // Categorize emails for this company into progression stages
+    // Progression stage emails
     const selectionListPattern = /selection\s+list|congratulations.*offer|selected\s+candidates|final\s+select/i;
     const selectionEmails = companyEmails.filter((e) =>
       selectionListPattern.test(e.subject || '')
@@ -173,124 +271,199 @@ export async function POST() {
     const nextRoundPattern =
       /next\s+round\s+of\s+selection|next\s+round\s+is\s+scheduled|interview\s+(?:is\s+)?scheduled|technical\s+interview|hr\s+interview|final\s+interview|interview\s+shortlist|shortlist\s+for\s+interview|shortlisted\s+for\s+(?:the\s+)?interview/i;
     const nextRoundEmails = companyEmails.filter((e) =>
-      nextRoundPattern.test((e.subject || '') + ' ' + (e.body_snippet || ''))
+      nextRoundPattern.test(`${e.subject || ''} ${e.body_snippet || ''}`)
     );
 
-    // General shortlist / screening signal (including initial screening lists)
-    const hasExplicitShortlistSignal = companyEmails.some((e) => {
-      const subj = (e.subject || '').toLowerCase();
-      const full = subj + ' ' + (e.body_snippet || '').toLowerCase();
-      return (
-        /shortlist|selection\s+list|selected\s+candidates|students\s+list|shortlisted\s+students/i.test(subj) ||
-        /shortlist|shortlisted candidates|initial shortlist|selection list|students list|shortlisted students|attached list of students/i.test(full) ||
-        e.classification === 'shortlist'
-      );
-    });
+    const testShortlistPattern = /shortlist|online\s+test|coding\s+test|assessment|test\s+schedule/i;
+    const testShortlistEmails = companyEmails.filter((e) =>
+      testShortlistPattern.test(e.subject || '')
+    );
 
+    // Candidate match verification
+    const isMatchedInSelectionList = selectionEmails.some((e) => matchedEmailIds.has(e.id));
+    const isMatchedInNextRound = nextRoundEmails.some((e) => matchedEmailIds.has(e.id));
+    const isMatchedInTest = testShortlistEmails.some((e) => matchedEmailIds.has(e.id));
+
+    // Extract events across all emails for this company
+    const allExtractedEvents = companyEmails.flatMap((e) =>
+      extractEvents({
+        gmailMessageId: e.id,
+        threadId: null,
+        sender: '',
+        senderEmail: '',
+        subject: e.subject || '',
+        receivedAt: e.received_at ? new Date(e.received_at) : new Date(),
+        bodySnippet: e.body_snippet || '',
+        bodyPlain: e.body_snippet || '',
+        bodyHtml: '',
+        hasAttachments: false,
+        attachments: [],
+        labels: [],
+      })
+    );
+
+    const hasPptEvent = allExtractedEvents.some((evt) => evt.eventType === 'ppt');
+
+    // ── STATUS COMPUTATION ──
     let computedStatus = 'not_applied';
 
     if (isWithdrawn) {
       computedStatus = 'declined';
-    } else if (isCompanyCandidateMatched) {
-      // Determine which specific emails the candidate was matched in
-      const matchedEmailIdsForCompany = new Set(
-        (candidateMatches || [])
-          .filter((cm) => emailIds.has((cm as unknown as { email_id: string }).email_id))
-          .map((cm) => (cm as unknown as { email_id: string }).email_id)
-      );
-
-      const isMatchedInSelectionList = selectionEmails.some((e) =>
-        matchedEmailIdsForCompany.has(e.id)
-      );
-      const isMatchedInNextRound = nextRoundEmails.some((e) =>
-        matchedEmailIdsForCompany.has(e.id)
-      );
-
-      if (selectionEmails.length > 0) {
-        // Final selections were released!
-        if (isMatchedInSelectionList) {
-          computedStatus = 'selected';
-        } else {
-          // Candidate was not in the final selection list -> rejected
-          computedStatus = 'rejected';
-        }
-      } else if (nextRoundEmails.length > 0) {
-        // Next round (interview/technical) was released!
-        if (isMatchedInNextRound) {
-          computedStatus = 'interview_scheduled';
-        } else {
-          // Candidate failed the test round and was not shortlisted for interview
-          computedStatus = 'rejected';
-        }
-      } else if (hasInterviewEvent) {
+    } else if (selectionEmails.length > 0) {
+      // Final selection list is out!
+      if (isMatchedInSelectionList) {
+        computedStatus = 'selected';
+      } else {
+        // Did not make final selection list -> rejected
+        computedStatus = 'rejected';
+      }
+    } else if (nextRoundEmails.length > 0) {
+      // Next round / interview announcement is out!
+      if (isMatchedInNextRound) {
         computedStatus = 'interview_scheduled';
-      } else if (hasTestEvent) {
+      } else {
+        // Failed the test round -> rejected
+        computedStatus = 'rejected';
+      }
+    } else if (testShortlistEmails.length > 0) {
+      // Test schedule or shortlist
+      if (isMatchedInTest) {
+        computedStatus = 'test_scheduled';
+      } else if (hasConfirmedRegistration) {
+        // Registered and waiting for test
         computedStatus = 'test_scheduled';
       } else {
-        computedStatus = 'shortlisted';
+        computedStatus = 'not_shortlisted';
       }
     } else if (hasConfirmedRegistration) {
-      // User registered, but was never candidate-matched in any shortlist:
-      if (selectionEmails.length > 0 || nextRoundEmails.length > 0) {
-        // Subsequent rounds or final selections are out, candidate never cleared:
-        computedStatus = 'rejected';
-      } else if (hasExplicitShortlistSignal) {
-        // Initial test shortlist released, candidate was not on it:
-        computedStatus = 'not_shortlisted';
-      } else if (hasTestEvent) {
-        computedStatus = 'test_scheduled';
-      } else if (hasPptEvent) {
+      if (hasPptEvent) {
         computedStatus = 'ppt_scheduled';
       } else {
         computedStatus = 'applied';
       }
     } else {
-      // User NEVER applied to this company — keep as not_applied
       computedStatus = 'not_applied';
     }
 
-    // Determine final status (respect manual_override if present)
-    const finalStatus = app?.manual_override ? currentStatus : computedStatus;
-
-    // Sanitize role: fix "you are", "you have", or empty values
-    let finalRole = extracted.role || app?.role || null;
-    if (finalRole && /\byou\s*(?:are|have|re)\b|dear\s|greetings|eligible|registr/i.test(finalRole)) {
-      finalRole = extracted.role && !/\byou\s*(?:are|have|re)\b/i.test(extracted.role) ? extracted.role : null;
-    }
-
-    // Build update payload
-    const updatePayload: Record<string, unknown> = {
-      user_id: userId,
-      company_id: companyId,
-      status: finalStatus,
-      status_source: app?.manual_override ? 'manual_override' : 'sync_reprocess',
-      status_confidence: 'high',
-      last_updated: new Date().toISOString(),
-    };
-
-    if (finalRole !== undefined) updatePayload.role = finalRole;
-    updatePayload.ctc = extracted.ctc;
-    updatePayload.stipend = extracted.stipend;
-    updatePayload.location = extracted.location;
-
-    await supabase
+    // Get existing application record
+    const { data: existingApp } = await supabase
       .from('applications')
-      .upsert(updatePayload, { onConflict: 'user_id,company_id' });
+      .select('status, manual_override, role, ctc, stipend, location')
+      .eq('user_id', userId)
+      .eq('company_id', comp.id)
+      .single();
 
-    // Purge events if user is not shortlisted, rejected, withdrawn, or not applied
-    if (['withdrawn', 'declined', 'rejected', 'not_shortlisted', 'not_applied'].includes(finalStatus)) {
-      await supabase.from('events').delete().eq('user_id', userId).eq('company_id', companyId);
+    const finalStatus = existingApp?.manual_override ? existingApp.status : computedStatus;
+
+    // Sanitize role
+    let finalRole = extractedJob.role || existingApp?.role || null;
+    if (finalRole && /\byou\s*(?:are|have|re)\b|dear\s|greetings|eligible|registr/i.test(finalRole)) {
+      finalRole = extractedJob.role && !/\byou\s*(?:are|have|re)\b/i.test(extractedJob.role) ? extractedJob.role : null;
     }
 
-    fixed++;
-    details.push({
-      companyId,
-      subject: companyEmails[0].subject || '',
-      newStatus: finalStatus,
+    // Upsert application
+    await supabase.from('applications').upsert(
+      {
+        user_id: userId,
+        company_id: comp.id,
+        status: finalStatus,
+        status_source: existingApp?.manual_override ? 'manual_override' : 'sync_reprocess',
+        status_confidence: 'high',
+        role: finalRole,
+        ctc: extractedJob.ctc || existingApp?.ctc || null,
+        stipend: extractedJob.stipend || existingApp?.stipend || null,
+        location: extractedJob.location || existingApp?.location || null,
+        last_updated: new Date().toISOString(),
+      },
+      { onConflict: 'user_id,company_id' }
+    );
+
+    // Manage events: if rejected/withdrawn/not_shortlisted, delete events
+    if (['withdrawn', 'declined', 'rejected', 'not_shortlisted', 'not_applied'].includes(finalStatus)) {
+      await supabase.from('events').delete().eq('user_id', userId).eq('company_id', comp.id);
+    } else {
+      // Re-insert valid events with deduplication
+      for (const evt of allExtractedEvents) {
+        if (!evt.startTime) continue;
+        const startTimeIso = evt.startTime.toISOString();
+
+        // Check if event already exists
+        const { data: existingEvts } = await supabase
+          .from('events')
+          .select('id')
+          .eq('user_id', userId)
+          .eq('company_id', comp.id)
+          .eq('event_type', evt.eventType)
+          .limit(1);
+
+        if (!existingEvts || existingEvts.length === 0) {
+          await supabase.from('events').insert({
+            user_id: userId,
+            company_id: comp.id,
+            event_type: evt.eventType,
+            title: `${comp.name} - ${evt.title}`,
+            start_time: startTimeIso,
+            end_time: evt.endTime ? evt.endTime.toISOString() : null,
+            venue: evt.venue,
+            mode: evt.mode,
+            confidence: evt.confidence,
+          });
+        }
+      }
+    }
+
+    updatedAppsCount++;
+    applicationResults.push({
+      company: comp.name,
+      status: finalStatus,
       role: finalRole,
-      ctc: extracted.ctc || app?.ctc,
     });
   }
 
-  return NextResponse.json({ success: true, emailsScanned: emails.length, fixed, details });
+  return {
+    success: true,
+    message: 'Placement feed successfully re-indexed and cleaned',
+    totalEmailsScanned: emails.length,
+    reclassifiedEmails: reclassifiedCount,
+    unlinkedIrrelevantEmails: unlinkedCount,
+    deletedInvalidCompanies: deletedCompanies,
+    updatedApplications: updatedAppsCount,
+    results: applicationResults,
+  };
+}
+
+export async function POST() {
+  const session = await getSession();
+  if (!session) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+
+  try {
+    const res = await performReprocess(session.userId);
+    return NextResponse.json(res);
+  } catch (err) {
+    console.error('Reprocess failed:', err);
+    return NextResponse.json(
+      { error: err instanceof Error ? err.message : 'Reprocess failed' },
+      { status: 500 }
+    );
+  }
+}
+
+export async function GET() {
+  const session = await getSession();
+  if (!session) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+
+  try {
+    const res = await performReprocess(session.userId);
+    return NextResponse.json(res);
+  } catch (err) {
+    console.error('Reprocess failed:', err);
+    return NextResponse.json(
+      { error: err instanceof Error ? err.message : 'Reprocess failed' },
+      { status: 500 }
+    );
+  }
 }

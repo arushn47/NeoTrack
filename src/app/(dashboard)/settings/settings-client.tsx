@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { useRouter } from 'next/navigation';
 import {
   Mail,
   Link2,
@@ -35,11 +36,40 @@ interface SettingsClientProps {
 }
 
 export default function SettingsClient({ accounts, neoId: initialNeoId, userEmail }: SettingsClientProps) {
+  const router = useRouter();
   const [neoId, setNeoId] = useState(initialNeoId);
   const [savingNeoId, setSavingNeoId] = useState(false);
   const [neoIdSaved, setNeoIdSaved] = useState(false);
   const [neoIdError, setNeoIdError] = useState('');
   const [disconnecting, setDisconnecting] = useState<string | null>(null);
+
+  const [reprocessing, setReprocessing] = useState(false);
+  const [reprocessResult, setReprocessResult] = useState<{
+    message: string;
+    totalEmailsScanned: number;
+    unlinkedIrrelevantEmails: number;
+    deletedInvalidCompanies: string[];
+    updatedApplications: number;
+  } | null>(null);
+
+  const handleReprocess = async () => {
+    setReprocessing(true);
+    setReprocessResult(null);
+    try {
+      const res = await fetch('/api/sync/reprocess', { method: 'POST' });
+      const data = await res.json();
+      if (res.ok) {
+        setReprocessResult(data);
+        router.refresh();
+      } else {
+        alert(data.error || 'Failed to reprocess placement feeds');
+      }
+    } catch {
+      alert('Failed to reprocess placement feeds');
+    } finally {
+      setReprocessing(false);
+    }
+  };
 
   const personalAccount = accounts.find((a) => a.account_type === 'personal');
   const collegeAccount = accounts.find((a) => a.account_type === 'college');
@@ -147,6 +177,51 @@ export default function SettingsClient({ accounts, neoId: initialNeoId, userEmai
             </p>
           )}
         </div>
+      </section>
+
+      {/* Placement Intelligence Engine Maintenance / Reprocess */}
+      <section className="rounded-3xl bg-[#101018]/90 backdrop-blur-2xl border border-zinc-800/80 overflow-hidden shadow-xl shadow-black/20">
+        <div className="px-6 py-5 border-b border-zinc-800/80 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div>
+            <h2 className="text-sm font-bold text-white flex items-center gap-2">
+              <Sparkles className="w-4 h-4 text-amber-400" />
+              Placement Feed Re-indexing & Cleanup
+            </h2>
+            <p className="text-xs text-zinc-400 mt-1">
+              Re-scans all stored emails with updated parser rules: deletes spurious company records (e.g. Google, role titles), fixes company aliases (e.g. EY GDS), and recalculates stage progression (e.g. MUFG, Epsilon test rejections).
+            </p>
+          </div>
+          <button
+            onClick={handleReprocess}
+            disabled={reprocessing}
+            className="flex items-center justify-center gap-2 px-5 py-2.5 rounded-2xl bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 border border-amber-500/30 text-xs font-bold transition-all shadow-md active:scale-95 disabled:opacity-50 flex-shrink-0"
+          >
+            {reprocessing ? (
+              <>
+                <Loader2 className="w-4 h-4 animate-spin text-amber-400" />
+                <span>Cleaning & Re-indexing...</span>
+              </>
+            ) : (
+              <>
+                <RefreshCw className="w-4 h-4 text-amber-400" />
+                <span>Re-index & Clean All Drives</span>
+              </>
+            )}
+          </button>
+        </div>
+        {reprocessResult && (
+          <div className="p-6 bg-zinc-950/60 border-t border-zinc-800/60">
+            <div className="flex items-start gap-3">
+              <CheckCircle2 className="w-5 h-5 text-emerald-400 flex-shrink-0 mt-0.5" />
+              <div>
+                <p className="text-xs font-bold text-white">{reprocessResult.message}</p>
+                <p className="text-[11px] text-zinc-400 mt-1">
+                  Scanned {reprocessResult.totalEmailsScanned} emails · Unlinked {reprocessResult.unlinkedIrrelevantEmails} irrelevant emails · Deleted {reprocessResult.deletedInvalidCompanies?.length || 0} invalid companies ({reprocessResult.deletedInvalidCompanies?.join(', ') || 'none'}) · Updated {reprocessResult.updatedApplications} company records.
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
       </section>
 
       {/* Gmail Accounts Section */}
