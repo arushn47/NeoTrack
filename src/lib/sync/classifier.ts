@@ -234,6 +234,9 @@ export const COMPANY_ALIASES: Record<string, string> = {
   'capgemini': 'Capgemini',
   'deloitte': 'Deloitte',
   'kpmg': 'KPMG',
+  'ey gds': 'EY GDS',
+  'ey global delivery services': 'EY GDS',
+  'ey-gds': 'EY GDS',
   'ey': 'EY',
   'ernst & young': 'EY',
   'pwc': 'PwC',
@@ -277,6 +280,7 @@ export const COMPANY_ALIASES: Record<string, string> = {
   'mitsubishi ufj': 'MUFG',
   'mitsubishi ufj financial group': 'MUFG',
   'mitsubishi': 'MUFG',
+  'epsilon': 'Epsilon',
   'zluri': 'Zluri',
   'nielsen': 'NielsenIQ',
   'nielseniq': 'NielsenIQ',
@@ -405,7 +409,7 @@ const SUBJECT_SUFFIXES = [
 ];
 
 /**
- * Words that are never company names.
+ * Words and role titles that are never company names.
  */
 const NON_COMPANY_WORDS = [
   'email', 'match', 'hr', 'github', 'linkedin', 'supabase', 'vitstudent',
@@ -417,6 +421,12 @@ const NON_COMPANY_WORDS = [
   'complete today', 'complete', 'practice test', 'practice assessment',
   'mock test', 'top coders', 'nerd season', 'codeathon', 'course',
   'learning contents', 'reminder',
+  // Role titles / profiles that are never company names
+  'ps associate software engineer', 'associate software engineer', 'ps associate engineer',
+  'associate engineer', 'software engineer', 'software development engineer',
+  'data scientist', 'data analyst', 'business analyst', 'graduate engineer trainee',
+  'graduate trainee', 'system engineer', 'technical consultant', 'consultant',
+  'full stack developer', 'backend developer', 'frontend developer', 'intern', 'internship',
 ];
 
 /**
@@ -440,8 +450,11 @@ export function extractCompanyName(
   const cleanedSubject = cleanSubjectNoise(subject);
 
   // Try known company aliases directly in the subject (highest precision match)
+  // Sort aliases by length descending so "ey gds" matches before "ey", "tata consultancy services" before "tcs", etc.
   const lowerCleaned = cleanedSubject.toLowerCase();
-  for (const [alias, canonical] of Object.entries(COMPANY_ALIASES)) {
+  const sortedAliases = Object.keys(COMPANY_ALIASES).sort((a, b) => b.length - a.length);
+  for (const alias of sortedAliases) {
+    const canonical = COMPANY_ALIASES[alias];
     const escaped = alias.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     const regex = new RegExp(`(?:^|[^a-z0-9])${escaped}(?:[^a-z0-9]|$)`, 'i');
     if (regex.test(lowerCleaned)) {
@@ -460,6 +473,12 @@ export function extractCompanyName(
         cleaned.length < 50 &&
         !NON_COMPANY_WORDS.includes(cleaned.toLowerCase()) &&
         !/^(?:portal|webinar|survey|assessment|feedback|cdc|vit|profile|course|day\s+\d+|session|prelims|passout\s+batch|complete|reminder)/i.test(
+          cleaned
+        ) &&
+        !/^(?:ps\s+)?(?:associate\s+)?(?:software\s+)?(?:engineer|developer|analyst|scientist|trainee|consultant|specialist)$/i.test(
+          cleaned
+        ) &&
+        !/(?:software\s+engineer|associate\s+engineer|data\s+scientist|data\s+analyst|graduate\s+trainee)/i.test(
           cleaned
         )
       ) {
@@ -527,8 +546,10 @@ export function normalizeCompanyName(name: string): string {
     return COMPANY_ALIASES[lower];
   }
 
-  // Check if any alias key is contained in the name (with word boundaries to avoid false positives like 'ion' in 'registration')
-  for (const [alias, canonical] of Object.entries(COMPANY_ALIASES)) {
+  // Check if any alias key is contained in the name (longest key first)
+  const sortedAliases = Object.keys(COMPANY_ALIASES).sort((a, b) => b.length - a.length);
+  for (const alias of sortedAliases) {
+    const canonical = COMPANY_ALIASES[alias];
     const escaped = alias.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     const regex = new RegExp(`(?:^|[^a-z0-9])${escaped}(?:[^a-z0-9]|$)`, 'i');
     if (regex.test(lower)) {

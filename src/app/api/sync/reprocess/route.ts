@@ -164,19 +164,17 @@ export async function POST() {
       ['technical_interview', 'hr_interview', 'final_interview'].includes(e.event_type)
     );
 
-    // Post-test progression signals (interviews, next rounds, selection lists)
-    const hasPostTestProgressionSignal = companyEmails.some((e) => {
-      const subj = (e.subject || '').toLowerCase();
-      const full = subj + ' ' + (e.body_snippet || '').toLowerCase();
-      return (
-        e.classification === 'interview' ||
-        /interview\s+(?:is\s+)?scheduled|technical\s+interview|hr\s+interview|final\s+interview/i.test(subj) ||
-        /next\s+round\s+of\s+selection|next\s+round\s+is\s+scheduled/i.test(subj) ||
-        /selection\s+list|final\s+shortlist|congratulations.*(?:selection\s+list|selects)/i.test(subj) ||
-        /interview\s+shortlist|shortlist\s+for\s+interview/i.test(full) ||
-        /next\s+round\s+shortlist|shortlisted\s+for\s+next\s+round|shortlisted\s+for\s+(?:the\s+)?interview/i.test(full)
-      );
-    });
+    // Categorize emails for this company into progression stages
+    const selectionListPattern = /selection\s+list|congratulations.*offer|selected\s+candidates|final\s+select/i;
+    const selectionEmails = companyEmails.filter((e) =>
+      selectionListPattern.test(e.subject || '')
+    );
+
+    const nextRoundPattern =
+      /next\s+round\s+of\s+selection|next\s+round\s+is\s+scheduled|interview\s+(?:is\s+)?scheduled|technical\s+interview|hr\s+interview|final\s+interview|interview\s+shortlist|shortlist\s+for\s+interview|shortlisted\s+for\s+(?:the\s+)?interview/i;
+    const nextRoundEmails = companyEmails.filter((e) =>
+      nextRoundPattern.test((e.subject || '') + ' ' + (e.body_snippet || ''))
+    );
 
     // General shortlist / screening signal (including initial screening lists)
     const hasExplicitShortlistSignal = companyEmails.some((e) => {
@@ -201,23 +199,29 @@ export async function POST() {
           .map((cm) => (cm as unknown as { email_id: string }).email_id)
       );
 
-      // A selection/offer email exists for this company
-      const selectionListPattern = /selection\s+list|congratulations.*offer/i;
-      const hasSelectionListEmail = companyEmails.some((e) =>
-        selectionListPattern.test(e.subject || '')
+      const isMatchedInSelectionList = selectionEmails.some((e) =>
+        matchedEmailIdsForCompany.has(e.id)
+      );
+      const isMatchedInNextRound = nextRoundEmails.some((e) =>
+        matchedEmailIdsForCompany.has(e.id)
       );
 
-      // Check if the candidate's Neo ID match is specifically in a selection list email
-      const isMatchedInSelectionList = companyEmails.some((e) =>
-        matchedEmailIdsForCompany.has(e.id) &&
-        selectionListPattern.test(e.subject || '')
-      );
-
-      if (isMatchedInSelectionList) {
-        computedStatus = 'selected';
-      } else if (hasSelectionListEmail || hasPostTestProgressionSignal) {
-        // Candidate was matched in earlier stage emails but NOT in the final selection
-        computedStatus = 'rejected';
+      if (selectionEmails.length > 0) {
+        // Final selections were released!
+        if (isMatchedInSelectionList) {
+          computedStatus = 'selected';
+        } else {
+          // Candidate was not in the final selection list -> rejected
+          computedStatus = 'rejected';
+        }
+      } else if (nextRoundEmails.length > 0) {
+        // Next round (interview/technical) was released!
+        if (isMatchedInNextRound) {
+          computedStatus = 'interview_scheduled';
+        } else {
+          // Candidate failed the test round and was not shortlisted for interview
+          computedStatus = 'rejected';
+        }
       } else if (hasInterviewEvent) {
         computedStatus = 'interview_scheduled';
       } else if (hasTestEvent) {
@@ -226,19 +230,15 @@ export async function POST() {
         computedStatus = 'shortlisted';
       }
     } else if (hasConfirmedRegistration) {
-      if (hasTestEvent || hasInterviewEvent) {
-        // Candidate had a test or interview scheduled:
-        if (hasPostTestProgressionSignal) {
-          // A subsequent round (interview, next round, or final selection list) was released,
-          // and candidate was not matched -> rejected
-          computedStatus = 'rejected';
-        } else {
-          // Test/Interview results are not out yet -> Keep waiting in test_scheduled / interview_scheduled!
-          computedStatus = hasInterviewEvent ? 'interview_scheduled' : 'test_scheduled';
-        }
-      } else if (hasExplicitShortlistSignal || hasPostTestProgressionSignal) {
-        // Candidate never had a test scheduled and a shortlist was released -> not shortlisted
+      // User registered, but was never candidate-matched in any shortlist:
+      if (selectionEmails.length > 0 || nextRoundEmails.length > 0) {
+        // Subsequent rounds or final selections are out, candidate never cleared:
+        computedStatus = 'rejected';
+      } else if (hasExplicitShortlistSignal) {
+        // Initial test shortlist released, candidate was not on it:
         computedStatus = 'not_shortlisted';
+      } else if (hasTestEvent) {
+        computedStatus = 'test_scheduled';
       } else if (hasPptEvent) {
         computedStatus = 'ppt_scheduled';
       } else {
@@ -247,20 +247,6 @@ export async function POST() {
     } else {
       // User NEVER applied to this company — keep as not_applied
       computedStatus = 'not_applied';
-    }
-
-    // ── Priority guard: never let reprocess overwrite a terminal state with a weaker one ──
-    const isTerminal = (s: string) =>
-      ['withdrawn', 'declined', 'rejected', 'not_shortlisted', 'selected'].includes(s);
-    if (!app?.manual_override && currentStatus && computedStatus !== currentStatus) {
-      const existingPriority = STATUS_PRIORITY[currentStatus] ?? 0;
-      const newPriority = STATUS_PRIORITY[computedStatus] ?? 0;
-      if (isTerminal(currentStatus) && !isTerminal(computedStatus)) {
-        // Never downgrade from a terminal state during reprocess
-        computedStatus = currentStatus;
-      } else if (!isTerminal(computedStatus) && newPriority < existingPriority) {
-        computedStatus = currentStatus;
-      }
     }
 
     // Determine final status (respect manual_override if present)

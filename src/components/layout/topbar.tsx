@@ -81,37 +81,42 @@ export default function Topbar({ userName, userAvatar, lastSyncAt }: TopbarProps
 
         buffer += decoder.decode(value, { stream: true });
 
-        // Parse SSE events from buffer
-        const lines = buffer.split('\n');
-        buffer = '';
+        // Split by standard SSE double-newline message delimiter
+        const messages = buffer.split('\n\n');
+        // Keep any incomplete trailing block in buffer
+        buffer = messages.pop() || '';
 
-        let currentEvent = '';
-        let currentData = '';
+        for (const message of messages) {
+          const lines = message.split('\n');
+          let currentEvent = '';
+          let currentData = '';
 
-        for (const line of lines) {
-          if (line.startsWith('event: ')) {
-            currentEvent = line.slice(7).trim();
-          } else if (line.startsWith('data: ')) {
-            currentData = line.slice(6).trim();
-          } else if (line === '' && currentEvent && currentData) {
-            // Process the complete event
+          for (const line of lines) {
+            if (line.startsWith('event: ')) {
+              currentEvent = line.slice(7).trim();
+            } else if (line.startsWith('data: ')) {
+              currentData = line.slice(6).trim();
+            }
+          }
+
+          if (currentEvent && currentData) {
             try {
               const parsed = JSON.parse(currentData);
 
-              if (currentEvent === 'progress' && !silent) {
+              if ((currentEvent === 'progress' || currentEvent === 'sync_progress') && !silent) {
                 setSyncProgress(parsed);
-              } else if (currentEvent === 'complete') {
+              } else if (currentEvent === 'complete' || currentEvent === 'sync_complete') {
                 setSyncProgress(null);
                 setSyncResult({
                   show: true,
                   success: true,
                   message: 'Placement sync complete',
-                  newEmails: parsed.newEmails,
-                  newCompanies: parsed.newCompanies,
+                  newEmails: parsed.newEmails ?? parsed.result?.newEmails ?? 0,
+                  newCompanies: parsed.newCompanies ?? parsed.result?.newCompanies ?? 0,
                 });
                 router.refresh();
                 setTimeout(() => setSyncResult(null), 5000);
-              } else if (currentEvent === 'error') {
+              } else if (currentEvent === 'error' || currentEvent === 'sync_error') {
                 setSyncProgress(null);
                 setSyncResult({
                   show: true,
@@ -123,11 +128,8 @@ export default function Topbar({ userName, userAvatar, lastSyncAt }: TopbarProps
                 setTimeout(() => setSyncResult(null), 8000);
               }
             } catch {
-              // Ignore malformed SSE chunk
+              // Ignore malformed JSON
             }
-
-            currentEvent = '';
-            currentData = '';
           }
         }
       }
@@ -142,6 +144,7 @@ export default function Topbar({ userName, userAvatar, lastSyncAt }: TopbarProps
       });
       setTimeout(() => setSyncResult(null), 8000);
     } finally {
+      setSyncProgress(null);
       isSyncingRef.current = false;
       setIsSyncing(false);
     }

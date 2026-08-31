@@ -35,18 +35,30 @@ export async function POST() {
           session.userId,
           (progress: SyncProgress) => {
             sendEvent('sync_progress', progress);
+            sendEvent('progress', progress);
           }
         );
 
         sendEvent('sync_complete', {
           message: 'Sync complete!',
           result,
+          newEmails: result.newEmails,
+          newCompanies: result.newCompanies,
+        });
+        sendEvent('complete', {
+          message: 'Sync complete!',
+          result,
+          newEmails: result.newEmails,
+          newCompanies: result.newCompanies,
         });
       } catch (err) {
         const errorMessage =
           err instanceof Error ? err.message : 'Unknown error';
         console.error('Sync error:', err);
         sendEvent('sync_error', {
+          message: errorMessage,
+        });
+        sendEvent('error', {
           message: errorMessage,
         });
       } finally {

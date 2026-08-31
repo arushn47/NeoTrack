@@ -35,13 +35,20 @@ export function checkNeoIdMatch(
 ): { matched: boolean; matchedValue: string | null } {
   if (!text) return { matched: false, matchedValue: null };
 
-  const upperText = text.toUpperCase();
+  // Strip recipient email addresses, mailto links, and headers to prevent matching user's own email
+  const sanitizedText = text
+    .replace(/[a-zA-Z0-9._%+-]+@vit(?:student|bhopal|chennai|vellore)?\.[a-zA-Z0-9.-]+/gi, ' ')
+    .replace(/[a-zA-Z0-9._%+-]+@gmail\.com/gi, ' ')
+    .replace(/mailto:[^\s>]+/gi, ' ')
+    .replace(/to:\s*[^\n]+/gi, ' ')
+    .replace(/from:\s*[^\n]+/gi, ' ')
+    .toUpperCase();
 
-  // 1. Check user's explicitly set Neo ID (e.g. "I4W0POK8", "I4W0P0K8", "K1D6D1R7")
+  // 1. Check user's explicitly configured Neo ID (e.g. "I4W0POK8", "I4W0P0K8", "K1D6D1R7")
   if (userNeoId && userNeoId.trim().length >= 4) {
     const cleanNeoId = userNeoId.trim().toUpperCase();
-    const matchesDirect = upperText.includes(cleanNeoId);
-    const matchesFlexible = upperText
+    const matchesDirect = sanitizedText.includes(cleanNeoId);
+    const matchesFlexible = sanitizedText
       .replace(/[0O]/g, '#0#')
       .replace(/[1I]/g, '#1#')
       .includes(cleanNeoId.replace(/[0O]/g, '#0#').replace(/[1I]/g, '#1#'));
@@ -52,10 +59,12 @@ export function checkNeoIdMatch(
   }
 
   // 2. Check registration number pattern (e.g. "23BCE10472")
+  // Only match standalone registration numbers (not part of email addresses)
   const regMatch = userEmail.match(/([0-9]{2}[a-z]{3}[0-9]{4,5})/i);
   if (regMatch && regMatch[1]) {
     const regNo = regMatch[1].toUpperCase();
-    if (upperText.includes(regNo)) {
+    const regRegex = new RegExp(`(?:^|[^A-Z0-9])${regNo}(?:[^A-Z0-9]|$)`, 'i');
+    if (regRegex.test(sanitizedText)) {
       return { matched: true, matchedValue: regNo };
     }
   }
@@ -336,14 +345,14 @@ export async function processEmailForEventsAndStatus(
 
     if (isRejectionLanguage) {
       newStatus = 'rejected';
+    } else if (/final\s*selection|offer\s*(?:letter|release)|congratulations.*(?:final|offer)/i.test(subjLower) || (/selection\s*list/i.test(subjLower) && !/interview|ppt|test/i.test(subjLower))) {
+      newStatus = 'selected';
     } else if (/interview|next\s+round|selection\s+process/i.test(subjLower)) {
       newStatus = 'interview_scheduled';
     } else if (/ppt|pre[\s-]*placement/i.test(subjLower)) {
       newStatus = 'ppt_scheduled';
-    } else if (/not\s+selected/i.test(subjLower)) {
-      newStatus = 'rejected';
-    } else if (/(?:selected|congratulations.*offer)/i.test(subjLower)) {
-      newStatus = 'selected';
+    } else if (/online\s+test|coding\s+test|assessment/i.test(subjLower)) {
+      newStatus = 'test_scheduled';
     } else {
       newStatus = 'shortlisted';
     }
@@ -433,7 +442,7 @@ export async function processEmailForEventsAndStatus(
     // If the new status has lower priority than existing AND existing is NOT terminal,
     // block the downgrade. Terminal states (withdrawn, rejected, not_shortlisted) are
     // always allowed to be applied.
-    const isTerminal = (s: string) => ['withdrawn', 'declined', 'rejected', 'not_shortlisted', 'selected'].includes(s);
+    const isTerminal = (s: string) => ['withdrawn', 'declined', 'rejected', 'not_shortlisted'].includes(s);
     if (!isTerminal(newStatus) && newPriority < existingPriority) {
       newStatus = null; // Block the downgrade
     }
