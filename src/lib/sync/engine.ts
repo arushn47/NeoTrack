@@ -254,10 +254,16 @@ export async function runSync(
               );
 
               if (classification.companyName && isPlacementClassification) {
-                // RULE: Only personal (NeoPAT) emails create new companies.
-                // College emails have thousands of drives for all branches (MBA, etc.)
-                // and should ONLY match against existing companies for enrichment/verification.
-                const allowCreate = isPersonal;
+                // RULE: ONLY emails from noreply.cdcinfo@vitstudent.ac.in (the official NeoPAT sender)
+                // on the personal account are allowed to create new companies.
+                // College emails have thousands of drives for all branches/batches and should
+                // ONLY match against existing NeoPAT companies for enrichment/verification.
+                const isNeoPatEmail =
+                  isPersonal &&
+                  /noreply\.cdcinfo@vitstudent\.ac\.in/i.test(
+                    parsedEmail.senderEmail || parsedEmail.sender
+                  );
+                const allowCreate = isNeoPatEmail;
 
                 companyId = await upsertCompany(
                   supabase,

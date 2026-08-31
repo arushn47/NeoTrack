@@ -46,10 +46,11 @@ export default function SettingsClient({ accounts, neoId: initialNeoId, userEmai
   const [reprocessing, setReprocessing] = useState(false);
   const [reprocessResult, setReprocessResult] = useState<{
     message: string;
-    totalEmailsScanned: number;
-    unlinkedIrrelevantEmails: number;
-    deletedInvalidCompanies: string[];
-    updatedApplications: number;
+    neoPatDrivesCount?: number;
+    deletedNonNeoPatCompanies?: string[];
+    collegeCircularsLinked?: number;
+    collegeCircularsDiscarded?: number;
+    updatedApplications?: number;
   } | null>(null);
 
   const handleReprocess = async () => {
@@ -216,7 +217,7 @@ export default function SettingsClient({ accounts, neoId: initialNeoId, userEmai
               <div>
                 <p className="text-xs font-bold text-white">{reprocessResult.message}</p>
                 <p className="text-[11px] text-zinc-400 mt-1">
-                  Scanned {reprocessResult.totalEmailsScanned} emails · Unlinked {reprocessResult.unlinkedIrrelevantEmails} irrelevant emails · Deleted {reprocessResult.deletedInvalidCompanies?.length || 0} invalid companies ({reprocessResult.deletedInvalidCompanies?.join(', ') || 'none'}) · Updated {reprocessResult.updatedApplications} company records.
+                  Tracking {reprocessResult.neoPatDrivesCount || 0} official NeoPAT drives · Purged {reprocessResult.deletedNonNeoPatCompanies?.length || 0} non-NeoPAT companies ({reprocessResult.deletedNonNeoPatCompanies?.slice(0, 5).join(', ') || 'none'}{((reprocessResult.deletedNonNeoPatCompanies?.length || 0) > 5) ? '...' : ''}) · Linked {reprocessResult.collegeCircularsLinked || 0} college circulars · Discarded {reprocessResult.collegeCircularsDiscarded || 0} irrelevant college broadcast emails.
                 </p>
               </div>
             </div>

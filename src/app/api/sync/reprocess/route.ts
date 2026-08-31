@@ -8,8 +8,12 @@ export const dynamic = 'force-dynamic';
 export const maxDuration = 120;
 
 /**
- * Re-indexes all stored emails, cleans up invalid companies (e.g. Google, PS Associate Engineer),
- * fixes company names (e.g. EY -> EY GDS), and recalculates exact application statuses and events.
+ * Re-indexes all stored emails using the strict 2-tier architecture:
+ *
+ * Tier 1: ONLY emails from noreply.cdcinfo@vitstudent.ac.in (the official NeoPAT notification sender)
+ *         define the company drives in NeoTrack.
+ * Tier 2: College circulars (@vitbhopal.ac.in) ONLY enrich existing NeoPAT drives with CTC, JDs,
+ *         test dates, and shortlist verification. Non-NeoPAT drives (e.g. Datagrokr) are discarded.
  */
 async function performReprocess(userId: string) {
   const supabase = createAdminClient();
@@ -24,12 +28,11 @@ async function performReprocess(userId: string) {
   const userNeoId = userData?.neo_id || null;
   const userEmail = userData?.email || '';
 
-  // 1. Clean invalid candidate matches where match was merely the recipient email address
+  // 1. Clean dirty candidate matches (false positives on recipient email headers)
   if (userEmail) {
     const regMatch = userEmail.match(/([0-9]{2}[a-z]{3}[0-9]{4,5})/i);
     const regNo = regMatch ? regMatch[1].toUpperCase() : '';
-    
-    // Delete email_body matches that matched the recipient email or had no valid Neo ID
+
     const { data: allMatches } = await supabase
       .from('candidate_matches')
       .select('id, match_type, matched_value')
@@ -38,7 +41,6 @@ async function performReprocess(userId: string) {
     const matchesToDelete = (allMatches || []).filter((m) => {
       if (m.match_type === 'xlsx_cell') return false; // Keep verified Excel matches
       const val = (m.matched_value || '').toUpperCase();
-      // If the match was just the user's registration number or email in headers, delete it
       if (regNo && val.includes(regNo) && !val.includes(userNeoId || '___NO_NEO___')) {
         return true;
       }
@@ -53,7 +55,7 @@ async function performReprocess(userId: string) {
     }
   }
 
-  // 2. Fetch ALL emails for this user
+  // 2. Fetch ALL stored emails for this user
   const { data: emails, error: emailsError } = await supabase
     .from('emails')
     .select('id, subject, sender, body_snippet, classification, company_id, received_at')
@@ -63,17 +65,22 @@ async function performReprocess(userId: string) {
     return { success: true, message: 'No emails found to reprocess', fixed: 0 };
   }
 
-  // 3. Re-evaluate company extraction & classification for EVERY email
-  const companyNameToId = new Map<string, string>();
-  let unlinkedCount = 0;
-  let reclassifiedCount = 0;
+  // Separate emails into NeoPAT emails (noreply.cdcinfo@vitstudent.ac.in) and College circulars
+  const isNeoPatSender = (sender: string) => /noreply\.cdcinfo@vitstudent\.ac\.in/i.test(sender);
 
-  for (const email of emails) {
+  const neoPatEmails = emails.filter((e) => isNeoPatSender(e.sender || ''));
+  const collegeEmails = emails.filter((e) => !isNeoPatSender(e.sender || ''));
+
+  // 3. Phase 1: Establish Official NeoPAT Companies
+  // ONLY NeoPAT emails define the drives in NeoTrack!
+  const validCompanyMap = new Map<string, { id: string; canonicalName: string }>(); // name -> { id, canonicalName }
+  const validCompanyIdSet = new Set<string>();
+
+  for (const email of neoPatEmails) {
     const subject = email.subject || '';
     const sender = email.sender || '';
     const bodySnippet = email.body_snippet || '';
 
-    // Classify email with updated rules
     const classification = classifyEmail({
       gmailMessageId: email.id,
       threadId: null,
@@ -90,43 +97,40 @@ async function performReprocess(userId: string) {
     });
 
     const companyName = classification.companyName;
-    const isPlacementRelevant = !['irrelevant', 'unclassified', 'general'].includes(
-      classification.classification
-    );
+    const isPlacement = !['irrelevant', 'unclassified', 'general'].includes(classification.classification);
 
-    if (companyName && isPlacementRelevant) {
+    if (companyName && isPlacement) {
       const normalized = normalizeCompanyName(companyName);
+      let comp = validCompanyMap.get(normalized.toLowerCase());
 
-      // Get or create company
-      let compId = companyNameToId.get(normalized);
-      if (!compId) {
+      if (!comp) {
+        // Look up existing company by name or alias
         const { data: existingComp } = await supabase
           .from('companies')
-          .select('id')
+          .select('id, name')
           .eq('user_id', userId)
           .eq('name', normalized)
           .single();
 
         if (existingComp) {
-          compId = existingComp.id;
+          comp = { id: existingComp.id, canonicalName: normalized };
         } else {
-          // Check aliases match
+          // Check aliases
           const { data: aliasMatch } = await supabase
             .from('companies')
-            .select('id')
+            .select('id, name')
             .eq('user_id', userId)
             .contains('aliases', [normalized.toLowerCase()])
             .single();
 
           if (aliasMatch) {
-            compId = aliasMatch.id;
-            // Update name to canonical (e.g. EY -> EY GDS)
+            comp = { id: aliasMatch.id, canonicalName: normalized };
             await supabase
               .from('companies')
               .update({ name: normalized })
-              .eq('id', compId);
+              .eq('id', aliasMatch.id);
           } else {
-            // Insert clean company
+            // Create new legitimate NeoPAT company
             const { data: newComp } = await supabase
               .from('companies')
               .insert({
@@ -136,25 +140,119 @@ async function performReprocess(userId: string) {
               })
               .select('id')
               .single();
-            compId = newComp?.id;
+
+            if (newComp) {
+              comp = { id: newComp.id, canonicalName: normalized };
+            }
           }
         }
-        if (compId) companyNameToId.set(normalized, compId);
+
+        if (comp) {
+          validCompanyMap.set(normalized.toLowerCase(), comp);
+          validCompanyIdSet.add(comp.id);
+        }
       }
 
-      // Link email to clean company
+      // Link this NeoPAT email to the company
+      if (comp) {
+        await supabase
+          .from('emails')
+          .update({
+            company_id: comp.id,
+            classification: classification.classification,
+            is_relevant: true,
+          })
+          .eq('id', email.id);
+      }
+    } else {
+      // Unlink non-company NeoPAT emails (e.g. general portal links)
       await supabase
         .from('emails')
         .update({
-          company_id: compId || null,
+          company_id: null,
+          classification: classification.classification,
+          is_relevant: false,
+        })
+        .eq('id', email.id);
+    }
+  }
+
+  // 4. Phase 2: Purge ANY Company in DB that is NOT in the Official NeoPAT List
+  // This permanently removes Datagrokr, Google, PS Associate Engineer, and all non-NeoPAT broadcast drives.
+  const { data: currentDbCompanies } = await supabase
+    .from('companies')
+    .select('id, name')
+    .eq('user_id', userId);
+
+  const deletedCompanyNames: string[] = [];
+
+  for (const comp of currentDbCompanies || []) {
+    if (!validCompanyIdSet.has(comp.id)) {
+      await supabase.from('events').delete().eq('user_id', userId).eq('company_id', comp.id);
+      await supabase.from('applications').delete().eq('user_id', userId).eq('company_id', comp.id);
+      await supabase.from('notifications').delete().eq('user_id', userId).eq('company_id', comp.id);
+      await supabase.from('companies').delete().eq('user_id', userId).eq('id', comp.id);
+      deletedCompanyNames.push(comp.name);
+    }
+  }
+
+  // 5. Phase 3: Match College Emails against Official NeoPAT Companies ONLY
+  let collegeLinkedCount = 0;
+  let collegeDiscardedCount = 0;
+
+  for (const email of collegeEmails) {
+    const subject = email.subject || '';
+    const sender = email.sender || '';
+    const bodySnippet = email.body_snippet || '';
+
+    const classification = classifyEmail({
+      gmailMessageId: email.id,
+      threadId: null,
+      sender,
+      senderEmail: sender.match(/<([^>]+)>/)?.[1] || sender,
+      subject,
+      receivedAt: email.received_at ? new Date(email.received_at) : new Date(),
+      bodySnippet,
+      bodyPlain: bodySnippet,
+      bodyHtml: '',
+      hasAttachments: false,
+      attachments: [],
+      labels: [],
+    });
+
+    const companyName = classification.companyName;
+    let matchedCompanyId: string | null = null;
+
+    if (companyName) {
+      const normalized = normalizeCompanyName(companyName).toLowerCase();
+
+      // Check if this matches an existing NeoPAT company
+      for (const [neoName, comp] of validCompanyMap.entries()) {
+        if (
+          neoName === normalized ||
+          neoName.includes(normalized) ||
+          normalized.includes(neoName)
+        ) {
+          matchedCompanyId = comp.id;
+          break;
+        }
+      }
+    }
+
+    if (matchedCompanyId) {
+      // Link college circular to legitimate NeoPAT company
+      await supabase
+        .from('emails')
+        .update({
+          company_id: matchedCompanyId,
           classification: classification.classification,
           is_relevant: true,
         })
         .eq('id', email.id);
 
-      reclassifiedCount++;
+      collegeLinkedCount++;
     } else {
-      // Unlink non-company / irrelevant emails (e.g. Google security notifications, role links)
+      // Discard non-NeoPAT college email (e.g. Datagrokr, MBA drives, etc.)
       await supabase
         .from('emails')
         .update({
@@ -164,60 +262,25 @@ async function performReprocess(userId: string) {
         })
         .eq('id', email.id);
 
-      unlinkedCount++;
+      collegeDiscardedCount++;
     }
   }
 
-  // 4. Delete Fake / Orphan Companies (e.g. Google, PS Associate Engineer)
-  const { data: allCompanies } = await supabase
+  // 6. Phase 4: Recalculate Stage Progression & Events for Official NeoPAT Companies
+  const { data: remainingCompanies } = await supabase
     .from('companies')
     .select('id, name')
     .eq('user_id', userId);
 
-  const deletedCompanies: string[] = [];
-  const INVALID_COMPANY_NAMES = [
-    'google', 'ps associate engineer', 'ps associate software engineer',
-    'associate engineer', 'associate software engineer', 'software engineer',
-    'data scientist', 'data analyst', 'placement drive',
-  ];
-
-  for (const comp of allCompanies || []) {
-    const isExplicitlyInvalid = INVALID_COMPANY_NAMES.some(
-      (inv) => comp.name.toLowerCase().trim() === inv
-    );
-
-    const { count } = await supabase
-      .from('emails')
-      .select('id', { count: 'exact', head: true })
-      .eq('user_id', userId)
-      .eq('company_id', comp.id);
-
-    if (isExplicitlyInvalid || count === 0) {
-      // Delete events, applications, candidate matches, and company
-      await supabase.from('events').delete().eq('user_id', userId).eq('company_id', comp.id);
-      await supabase.from('applications').delete().eq('user_id', userId).eq('company_id', comp.id);
-      await supabase.from('notifications').delete().eq('user_id', userId).eq('company_id', comp.id);
-      await supabase.from('companies').delete().eq('user_id', userId).eq('id', comp.id);
-      deletedCompanies.push(comp.name);
-    }
-  }
-
-  // 5. Fetch updated list of remaining legitimate companies
-  const { data: validCompanies } = await supabase
-    .from('companies')
-    .select('id, name')
-    .eq('user_id', userId);
-
-  // Fetch updated candidate matches
   const { data: candidateMatches } = await supabase
     .from('candidate_matches')
     .select('id, match_type, email_id')
     .eq('user_id', userId);
 
   let updatedAppsCount = 0;
-  const applicationResults: Array<{ company: string; status: string; role?: string | null }> = [];
+  const applicationResults: Array<{ company: string; status: string; role?: string | null; ctc?: string | null }> = [];
 
-  for (const comp of validCompanies || []) {
+  for (const comp of remainingCompanies || []) {
     const { data: companyEmails } = await supabase
       .from('emails')
       .select('id, subject, body_snippet, classification, received_at')
@@ -233,14 +296,13 @@ async function performReprocess(userId: string) {
         .map((cm) => (cm as unknown as { email_id: string }).email_id)
     );
 
-    // Combine email text for details
     const combinedEmailText = companyEmails
       .map((e) => `${e.subject || ''}\n${e.body_snippet || ''}`)
       .join('\n\n');
 
     const extractedJob = extractJobDetails(combinedEmailText);
 
-    // Identify email types
+    // Identify user actions & progression from emails
     const isWithdrawn = companyEmails.some((e) => {
       const full = `${e.subject || ''} ${e.body_snippet || ''}`.toLowerCase();
       return (
@@ -279,12 +341,11 @@ async function performReprocess(userId: string) {
       testShortlistPattern.test(e.subject || '')
     );
 
-    // Candidate match verification
     const isMatchedInSelectionList = selectionEmails.some((e) => matchedEmailIds.has(e.id));
     const isMatchedInNextRound = nextRoundEmails.some((e) => matchedEmailIds.has(e.id));
     const isMatchedInTest = testShortlistEmails.some((e) => matchedEmailIds.has(e.id));
 
-    // Extract events across all emails for this company
+    // Extract events
     const allExtractedEvents = companyEmails.flatMap((e) =>
       extractEvents({
         gmailMessageId: e.id,
@@ -314,7 +375,7 @@ async function performReprocess(userId: string) {
       if (isMatchedInSelectionList) {
         computedStatus = 'selected';
       } else {
-        // Did not make final selection list -> rejected
+        // Not in final selection list -> rejected
         computedStatus = 'rejected';
       }
     } else if (nextRoundEmails.length > 0) {
@@ -326,11 +387,9 @@ async function performReprocess(userId: string) {
         computedStatus = 'rejected';
       }
     } else if (testShortlistEmails.length > 0) {
-      // Test schedule or shortlist
       if (isMatchedInTest) {
         computedStatus = 'test_scheduled';
       } else if (hasConfirmedRegistration) {
-        // Registered and waiting for test
         computedStatus = 'test_scheduled';
       } else {
         computedStatus = 'not_shortlisted';
@@ -345,7 +404,6 @@ async function performReprocess(userId: string) {
       computedStatus = 'not_applied';
     }
 
-    // Get existing application record
     const { data: existingApp } = await supabase
       .from('applications')
       .select('status, manual_override, role, ctc, stipend, location')
@@ -361,7 +419,6 @@ async function performReprocess(userId: string) {
       finalRole = extractedJob.role && !/\byou\s*(?:are|have|re)\b/i.test(extractedJob.role) ? extractedJob.role : null;
     }
 
-    // Upsert application
     await supabase.from('applications').upsert(
       {
         user_id: userId,
@@ -378,16 +435,14 @@ async function performReprocess(userId: string) {
       { onConflict: 'user_id,company_id' }
     );
 
-    // Manage events: if rejected/withdrawn/not_shortlisted, delete events
+    // Manage events: purge if eliminated
     if (['withdrawn', 'declined', 'rejected', 'not_shortlisted', 'not_applied'].includes(finalStatus)) {
       await supabase.from('events').delete().eq('user_id', userId).eq('company_id', comp.id);
     } else {
-      // Re-insert valid events with deduplication
       for (const evt of allExtractedEvents) {
         if (!evt.startTime) continue;
         const startTimeIso = evt.startTime.toISOString();
 
-        // Check if event already exists
         const { data: existingEvts } = await supabase
           .from('events')
           .select('id')
@@ -417,16 +472,17 @@ async function performReprocess(userId: string) {
       company: comp.name,
       status: finalStatus,
       role: finalRole,
+      ctc: extractedJob.ctc,
     });
   }
 
   return {
     success: true,
-    message: 'Placement feed successfully re-indexed and cleaned',
-    totalEmailsScanned: emails.length,
-    reclassifiedEmails: reclassifiedCount,
-    unlinkedIrrelevantEmails: unlinkedCount,
-    deletedInvalidCompanies: deletedCompanies,
+    message: `Successfully re-indexed: ${validCompanyMap.size} official NeoPAT drives tracked`,
+    neoPatDrivesCount: validCompanyMap.size,
+    deletedNonNeoPatCompanies: deletedCompanyNames,
+    collegeCircularsLinked: collegeLinkedCount,
+    collegeCircularsDiscarded: collegeDiscardedCount,
     updatedApplications: updatedAppsCount,
     results: applicationResults,
   };
