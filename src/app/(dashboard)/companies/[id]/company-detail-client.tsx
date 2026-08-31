@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import {
   ArrowLeft,
   Building2,
@@ -19,6 +20,7 @@ import {
   FileText,
   Briefcase,
   Layers,
+  Trash2,
 } from 'lucide-react';
 import { cn, timeAgo } from '@/lib/utils';
 import StatusBadge from '@/components/shared/status-badge';
@@ -91,6 +93,8 @@ export default function CompanyDetailClient({ company }: CompanyDetailClientProp
   const [isUpdating, setIsUpdating] = useState(false);
   const [showStatusMenu, setShowStatusMenu] = useState(false);
   const [activeTab, setActiveTab] = useState<'timeline' | 'emails'>('timeline');
+  const [isDeleting, setIsDeleting] = useState(false);
+  const router = useRouter();
 
   useEffect(() => {
     if (company.application?.status) {
@@ -198,6 +202,28 @@ export default function CompanyDetailClient({ company }: CompanyDetailClientProp
               </>
             )}
           </div>
+
+          {/* Delete Company */}
+          <button
+            onClick={async () => {
+              if (!confirm(`Delete "${company.name}" and all its events, status, and linked data? This cannot be undone.`)) return;
+              setIsDeleting(true);
+              try {
+                const res = await fetch(`/api/companies/${company.id}`, { method: 'DELETE' });
+                if (res.ok) {
+                  router.push('/companies');
+                } else {
+                  alert('Failed to delete company');
+                }
+              } catch { alert('Failed to delete company'); }
+              finally { setIsDeleting(false); }
+            }}
+            disabled={isDeleting}
+            className="p-2.5 rounded-xl border border-zinc-800 hover:border-red-500/40 hover:bg-red-500/10 text-zinc-500 hover:text-red-400 transition-all active:scale-95 disabled:opacity-50"
+            title="Delete this company"
+          >
+            <Trash2 className="w-4 h-4" />
+          </button>
         </div>
 
         {/* Quick Metadata Bar */}

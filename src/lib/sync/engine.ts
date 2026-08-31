@@ -191,18 +191,41 @@ export async function runSync(
       const isPersonal = account.account_type === 'personal';
       const BATCH_SIZE = 5;
 
+      // Known NeoPAT/CDC senders that always pass (no keyword check needed)
+      const TRUSTED_PLACEMENT_SENDERS = [
+        'noreply.cdcinfo@vitstudent.ac.in',
+        'vitlions2027@vitbhopal.ac.in',
+        'placementoffice@vitbhopal.ac.in',
+      ];
+
+      // Known non-placement senders to always skip (Google, Microsoft notifications, social media, etc.)
+      const BLOCKED_SENDERS = /noreply-accounts@google|no-reply@accounts\.google|noreply@github|notifications@github|@linkedin\.com|@facebookmail|@discord|@slack|noreply@medium|noreply@.*\.zoom\.us|security-noreply|account-security|password.*reset|verify.*email|do-not-reply@|mailer-daemon/i;
+
       for (let i = 0; i < newMsgIds.length; i += BATCH_SIZE) {
         const batch = newMsgIds.slice(i, i + BATCH_SIZE);
 
         for (const msgId of batch) {
             try {
-              // Stage 1: Cheap metadata inspection
+              // Stage 1: Cheap metadata inspection — filter out non-placement emails
+              // For BOTH personal and college accounts during incremental sync (history.list),
+              // we must verify each email is placement-relevant before full processing.
               let shouldFetchFull = true;
-              if (!isPersonal) {
-                const metadata = await fetchMessageMetadata(gmail, msgId);
-                const subj = metadata.subject.toLowerCase();
+              const metadata = await fetchMessageMetadata(gmail, msgId);
+              const subj = metadata.subject.toLowerCase();
+              const senderLower = metadata.senderEmail.toLowerCase();
+
+              // A. Always block known non-placement senders
+              if (BLOCKED_SENDERS.test(senderLower)) {
+                shouldFetchFull = false;
+              }
+              // B. Always allow trusted CDC/NeoPAT senders
+              else if (TRUSTED_PLACEMENT_SENDERS.some((s) => senderLower === s)) {
+                shouldFetchFull = true;
+              }
+              // C. For all other senders, require placement keywords in subject
+              else {
                 const isPlacementRelevant =
-                  /shortlist|selection|online\s+test|coding\s+test|assessment|interview|ppt|pre-placement|super\s+dream|dream\s+core|registration|internship|placement\s+drive|campus\s+drive|hiring|cdc\s+info/i.test(
+                  /shortlist|selection|online\s+test|coding\s+test|assessment|interview|ppt|pre-placement|super\s+dream|dream\s+core|registration|internship|placement\s+drive|campus\s+drive|hiring|cdc\s+info|candidate\s+information|offer|joining|onboarding/i.test(
                     subj
                   );
                 if (!isPlacementRelevant) {
@@ -222,9 +245,15 @@ export async function runSync(
               const classification = classifyEmail(parsedEmail);
 
               // Extract/create company
+              // GUARD: Don't create companies from irrelevant/unclassified/general emails.
+              // These are noise (Google notifications, account updates, etc.) that slipped
+              // through the metadata filter.
               let companyId: string | null = null;
+              const isPlacementClassification = !['irrelevant', 'unclassified', 'general'].includes(
+                classification.classification
+              );
 
-              if (classification.companyName) {
+              if (classification.companyName && isPlacementClassification) {
                 // RULE: Only personal (NeoPAT) emails create new companies.
                 // College emails have thousands of drives for all branches (MBA, etc.)
                 // and should ONLY match against existing companies for enrichment/verification.
