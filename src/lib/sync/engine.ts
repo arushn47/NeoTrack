@@ -73,9 +73,9 @@ export async function runSync(
     .eq('user_id', userId)
     .eq('is_connected', true);
 
-  if (accountsError || !accounts || accounts.length === 0) {
-    throw new Error('No connected Gmail accounts found. Please connect a Gmail account in Settings.');
-  }
+  const connectedAccounts = (accounts || []).filter((a) => a.is_connected) as GmailAccount[];
+  const hasPersonal = connectedAccounts.some((a) => a.account_type === 'personal');
+  const hasCollege = connectedAccounts.some((a) => a.account_type === 'college');
 
   // Fetch user's configured Neo ID
   const { data: userData } = await supabase
@@ -85,9 +85,21 @@ export async function runSync(
     .single();
   const userNeoId = userData?.neo_id || null;
 
+  // RULE: Guard sync until user completes all 3 onboarding setup items
+  if (!hasPersonal || !hasCollege || !userNeoId) {
+    const missing: string[] = [];
+    if (!hasPersonal) missing.push('Personal Gmail (for NeoPAT drives)');
+    if (!hasCollege) missing.push('College Gmail (for CTC/JDs)');
+    if (!userNeoId) missing.push('NeoPAT Registration ID');
+
+    throw new Error(
+      `Complete setup to sync: Please add ${missing.join(', ')} in Settings.`
+    );
+  }
+
   // Sort accounts so 'personal' is processed FIRST
   // This allows official NeoPAT emails to establish master company records first
-  const sortedAccounts = (accounts as GmailAccount[]).sort((a, b) => {
+  const sortedAccounts = connectedAccounts.sort((a, b) => {
     if (a.account_type === 'personal' && b.account_type !== 'personal') return -1;
     if (a.account_type !== 'personal' && b.account_type === 'personal') return 1;
     return 0;
@@ -441,6 +453,62 @@ export async function runSync(
     result.totalEmailsFetched += accountResult.emailsFetched;
     result.totalEmailsProcessed += accountResult.emailsProcessed;
     result.accounts.push(accountResult);
+  }
+
+  // 5. If new companies were created, reconcile any unlinked college circulars in DB
+  if (result.newCompanies > 0) {
+    try {
+      const { data: unlinkedEmails } = await supabase
+        .from('emails')
+        .select('id, subject, sender, body_snippet')
+        .eq('user_id', userId)
+        .is('company_id', null);
+
+      if (unlinkedEmails && unlinkedEmails.length > 0) {
+        const { data: allUserComps } = await supabase
+          .from('companies')
+          .select('id, name, aliases')
+          .eq('user_id', userId);
+
+        if (allUserComps && allUserComps.length > 0) {
+          for (const email of unlinkedEmails) {
+            const compName = extractCompanyName(
+              email.subject || '',
+              email.sender || '',
+              email.body_snippet || ''
+            );
+            if (compName) {
+              const norm = normalizeCompanyName(compName).toLowerCase();
+              const matched = allUserComps.find((c) => {
+                const cLower = c.name.toLowerCase();
+                // Guard: Never merge EY GDS and EY SAP
+                if (
+                  (cLower.includes('gds') && norm.includes('sap')) ||
+                  (cLower.includes('sap') && norm.includes('gds'))
+                ) {
+                  return false;
+                }
+                return (
+                  cLower === norm ||
+                  (c.aliases || []).includes(norm) ||
+                  (cLower.length >= 4 &&
+                    norm.length >= 4 &&
+                    (cLower.includes(norm) || norm.includes(cLower)))
+                );
+              });
+              if (matched) {
+                await supabase
+                  .from('emails')
+                  .update({ company_id: matched.id, is_relevant: true })
+                  .eq('id', email.id);
+              }
+            }
+          }
+        }
+      }
+    } catch (reconcileErr) {
+      console.warn('Post-sync circular reconciliation non-critical error:', reconcileErr);
+    }
   }
 
   return result;

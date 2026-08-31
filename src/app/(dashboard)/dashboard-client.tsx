@@ -39,6 +39,8 @@ interface DashboardClientProps {
     mode: string | null;
   }>;
   hasAccounts: boolean;
+  hasPersonalAccount?: boolean;
+  hasCollegeAccount?: boolean;
   disconnectedAccounts?: Array<{
     id: string;
     email: string;
@@ -109,10 +111,14 @@ export default function DashboardClient({
   stats,
   upcomingEvents,
   hasAccounts,
+  hasPersonalAccount = false,
+  hasCollegeAccount = false,
   disconnectedAccounts,
   hasNeoId,
   neoId,
 }: DashboardClientProps) {
+  const isSetupIncomplete = !hasPersonalAccount || !hasCollegeAccount || !hasNeoId;
+
   return (
     <div className="max-w-7xl mx-auto space-y-6 animate-fade-in selection:bg-indigo-500/20">
       
@@ -140,50 +146,88 @@ export default function DashboardClient({
         </div>
       )}
 
-      {/* Onboarding prompts */}
-      {(!hasAccounts || !hasNeoId) && (
-        <div className="space-y-3">
-          {!hasAccounts && (
-            <div className="flex items-center gap-4 p-4 rounded-2xl bg-indigo-500/10 border border-indigo-500/25 backdrop-blur-xl">
-              <div className="w-10 h-10 rounded-xl bg-indigo-500/20 flex items-center justify-center flex-shrink-0">
-                <Mail className="w-5 h-5 text-indigo-400" />
-              </div>
-              <div className="flex-1 min-w-0">
-                <p className="text-sm font-semibold text-white">Connect your Gmail accounts</p>
-                <p className="text-xs text-zinc-400 mt-0.5">
-                  Link your personal and VIT Gmail to start syncing placement emails.
-                </p>
-              </div>
-              <Link
-                href="/settings"
-                className="flex items-center gap-1 px-3.5 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold transition-all flex-shrink-0 shadow-md shadow-indigo-600/25"
-              >
-                Connect
-                <ArrowRight className="w-3.5 h-3.5" />
-              </Link>
+      {/* 3-Step Placement Setup Onboarding Checklist */}
+      {isSetupIncomplete && (
+        <div className="rounded-3xl bg-[#101018]/90 border border-indigo-500/30 p-5 sm:p-6 backdrop-blur-2xl shadow-xl shadow-indigo-950/20 space-y-4">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-zinc-800/80 pb-4">
+            <div>
+              <h2 className="text-sm font-bold text-white flex items-center gap-2">
+                <Sparkles className="w-4 h-4 text-indigo-400" />
+                Complete Placement Setup (3 Prerequisites)
+              </h2>
+              <p className="text-xs text-zinc-400 mt-1">
+                To guarantee zero noise and 100% accurate shortlist matching, NeoTrack starts syncing only after all 3 items are connected.
+              </p>
             </div>
-          )}
+            <Link
+              href="/settings"
+              className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold transition-all shadow-md shadow-indigo-600/30 self-start sm:self-center"
+            >
+              Complete Setup in Settings
+              <ArrowRight className="w-3.5 h-3.5" />
+            </Link>
+          </div>
 
-          {!hasNeoId && (
-            <div className="flex items-center gap-4 p-4 rounded-2xl bg-violet-500/10 border border-violet-500/25 backdrop-blur-xl">
-              <div className="w-10 h-10 rounded-xl bg-violet-500/20 flex items-center justify-center flex-shrink-0">
-                <Fingerprint className="w-5 h-5 text-violet-400" />
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+            {/* Step 1: Personal Gmail */}
+            <div className={cn(
+              'p-3.5 rounded-2xl border transition-all flex items-start gap-3',
+              hasPersonalAccount
+                ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300'
+                : 'bg-zinc-900/60 border-zinc-800 text-zinc-400'
+            )}>
+              <div className={cn(
+                'w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0 mt-0.5',
+                hasPersonalAccount ? 'bg-emerald-500 text-black' : 'bg-zinc-800 text-zinc-400'
+              )}>
+                {hasPersonalAccount ? '✓' : '1'}
               </div>
-              <div className="flex-1 min-w-0">
-                <p className="text-sm font-semibold text-white">Set your NeoPAT Registration ID</p>
-                <p className="text-xs text-zinc-400 mt-0.5">
-                  Enter your ID to automatically match your shortlists in CDC emails.
+              <div className="min-w-0">
+                <p className="text-xs font-semibold text-white">Personal Gmail</p>
+                <p className="text-[11px] text-zinc-400 mt-0.5">Where official NeoPAT invites arrive (`noreply.cdcinfo`)</p>
+              </div>
+            </div>
+
+            {/* Step 2: College Gmail */}
+            <div className={cn(
+              'p-3.5 rounded-2xl border transition-all flex items-start gap-3',
+              hasCollegeAccount
+                ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300'
+                : 'bg-zinc-900/60 border-zinc-800 text-zinc-400'
+            )}>
+              <div className={cn(
+                'w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0 mt-0.5',
+                hasCollegeAccount ? 'bg-emerald-500 text-black' : 'bg-zinc-800 text-zinc-400'
+              )}>
+                {hasCollegeAccount ? '✓' : '2'}
+              </div>
+              <div className="min-w-0">
+                <p className="text-xs font-semibold text-white">College Gmail (VIT)</p>
+                <p className="text-[11px] text-zinc-400 mt-0.5">Where CTC, stipend, JDs & shortlists arrive</p>
+              </div>
+            </div>
+
+            {/* Step 3: NeoPAT ID */}
+            <div className={cn(
+              'p-3.5 rounded-2xl border transition-all flex items-start gap-3',
+              hasNeoId
+                ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300'
+                : 'bg-zinc-900/60 border-zinc-800 text-zinc-400'
+            )}>
+              <div className={cn(
+                'w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0 mt-0.5',
+                hasNeoId ? 'bg-emerald-500 text-black' : 'bg-zinc-800 text-zinc-400'
+              )}>
+                {hasNeoId ? '✓' : '3'}
+              </div>
+              <div className="min-w-0">
+                <p className="text-xs font-semibold text-white">NeoPAT ID</p>
+                <p className="text-[11px] text-zinc-400 mt-0.5">
+                  {hasNeoId ? `Configured: ${neoId}` : 'Required for Excel candidate matching'}
                 </p>
               </div>
-              <Link
-                href="/settings"
-                className="flex items-center gap-1 px-3.5 py-1.5 rounded-xl bg-violet-600 hover:bg-violet-500 text-white text-xs font-semibold transition-all flex-shrink-0 shadow-md shadow-violet-600/25"
-              >
-                Set ID
-                <ArrowRight className="w-3.5 h-3.5" />
-              </Link>
             </div>
-          )}
+          </div>
         </div>
       )}
 

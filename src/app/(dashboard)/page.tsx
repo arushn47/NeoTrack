@@ -99,7 +99,9 @@ export default async function DashboardPage() {
   // Only pass top 6 to DashboardClient to avoid UI clutter
   const topUpcomingEvents = uniqueUpcomingEvents.slice(0, 6);
 
-  const hasAccounts = accounts && accounts.some((a) => a.is_connected);
+  const connectedAccounts = (accounts || []).filter((a) => a.is_connected);
+  const hasPersonalAccount = connectedAccounts.some((a) => a.account_type === 'personal');
+  const hasCollegeAccount = connectedAccounts.some((a) => a.account_type === 'college');
   const disconnectedAccounts = (accounts || []).filter((a) => !a.is_connected);
   const hasNeoId = !!user?.neo_id;
 
@@ -107,7 +109,9 @@ export default async function DashboardPage() {
     <DashboardClient
       stats={stats}
       upcomingEvents={topUpcomingEvents}
-      hasAccounts={hasAccounts || false}
+      hasAccounts={hasPersonalAccount && hasCollegeAccount}
+      hasPersonalAccount={hasPersonalAccount}
+      hasCollegeAccount={hasCollegeAccount}
       disconnectedAccounts={disconnectedAccounts}
       hasNeoId={hasNeoId}
       neoId={user?.neo_id || null}
