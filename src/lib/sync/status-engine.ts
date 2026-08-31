@@ -11,6 +11,8 @@ function htmlToPlainText(html: string | undefined | null): string {
   return html
     .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, ' ')
     .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, ' ')
+    .replace(/<\/(tr|p|div|li)>/gi, '\n')
+    .replace(/<(td|th)[^>]*>/gi, ' | ')
     .replace(/<\/?[a-z][a-z0-9]*[^<>]*>/gi, ' ')
     .replace(/&nbsp;/gi, ' ')
     .replace(/&amp;/gi, '&')
@@ -18,7 +20,8 @@ function htmlToPlainText(html: string | undefined | null): string {
     .replace(/&gt;/gi, '>')
     .replace(/&quot;/gi, '"')
     .replace(/&#39;/gi, "'")
-    .replace(/\s+/g, ' ')
+    .replace(/[ \t]+/g, ' ')
+    .replace(/\n\s*\n+/g, '\n')
     .trim();
 }
 
@@ -139,6 +142,17 @@ export async function processEmailForEventsAndStatus(
   const { classifyEmail } = await import('@/lib/sync/classifier');
   const emailClass = classifyEmail(email).classification;
 
+  // Downgrade body-text Neo ID matches inside elimination/rejection emails.
+  // A Neo ID match inside a rejection-list body means "you were in the applicant
+  // pool that got eliminated," not "you're confirmed for the next stage."
+  const isEliminationEmail =
+    emailClass === 'result' &&
+    /not\s+selected|regret\s+to\s+inform|unfortunately|could\s+not\s+be\s+selected|not\s+shortlisted/i.test(fullText);
+
+  if (isEliminationEmail && matchType === 'email_body') {
+    isNeoMatched = false;
+  }
+
   // Check existing application status from DB
   const { data: existingApp } = await supabase
     .from('applications')
@@ -203,7 +217,7 @@ export async function processEmailForEventsAndStatus(
         continue; // Do not add events for companies where user is not registered or not shortlisted
       }
 
-      if ((isTestOrInterview || isShortlistEmail) && !isNeoMatched && matchType !== 'excel_attachment') {
+      if ((isTestOrInterview || isShortlistEmail) && !isNeoMatched) {
         // User was not shortlisted for this test/event/PPT — do not add to personal schedule
         continue;
       }
@@ -315,10 +329,19 @@ export async function processEmailForEventsAndStatus(
     newStatus = existingApp.status;
   } else if (isNeoMatched) {
     // B. Candidate is confirmed in an actual shortlist / test / interview Excel or body match
-    if (/interview|next\s+round|selection\s+process/i.test(subjLower)) {
+    // Check for rejection language BEFORE checking for "selected" — order matters
+    const isRejectionLanguage =
+      emailClass === 'result' &&
+      /not\s+selected|regret|unfortunately|could\s+not\s+be\s+selected/i.test(subjLower + ' ' + fullText);
+
+    if (isRejectionLanguage) {
+      newStatus = 'rejected';
+    } else if (/interview|next\s+round|selection\s+process/i.test(subjLower)) {
       newStatus = 'interview_scheduled';
     } else if (/ppt|pre[\s-]*placement/i.test(subjLower)) {
       newStatus = 'ppt_scheduled';
+    } else if (/not\s+selected/i.test(subjLower)) {
+      newStatus = 'rejected';
     } else if (/(?:selected|congratulations.*offer)/i.test(subjLower)) {
       newStatus = 'selected';
     } else {
@@ -430,7 +453,7 @@ export async function processEmailForEventsAndStatus(
 
   if (newStatus) {
     appUpdate.status = newStatus;
-    appUpdate.status_source = matchType === 'excel_attachment' ? 'excel_attachment' : 'sync_engine';
+    appUpdate.status_source = matchType === 'xlsx_cell' ? 'excel_shortlist_match' : 'sync_engine';
     appUpdate.status_confidence = 'high';
 
     // If candidate withdrew, declined, or was not shortlisted/rejected, purge scheduled events

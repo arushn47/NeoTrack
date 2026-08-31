@@ -64,6 +64,8 @@ interface CompaniesClientProps {
   companies: CompanyWithDetails[];
 }
 
+const SHORTLISTED_STAGE_STATUSES = ['shortlisted', 'test_scheduled', 'interview_scheduled'];
+
 const STATUS_FILTERS = [
   { id: 'active', label: 'In Progress' },
   { id: 'shortlisted', label: 'Shortlisted' },
@@ -222,7 +224,7 @@ export default function CompaniesClient({ companies }: CompaniesClientProps) {
         return s === 'withdrawn' || s === 'declined';
       }
       if (selectedFilter === 'shortlisted') {
-        return c.application?.status === 'shortlisted' || c.neoIdMatched;
+        return SHORTLISTED_STAGE_STATUSES.includes(c.application?.status || '');
       }
       return (c.application?.status || 'not_applied') === selectedFilter;
     });
@@ -347,7 +349,7 @@ export default function CompaniesClient({ companies }: CompaniesClientProps) {
           } else if (filter.id === 'withdrawn') {
             count = companies.filter((c) => ['withdrawn', 'declined'].includes(c.application?.status || '')).length;
           } else if (filter.id === 'shortlisted') {
-            count = companies.filter((c) => (c.application?.status === 'shortlisted') || c.neoIdMatched).length;
+            count = companies.filter((c) => SHORTLISTED_STAGE_STATUSES.includes(c.application?.status || '')).length;
           } else {
             count = companies.filter((c) => (c.application?.status || 'not_applied') === filter.id).length;
           }

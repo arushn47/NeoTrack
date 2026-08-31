@@ -158,7 +158,8 @@ export function extractEvents(email: ParsedEmail): ExtractedEvent[] {
   const fullText = `${email.subject}\n${email.bodyPlain || email.bodySnippet}`;
 
   // 1. Check for Pre-Placement Talk (PPT)
-  if (/ppt|pre[\s-]*placement\s*talk/i.test(fullText)) {
+  // Guard: exclude ".ppt" file attachment mentions (e.g. "find the attached PPT file")
+  if (/ppt|pre[\s-]*placement\s*talk/i.test(fullText) && !/ppt\s*file|\.ppt\b/i.test(fullText)) {
     const pptMatch = fullText.match(/(?:ppt|pre[\s-]*placement\s*talk)\s*[:\-–—]?\s*(.{1,100})/i);
     const date = parseDateTime(pptMatch ? pptMatch[0] : fullText);
     const venue = extractVenue(fullText);
@@ -192,9 +193,21 @@ export function extractEvents(email: ParsedEmail): ExtractedEvent[] {
   }
 
   // 3. Check for Interview / Next Selection Round
-  if (/interview|next\s+round|selection\s+process/i.test(fullText)) {
+  // GUARD: If we already extracted a test event from this email, only create an interview
+  // event if the SUBJECT explicitly mentions "interview". This prevents phantom interview
+  // events when the body casually mentions "selection process" or similar language.
+  const alreadyHasTestEvent = events.some((e) =>
+    ['online_test', 'coding_test'].includes(e.eventType)
+  );
+  const subjectMentionsInterview = /interview/i.test(email.subject);
+
+  if (
+    /interview|next\s+round|selection\s+process/i.test(fullText) &&
+    (!alreadyHasTestEvent || subjectMentionsInterview)
+  ) {
     const isTech = /technical/i.test(fullText);
-    const isHr = /hr|human\s+resource/i.test(fullText);
+    // Word-boundary \b prevents matching "hr" inside words like "through", "share", "shortlisted"
+    const isHr = /\bhr\b|human\s+resource/i.test(fullText);
     const interviewMatch = fullText.match(
       /(?:interview|next\s+round(?:\s+of\s+selection\s+process)?|selection\s+process)\s*(?:is\s+scheduled)?\s*[:\-–—]?\s*(?:on\s+)?\(?(.{1,120})/i
     );
@@ -286,23 +299,27 @@ export function extractJobDetails(text: string): ExtractedJobDetails {
   } else {
     const ctcText = ctcBlockMatch ? ctcBlockMatch[1].trim() : cleanText;
 
-    // Match the first occurrence of "Rs. X LPA" or "X LPA" — take only base number
-    const baseMatch = ctcText.match(/(?:INR|₹|Rs\.?)?\s*(\d+(?:\.\d+)?)\s*(?:LPA|L\s*PA|Lakhs?|Lac)\b/i);
-    if (baseMatch) {
-      const base = parseFloat(baseMatch[1]);
-      if (base > 0 && base < 200) {
-        ctc = `${base} LPA`;
+    // Match ALL occurrences of "Rs. X LPA" or "X LPA" — take the max (total/gross CTC)
+    const baseMatches = [...ctcText.matchAll(/(?:INR|₹|Rs\.?)\s*(\d+(?:\.\d+)?)\s*(?:LPA|L\s*PA|Lakhs?|Lac)\b/gi)];
+    if (baseMatches.length > 0) {
+      const values = baseMatches
+        .map(m => parseFloat(m[1]))
+        .filter(v => v > 0 && v < 200);
+      if (values.length > 0) {
+        ctc = `${Math.max(...values)} LPA`;
       }
     }
 
     // Fallback: scan whole cleanText for CTC/Package label
     if (!ctc) {
-      const fallback = cleanText.match(
-        /(?:CTC|Package|Salary|Compensation)\s*[:\-–—\t]?\s*(?:INR|₹|Rs\.?)?\s*(\d+(?:\.\d+)?)\s*(?:LPA|L\s*PA|Lakhs?|Lac)\b/i
-      );
-      if (fallback) {
-        const base = parseFloat(fallback[1]);
-        if (base > 0 && base < 200) ctc = `${base} LPA`;
+      const fallbackMatches = [...cleanText.matchAll(
+        /(?:CTC|Package|Salary|Compensation)\s*[:\-–—\t]?\s*(?:INR|₹|Rs\.?)?\s*(\d+(?:\.\d+)?)\s*(?:LPA|L\s*PA|Lakhs?|Lac)\b/gi
+      )];
+      if (fallbackMatches.length > 0) {
+        const values = fallbackMatches
+          .map(m => parseFloat(m[1]))
+          .filter(v => v > 0 && v < 200);
+        if (values.length > 0) ctc = `${Math.max(...values)} LPA`;
       }
     }
   }
@@ -320,7 +337,7 @@ export function extractJobDetails(text: string): ExtractedJobDetails {
       const rawNum = m[1].replace(/,/g, '');
       const val = parseInt(rawNum, 10);
       // Accept values 5000-500000, excluding years
-      if (val >= 5000 && val < 500000 && ![2024, 2025, 2026, 2027].includes(val)) {
+      if (val >= 5000 && val < 500000 && ![2024, 2025, 2026, 2027, 2028, 2029].includes(val)) {
         nums.push(val);
       }
     }

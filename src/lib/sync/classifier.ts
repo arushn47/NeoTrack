@@ -82,7 +82,7 @@ const CLASSIFICATION_RULES: ClassificationRule[] = [
     classification: 'test',
     confidence: 'high',
     match: (s) =>
-      /(online\s+test|coding\s+test|assessment|aptitude\s+test|test\s+schedule|test\s+link)/i.test(s),
+      /(online\s+test|coding\s+test|online\s+assessment|aptitude\s+test|test\s+schedule|test\s+link|assessment\s+(?:test|link|scheduled|window))/i.test(s),
     reason: 'Subject mentions online test or assessment',
   },
   {

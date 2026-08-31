@@ -157,7 +157,7 @@ export async function POST() {
       .eq('company_id', companyId);
 
     const hasTestEvent = (storedEvents || []).some((e) =>
-      ['online_test', 'coding_test', 'assessment'].includes(e.event_type)
+      ['online_test', 'coding_test'].includes(e.event_type)
     );
     const hasPptEvent = (storedEvents || []).some((e) => e.event_type === 'ppt');
     const hasInterviewEvent = (storedEvents || []).some((e) =>
@@ -194,11 +194,30 @@ export async function POST() {
     if (isWithdrawn) {
       computedStatus = 'declined';
     } else if (isCompanyCandidateMatched) {
-      const isSelectionList = companyEmails.some((e) =>
-        /selection\s+list|selected|congratulations.*offer/i.test(e.subject || '')
+      // Determine which specific emails the candidate was matched in
+      const matchedEmailIdsForCompany = new Set(
+        (candidateMatches || [])
+          .filter((cm) => emailIds.has((cm as unknown as { email_id: string }).email_id))
+          .map((cm) => (cm as unknown as { email_id: string }).email_id)
       );
-      if (isSelectionList) {
+
+      // A selection/offer email exists for this company
+      const selectionListPattern = /selection\s+list|congratulations.*offer/i;
+      const hasSelectionListEmail = companyEmails.some((e) =>
+        selectionListPattern.test(e.subject || '')
+      );
+
+      // Check if the candidate's Neo ID match is specifically in a selection list email
+      const isMatchedInSelectionList = companyEmails.some((e) =>
+        matchedEmailIdsForCompany.has(e.id) &&
+        selectionListPattern.test(e.subject || '')
+      );
+
+      if (isMatchedInSelectionList) {
         computedStatus = 'selected';
+      } else if (hasSelectionListEmail || hasPostTestProgressionSignal) {
+        // Candidate was matched in earlier stage emails but NOT in the final selection
+        computedStatus = 'rejected';
       } else if (hasInterviewEvent) {
         computedStatus = 'interview_scheduled';
       } else if (hasTestEvent) {
