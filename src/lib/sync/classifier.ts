@@ -234,6 +234,8 @@ export const COMPANY_ALIASES: Record<string, string> = {
   'capgemini': 'Capgemini',
   'deloitte': 'Deloitte',
   'kpmg': 'KPMG',
+  'ey sap': 'EY SAP',
+  'ey-sap': 'EY SAP',
   'ey gds': 'EY GDS',
   'ey global delivery services': 'EY GDS',
   'ey-gds': 'EY GDS',

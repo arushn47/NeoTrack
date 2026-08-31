@@ -499,6 +499,15 @@ async function upsertCompany(
     const targetLower = normalized.toLowerCase();
     for (const comp of userCompanies) {
       const compLower = comp.name.toLowerCase();
+
+      // Guard: Never merge EY GDS and EY SAP
+      if (
+        (compLower.includes('gds') && targetLower.includes('sap')) ||
+        (compLower.includes('sap') && targetLower.includes('gds'))
+      ) {
+        continue;
+      }
+
       // Match if one contains the other (e.g. "MUFG" inside "MUFG Financial", or "PlaySimple" in "PlaySimple Games")
       // Guard: both strings must be at least 4 chars to prevent false merges (e.g. "AT" matching "ATRENTA")
       if (compLower.length >= 4 && targetLower.length >= 4) {

@@ -226,15 +226,26 @@ async function performReprocess(userId: string) {
     if (companyName) {
       const normalized = normalizeCompanyName(companyName).toLowerCase();
 
-      // Check if this matches an existing NeoPAT company
-      for (const [neoName, comp] of validCompanyMap.entries()) {
-        if (
-          neoName === normalized ||
-          neoName.includes(normalized) ||
-          normalized.includes(neoName)
-        ) {
-          matchedCompanyId = comp.id;
-          break;
+      // 1. Exact match first
+      if (validCompanyMap.has(normalized)) {
+        matchedCompanyId = validCompanyMap.get(normalized)!.id;
+      } else {
+        // 2. Substring match with distinct company guards
+        for (const [neoName, comp] of validCompanyMap.entries()) {
+          // Guard: Never merge EY GDS and EY SAP
+          if (
+            (neoName.includes('gds') && normalized.includes('sap')) ||
+            (neoName.includes('sap') && normalized.includes('gds'))
+          ) {
+            continue;
+          }
+
+          if (neoName.length >= 4 && normalized.length >= 4) {
+            if (neoName.includes(normalized) || normalized.includes(neoName)) {
+              matchedCompanyId = comp.id;
+              break;
+            }
+          }
         }
       }
     }
