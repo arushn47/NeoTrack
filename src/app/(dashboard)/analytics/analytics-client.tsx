@@ -56,49 +56,43 @@ export default function AnalyticsClient({
     let interviewed = 0;
     let selected = 0;
 
-    const companyToEvents = new Map<string, string[]>();
-    events.forEach((evt) => {
-      const types = companyToEvents.get(evt.company_id) || [];
-      types.push(evt.event_type);
-      companyToEvents.set(evt.company_id, types);
-    });
-
     applications.forEach((app) => {
-      if (app.status === 'withdrawn') return;
+      // Exclude drives the user opted out of or never registered for
+      if (['not_applied', 'withdrawn', 'declined'].includes(app.status)) return;
       applied++;
 
-      const evtTypes = companyToEvents.get(app.company_id) || [];
-      const hasTest = evtTypes.some((t) => ['online_test', 'coding_test'].includes(t));
-      const hasInterview = evtTypes.some((t) =>
-        ['technical_interview', 'hr_interview', 'final_interview'].includes(t)
-      );
+      const isShortlistedForTest = [
+        'shortlisted',
+        'test_scheduled',
+        'interview_scheduled',
+        'selected',
+        'offer_received',
+        'rejected', // Wrote test and was eliminated post-test
+      ].includes(app.status);
 
-      if (
-        app.status === 'shortlisted' ||
-        app.status === 'interview_scheduled' ||
-        app.status === 'selected' ||
-        hasTest ||
-        hasInterview
-      ) {
-        shortlisted++;
-      }
+      const isTested = [
+        'test_scheduled',
+        'interview_scheduled',
+        'selected',
+        'offer_received',
+        'rejected',
+      ].includes(app.status);
 
-      if (
-        hasTest ||
-        app.status === 'interview_scheduled' ||
-        app.status === 'selected' ||
-        hasInterview
-      ) {
-        tested++;
-      }
+      const isInterviewed = [
+        'interview_scheduled',
+        'selected',
+        'offer_received',
+      ].includes(app.status);
 
-      if (hasInterview || app.status === 'interview_scheduled' || app.status === 'selected') {
-        interviewed++;
-      }
+      const isSelected = [
+        'selected',
+        'offer_received',
+      ].includes(app.status);
 
-      if (app.status === 'selected') {
-        selected++;
-      }
+      if (isShortlistedForTest) shortlisted++;
+      if (isTested) tested++;
+      if (isInterviewed) interviewed++;
+      if (isSelected) selected++;
     });
 
     return [
@@ -108,15 +102,17 @@ export default function AnalyticsClient({
       { name: 'Interviewed', value: interviewed, fill: '#10b981' },
       { name: 'Selected', value: selected, fill: '#ec4899' },
     ];
-  }, [applications, events]);
+  }, [applications]);
 
   // 2. Compute timeline data
   const timelineData = useMemo(() => {
     const months = new Map<string, number>();
 
     applications.forEach((app) => {
-      if (!app.applied_at) return;
-      const date = new Date(app.applied_at);
+      if (!app.applied_at && !app.last_updated) return;
+      const rawDate = app.applied_at || app.last_updated;
+      if (!rawDate) return;
+      const date = new Date(rawDate);
       if (isNaN(date.getTime())) return;
 
       const monthKey = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
@@ -135,7 +131,10 @@ export default function AnalyticsClient({
       });
   }, [applications]);
 
-  const activeCount = applications.filter((a) => !['withdrawn', 'selected', 'declined'].includes(a.status)).length;
+  // Exact sync with Companies page "In Progress" (active) filter
+  const activeCount = applications.filter(
+    (a) => !['not_applied', 'withdrawn', 'declined', 'not_shortlisted', 'rejected', 'selected'].includes(a.status)
+  ).length;
   const notShortlistedCount = applications.filter((a) => a.status === 'not_shortlisted').length;
 
   return (
