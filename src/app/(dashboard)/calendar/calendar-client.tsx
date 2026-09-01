@@ -204,18 +204,6 @@ export default function CalendarClient({ events }: CalendarClientProps) {
     return days;
   }, [year, month]);
 
-  const weekDays = useMemo(() => {
-    // Guard against empty or invalid selectedDateStr (e.g. '' or 'NaN-NaN-NaN')
-    const parsed = new Date(selectedDateStr + 'T00:00:00');
-    const selected = isNaN(parsed.getTime()) ? new Date() : parsed;
-    const startOfWeek = new Date(selected);
-    startOfWeek.setDate(selected.getDate() - selected.getDay());
-    return Array.from({ length: 7 }, (_, i) => {
-      const d = new Date(startOfWeek);
-      d.setDate(startOfWeek.getDate() + i);
-      return { date: d, dateString: toDateStr(d), dayNumber: d.getDate(), dayName: DAY_SHORT[d.getDay()] };
-    });
-  }, [selectedDateStr]);
 
   const selectedDayEvents = useMemo(
     () => (eventsByDate.get(selectedDateStr) || []).sort((a, b) =>
@@ -237,23 +225,19 @@ export default function CalendarClient({ events }: CalendarClientProps) {
   );
 
   const handlePrev = () => {
-    if (viewMode === 'month') {
-      setCurrentDate(new Date(year, month - 1, 1));
-    } else {
-      const d = new Date(selectedDateStr + 'T00:00:00');
-      d.setDate(d.getDate() - 7);
-      setSelectedDateStr(toDateStr(d));
-    }
+    const newDate = new Date(year, month - 1, 1);
+    setCurrentDate(newDate);
+    const isCurrentMonthToday = today.getFullYear() === newDate.getFullYear() && today.getMonth() === newDate.getMonth();
+    setSelectedDateStr(isCurrentMonthToday ? todayStr : toDateStr(newDate));
   };
+
   const handleNext = () => {
-    if (viewMode === 'month') {
-      setCurrentDate(new Date(year, month + 1, 1));
-    } else {
-      const d = new Date(selectedDateStr + 'T00:00:00');
-      d.setDate(d.getDate() + 7);
-      setSelectedDateStr(toDateStr(d));
-    }
+    const newDate = new Date(year, month + 1, 1);
+    setCurrentDate(newDate);
+    const isCurrentMonthToday = today.getFullYear() === newDate.getFullYear() && today.getMonth() === newDate.getMonth();
+    setSelectedDateStr(isCurrentMonthToday ? todayStr : toDateStr(newDate));
   };
+
   const handleToday = () => {
     setCurrentDate(today);
     setSelectedDateStr(todayStr);
@@ -282,11 +266,11 @@ export default function CalendarClient({ events }: CalendarClientProps) {
       <div className="flex items-center justify-between mb-4 px-1">
         <button onClick={handleToday} className="text-xs font-bold text-indigo-400 hover:text-indigo-300 bg-indigo-500/10 border border-indigo-500/20 px-3 py-1.5 rounded-xl transition-all hover:bg-indigo-500/15">Today</button>
         <div className="flex items-center gap-2">
-          <button onClick={handlePrev} className="p-1.5 rounded-xl text-zinc-400 hover:text-white hover:bg-zinc-800 transition-colors"><ChevronLeft className="w-4 h-4" /></button>
+          <button onClick={handlePrev} className="p-1.5 rounded-xl text-zinc-400 hover:text-white hover:bg-zinc-800 transition-colors" aria-label="Previous Month"><ChevronLeft className="w-4 h-4" /></button>
           <span className="text-sm font-bold text-white min-w-[130px] text-center">
-            {viewMode === 'month' ? `${MONTH_NAMES[month]} ${year}` : `${weekDays[0].dayNumber}\u2013${weekDays[6].dayNumber} ${MONTH_NAMES[new Date(selectedDateStr + 'T00:00:00').getMonth()]} ${year}`}
+            {MONTH_NAMES[month]} {year}
           </span>
-          <button onClick={handleNext} className="p-1.5 rounded-xl text-zinc-400 hover:text-white hover:bg-zinc-800 transition-colors"><ChevronRight className="w-4 h-4" /></button>
+          <button onClick={handleNext} className="p-1.5 rounded-xl text-zinc-400 hover:text-white hover:bg-zinc-800 transition-colors" aria-label="Next Month"><ChevronRight className="w-4 h-4" /></button>
         </div>
         <div className="hidden sm:flex items-center gap-2 text-xs">
           {[['bg-blue-400','PPT'],['bg-amber-400','Test'],['bg-emerald-400','Interview']].map(([color, label]) => (
@@ -330,46 +314,104 @@ export default function CalendarClient({ events }: CalendarClientProps) {
             </div>
           </div>
 
-          {/* Mobile: week strip + day list */}
+          {/* Mobile: Full Month Grid (with dot badges) + Day event list below */}
           <div className="md:hidden space-y-4">
-            <div className="bg-[#101018]/90 border border-zinc-800/80 rounded-2xl p-3">
-              <div className="grid grid-cols-7 gap-1">
-                {weekDays.map((wd) => {
-                  const dots = (eventsByDate.get(wd.dateString) || []).slice(0, 3);
-                  const isToday = wd.dateString === todayStr;
-                  const isSelected = wd.dateString === selectedDateStr;
+            {/* Full Month Dot Grid */}
+            <div className="bg-[#101018]/90 border border-zinc-800/80 rounded-2xl p-3.5 shadow-lg">
+              {/* Day of week headers */}
+              <div className="grid grid-cols-7 text-center mb-2 pb-2 border-b border-zinc-800/60">
+                {DAY_SHORT.map((d) => (
+                  <span key={d} className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider">
+                    {d}
+                  </span>
+                ))}
+              </div>
+
+              {/* Month days */}
+              <div className="grid grid-cols-7 gap-y-1.5 gap-x-1">
+                {calendarDays.map((d) => {
+                  const dayEvents = eventsByDate.get(d.dateString) || [];
+                  const dots = dayEvents.slice(0, 3);
+                  const isToday = d.dateString === todayStr;
+                  const isSelected = d.dateString === selectedDateStr;
+
                   return (
-                    <button key={wd.dateString} onClick={() => setSelectedDateStr(wd.dateString)} className="flex flex-col items-center gap-1 py-2 rounded-xl">
-                      <span className={cn('text-[10px] font-bold uppercase tracking-wider', isToday ? 'text-indigo-400' : 'text-zinc-500')}>{wd.dayName}</span>
-                      <span className={cn('w-8 h-8 rounded-full flex items-center justify-center text-sm font-extrabold transition-all', isSelected ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/40' : isToday ? 'text-indigo-400 border border-indigo-500/40' : 'text-zinc-300 hover:bg-zinc-800')}>{wd.dayNumber}</span>
-                      <div className="flex gap-0.5 h-1.5">
-                        {dots.map((e, i) => <span key={i} className={cn('w-1.5 h-1.5 rounded-full', getDotColor(e.eventType))} />)}
+                    <button
+                      key={d.dateString}
+                      onClick={() => {
+                        setSelectedDateStr(d.dateString);
+                        // If user clicks a padding day from prev/next month, update currentDate too
+                        if (!d.isCurrentMonth) {
+                          const clickedDate = new Date(d.dateString + 'T00:00:00');
+                          setCurrentDate(new Date(clickedDate.getFullYear(), clickedDate.getMonth(), 1));
+                        }
+                      }}
+                      className={cn(
+                        'flex flex-col items-center justify-center py-1.5 rounded-xl transition-all',
+                        !d.isCurrentMonth && 'opacity-25',
+                        isSelected
+                          ? 'bg-indigo-600/10'
+                          : 'hover:bg-zinc-900/60'
+                      )}
+                    >
+                      <span
+                        className={cn(
+                          'w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold transition-all',
+                          isSelected
+                            ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/40 scale-105'
+                            : isToday
+                            ? 'text-indigo-400 border border-indigo-500/50 font-extrabold'
+                            : 'text-zinc-300'
+                        )}
+                      >
+                        {d.dayNumber}
+                      </span>
+                      {/* Event dots under the date */}
+                      <div className="flex items-center gap-0.5 h-1.5 mt-0.5">
+                        {dots.map((e, i) => (
+                          <span key={i} className={cn('w-1.5 h-1.5 rounded-full', getDotColor(e.eventType))} />
+                        ))}
                       </div>
                     </button>
                   );
                 })}
               </div>
             </div>
-            <div className="bg-[#101018]/90 border border-zinc-800/80 rounded-2xl p-4">
+
+            {/* Selected Day Event List */}
+            <div className="bg-[#101018]/90 border border-zinc-800/80 rounded-2xl p-4 shadow-lg">
               <div className="flex items-center justify-between mb-4">
                 <div>
-                  <p className="text-xs font-bold text-zinc-500 uppercase tracking-wider">{new Date(selectedDateStr + 'T00:00:00').toLocaleDateString('en-IN', { weekday: 'long' })}</p>
+                  <p className="text-xs font-bold text-zinc-500 uppercase tracking-wider">
+                    {new Date(selectedDateStr + 'T00:00:00').toLocaleDateString('en-IN', { weekday: 'long' })}
+                  </p>
                   <p className="text-lg font-extrabold text-white">
-                    {new Date(selectedDateStr + 'T00:00:00').toLocaleDateString('en-IN', { day: 'numeric', month: 'long' })}
-                    {selectedDateStr === todayStr && <span className="ml-2 text-xs font-bold text-indigo-400 bg-indigo-500/10 border border-indigo-500/20 px-2 py-0.5 rounded-full align-middle">Today</span>}
+                    {new Date(selectedDateStr + 'T00:00:00').toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric' })}
+                    {selectedDateStr === todayStr && (
+                      <span className="ml-2 text-xs font-bold text-indigo-400 bg-indigo-500/10 border border-indigo-500/20 px-2 py-0.5 rounded-full align-middle">
+                        Today
+                      </span>
+                    )}
                   </p>
                 </div>
-                {selectedDayEvents.length > 0 && <span className="text-xs font-bold text-zinc-400 bg-zinc-800/60 border border-zinc-700/50 px-2.5 py-1 rounded-xl">{selectedDayEvents.length} event{selectedDayEvents.length !== 1 ? 's' : ''}</span>}
+                {selectedDayEvents.length > 0 && (
+                  <span className="text-xs font-bold text-indigo-300 bg-indigo-500/10 border border-indigo-500/20 px-2.5 py-1 rounded-xl font-mono">
+                    {selectedDayEvents.length} event{selectedDayEvents.length !== 1 ? 's' : ''}
+                  </span>
+                )}
               </div>
+
               {selectedDayEvents.length === 0 ? (
-                <div className="py-10 text-center">
-                  <CalendarCheck className="w-10 h-10 text-zinc-700 mx-auto mb-2" />
-                  <p className="text-sm font-semibold text-zinc-500">No events this day</p>
-                  <p className="text-xs text-zinc-700 mt-1">Tap another day to see its schedule</p>
+                <div className="py-8 text-center bg-zinc-950/40 rounded-xl border border-zinc-800/40">
+                  <CalendarCheck className="w-9 h-9 text-zinc-700 mx-auto mb-2" />
+                  <p className="text-xs font-semibold text-zinc-400">No events on this date</p>
+                  <p className="text-[11px] text-zinc-600 mt-0.5">Tap any day with colored dots to view rounds</p>
                 </div>
               ) : (
                 <div className="space-y-2.5">
-                  {selectedDayEvents.map((evt) => <EventCard key={evt.id} evt={evt} />)}
+                  {selectedDayEvents.map((evt) => (
+                    <EventCard key={evt.id} evt={evt} />
+                  ))}
                 </div>
               )}
             </div>
@@ -384,7 +426,7 @@ export default function CalendarClient({ events }: CalendarClientProps) {
               const modalDate = new Date(modalDateStr + 'T00:00:00');
               return (
                 <div
-                  className="fixed inset-0 z-[9999] flex items-center justify-center p-4 sm:p-6 bg-black/80 backdrop-blur-md animate-in fade-in duration-200"
+                  className="fixed inset-0 z-[9999] flex items-center justify-center p-4 sm:p-6 bg-black/80 backdrop-blur-xs animate-in fade-in duration-200"
                   onClick={() => setModalDateStr(null)}
                 >
                   <div
