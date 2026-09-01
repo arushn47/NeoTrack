@@ -130,6 +130,21 @@ export default function CalendarClient({ events }: CalendarClientProps) {
     return map;
   }, [filteredEvents]);
 
+  const [selectedDayData, setSelectedDayData] = useState<{
+    dateString: string;
+    dayNumber: number;
+    date: Date;
+    events: CalendarEvent[];
+  } | null>(null);
+
+  const formatChipText = (evt: CalendarEvent) => {
+    let cleanTitle = evt.title || evt.eventType;
+    if (cleanTitle.toLowerCase().startsWith(evt.companyName.toLowerCase())) {
+      cleanTitle = cleanTitle.slice(evt.companyName.length).replace(/^[\s\-–—:]+/, '').trim();
+    }
+    return `${evt.companyName} · ${cleanTitle || evt.eventType}`;
+  };
+
   const monthNames = [
     'January', 'February', 'March', 'April', 'May', 'June',
     'July', 'August', 'September', 'October', 'November', 'December',
@@ -147,94 +162,96 @@ export default function CalendarClient({ events }: CalendarClientProps) {
     setCurrentDate(new Date());
   };
 
-  const getEventBadgeColor = (type: string) => {
-    switch (type) {
-      case 'ppt':
-        return 'bg-blue-500/15 text-blue-400 border-blue-500/30 hover:bg-blue-500/25';
-      case 'online_test':
-      case 'coding_test':
-        return 'bg-amber-500/15 text-amber-300 border-amber-500/30 hover:bg-amber-500/25';
-      case 'technical_interview':
-      case 'hr_interview':
-      case 'final_interview':
-        return 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30 hover:bg-emerald-500/25';
-      case 'registration_deadline':
-        return 'bg-rose-500/15 text-rose-300 border-rose-500/30 hover:bg-rose-500/25';
-      default:
-        return 'bg-purple-500/15 text-purple-300 border-purple-500/30 hover:bg-purple-500/25';
-    }
+  const getEventBadgeColor = (eventType: string) => {
+    const colors: Record<string, string> = {
+      ppt: 'bg-blue-500/15 text-blue-300 border-blue-500/30 hover:bg-blue-500/25',
+      online_test: 'bg-amber-500/15 text-amber-300 border-amber-500/30 hover:bg-amber-500/25',
+      coding_test: 'bg-orange-500/15 text-orange-300 border-orange-500/30 hover:bg-orange-500/25',
+      technical_interview: 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30 hover:bg-emerald-500/25',
+      hr_interview: 'bg-teal-500/15 text-teal-300 border-teal-500/30 hover:bg-teal-500/25',
+      final_interview: 'bg-green-500/15 text-green-300 border-green-500/30 hover:bg-green-500/25',
+      registration_deadline: 'bg-red-500/15 text-red-300 border-red-500/30 hover:bg-red-500/25',
+    };
+    return colors[eventType] || 'bg-zinc-800 text-zinc-300 border-zinc-700 hover:bg-zinc-700';
   };
 
-  const todayStr = new Date().toISOString().split('T')[0];
-  const todayEvents = eventsByDate.get(todayStr) || [];
+  const todayStr = useMemo(() => {
+    const now = new Date();
+    const yyyy = now.getFullYear();
+    const mm = String(now.getMonth() + 1).padStart(2, '0');
+    const dd = String(now.getDate()).padStart(2, '0');
+    return `${yyyy}-${mm}-${dd}`;
+  }, []);
 
   return (
-    <div className="space-y-6 max-w-7xl mx-auto animate-fade-in selection:bg-indigo-500/20">
-      {/* Header & Month Navigation */}
+    <div className="space-y-6 animate-fade-in max-w-7xl mx-auto selection:bg-indigo-500/20">
+      {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h1 className="text-2xl sm:text-3xl font-extrabold text-white tracking-tight flex items-center gap-2.5">
-            <CalendarIcon className="w-6 h-6 text-indigo-400" />
-            <span>Placement Schedule</span>
+          <h1 className="text-2xl sm:text-3xl font-extrabold text-white tracking-tight flex items-center gap-3">
+            <span className="p-2 rounded-2xl bg-indigo-500/10 border border-indigo-500/20 text-indigo-400 shadow-md shadow-indigo-500/10">
+              <CalendarIcon className="w-6 h-6" />
+            </span>
+            Placement Schedule
           </h1>
           <p className="text-xs sm:text-sm text-zinc-400 mt-1">
             Visual calendar and action timeline for upcoming tests, interview slots, and drive sessions.
           </p>
         </div>
 
-        {/* View Switcher & Month Controls */}
-        <div className="flex items-center gap-2.5 flex-wrap">
-          {/* Grid vs Timeline View Toggle */}
-          <div className="flex items-center bg-[#101018] border border-zinc-800 rounded-xl p-1 shadow-sm">
+        {/* View mode toggle + Month navigator */}
+        <div className="flex items-center gap-3 self-start sm:self-center flex-wrap">
+          {/* Grid vs Timeline mode toggle */}
+          <div className="flex items-center p-1 bg-[#101018] rounded-2xl border border-zinc-800">
             <button
               onClick={() => setViewMode('grid')}
               className={cn(
-                'flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all',
+                'flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold transition-all',
                 viewMode === 'grid'
                   ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/30'
                   : 'text-zinc-400 hover:text-zinc-200'
               )}
             >
               <LayoutGrid className="w-3.5 h-3.5" />
-              <span>Grid</span>
+              Grid
             </button>
             <button
               onClick={() => setViewMode('timeline')}
               className={cn(
-                'flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all',
+                'flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold transition-all',
                 viewMode === 'timeline'
                   ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/30'
                   : 'text-zinc-400 hover:text-zinc-200'
               )}
             >
               <List className="w-3.5 h-3.5" />
-              <span>Timeline</span>
+              Timeline
             </button>
           </div>
 
-          <button
-            onClick={handleToday}
-            className="px-3.5 py-1.5 rounded-xl bg-[#101018] border border-zinc-800 hover:bg-zinc-800 text-xs font-semibold text-zinc-300 hover:text-white transition-all shadow-sm"
-          >
-            Today
-          </button>
-
-          {/* Month Selector */}
-          <div className="flex items-center gap-1 bg-[#101018] border border-zinc-800 rounded-xl p-1 shadow-sm">
+          {/* Month Navigation */}
+          <div className="flex items-center gap-1.5 bg-[#101018] px-2 py-1 rounded-2xl border border-zinc-800">
+            <button
+              onClick={handleToday}
+              className="px-2.5 py-1 text-xs font-semibold text-zinc-300 hover:text-white transition-colors"
+            >
+              Today
+            </button>
+            <div className="h-4 w-px bg-zinc-800" />
             <button
               onClick={handlePrevMonth}
-              className="p-1.5 rounded-lg hover:bg-zinc-800 text-zinc-400 hover:text-white transition-all"
-              aria-label="Previous month"
+              className="p-1 rounded-lg text-zinc-400 hover:text-white hover:bg-zinc-800/60 transition-colors"
+              aria-label="Previous Month"
             >
               <ChevronLeft className="w-4 h-4" />
             </button>
-            <span className="text-xs sm:text-sm font-bold text-white px-3 min-w-[130px] text-center font-mono">
+            <span className="text-xs font-bold text-white px-2 min-w-[120px] text-center font-mono">
               {monthNames[month]} {year}
             </span>
             <button
               onClick={handleNextMonth}
-              className="p-1.5 rounded-lg hover:bg-zinc-800 text-zinc-400 hover:text-white transition-all"
-              aria-label="Next month"
+              className="p-1 rounded-lg text-zinc-400 hover:text-white hover:bg-zinc-800/60 transition-colors"
+              aria-label="Next Month"
             >
               <ChevronRight className="w-4 h-4" />
             </button>
@@ -242,8 +259,9 @@ export default function CalendarClient({ events }: CalendarClientProps) {
         </div>
       </div>
 
-      {/* Filter Tabs & Event Legend */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-1">
+      {/* Filter Tabs */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-zinc-800/80 pb-4">
+        {/* Category Pills */}
         <div className="flex items-center gap-2 overflow-x-auto pb-1 sm:pb-0 scrollbar-none">
           {[
             { id: 'all' as const, label: 'All Events' },
@@ -310,24 +328,38 @@ export default function CalendarClient({ events }: CalendarClientProps) {
               return (
                 <div
                   key={index}
+                  onClick={() => {
+                    setSelectedDayData({
+                      dateString: d.dateString,
+                      dayNumber: d.dayNumber,
+                      date: new Date(`${d.dateString}T00:00:00`),
+                      events: dayEvents,
+                    });
+                  }}
                   className={cn(
-                    'min-h-[120px] p-2.5 flex flex-col justify-between transition-colors',
-                    d.isCurrentMonth ? 'bg-[#101018] hover:bg-zinc-900/60' : 'bg-zinc-950/40 opacity-30',
+                    'min-h-[120px] p-2.5 flex flex-col justify-between transition-all cursor-pointer group select-none',
+                    d.isCurrentMonth
+                      ? 'bg-[#101018] hover:bg-zinc-900/80 hover:shadow-inner'
+                      : 'bg-zinc-950/40 opacity-35 hover:opacity-75',
                     isToday && 'ring-2 ring-inset ring-indigo-500/80 bg-indigo-500/5'
                   )}
                 >
                   {/* Date Number Header */}
-                  <div className="flex items-center justify-between">
+                  <div className="flex items-center justify-between pointer-events-none">
                     <span
                       className={cn(
-                        'text-xs font-bold w-6 h-6 rounded-full flex items-center justify-center font-mono',
-                        isToday ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/40' : 'text-zinc-400'
+                        'text-xs font-bold w-6 h-6 rounded-full flex items-center justify-center font-mono transition-transform group-hover:scale-110',
+                        isToday
+                          ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/40'
+                          : dayEvents.length > 0
+                          ? 'bg-zinc-800 text-white font-extrabold'
+                          : 'text-zinc-400'
                       )}
                     >
                       {d.dayNumber}
                     </span>
                     {dayEvents.length > 0 && (
-                      <span className="text-[10px] text-zinc-500 font-bold font-mono">
+                      <span className="text-[10px] text-indigo-400 font-bold font-mono px-1.5 py-0.5 rounded-md bg-indigo-500/10 border border-indigo-500/20">
                         {dayEvents.length} {dayEvents.length === 1 ? 'event' : 'events'}
                       </span>
                     )}
@@ -336,21 +368,29 @@ export default function CalendarClient({ events }: CalendarClientProps) {
                   {/* Day Events List */}
                   <div className="space-y-1.5 mt-2 overflow-hidden">
                     {dayEvents.slice(0, 3).map((evt) => (
-                      <button
+                      <div
                         key={evt.id}
-                        onClick={() => setSelectedEvent(evt)}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setSelectedDayData({
+                            dateString: d.dateString,
+                            dayNumber: d.dayNumber,
+                            date: new Date(`${d.dateString}T00:00:00`),
+                            events: dayEvents,
+                          });
+                        }}
                         className={cn(
                           'w-full text-left px-2 py-1 rounded-lg border text-[11px] font-semibold truncate block transition-all hover:scale-[1.02] shadow-sm',
                           getEventBadgeColor(evt.eventType)
                         )}
+                        title={evt.title || evt.eventType}
                       >
-                        <span className="font-bold mr-1">{evt.companyName}:</span>
-                        <span>{evt.title || evt.eventType}</span>
-                      </button>
+                        <span>{formatChipText(evt)}</span>
+                      </div>
                     ))}
                     {dayEvents.length > 3 && (
                       <span className="text-[10px] text-indigo-400 pl-1 block font-bold">
-                        +{dayEvents.length - 3} more
+                        +{dayEvents.length - 3} more (tap to view)
                       </span>
                     )}
                   </div>
@@ -379,50 +419,71 @@ export default function CalendarClient({ events }: CalendarClientProps) {
                 return (
                   <div
                     key={evt.id}
-                    className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 py-4 hover:bg-zinc-900/40 rounded-2xl px-3 transition-all group"
+                    className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 py-4 hover:bg-zinc-900/40 transition-all rounded-2xl px-3 group"
                   >
                     <div className="flex items-start gap-3.5">
                       <div className={cn('w-3 h-3 rounded-full mt-1.5 flex-shrink-0', eventColors.dot)} />
                       <div>
-                        <div className="flex items-center gap-2">
-                          <Link
-                            href={`/companies/${evt.companyId}`}
-                            className="text-sm font-bold text-white hover:text-indigo-400 transition-colors"
-                          >
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <h4 className="text-sm font-bold text-white group-hover:text-indigo-300 transition-colors">
                             {evt.companyName}
-                          </Link>
-                          <span className={cn('text-[10px] font-bold px-2 py-0.5 rounded-md uppercase tracking-wider', getEventBadgeColor(evt.eventType))}>
-                            {EVENT_TYPE_LABELS[evt.eventType as EventType] || evt.eventType}
+                          </h4>
+                          <span
+                            className={cn(
+                              'text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-md border',
+                              getEventBadgeColor(evt.eventType)
+                            )}
+                          >
+                            {EVENT_TYPE_LABELS[evt.eventType as EventType] || evt.eventType.replace('_', ' ')}
                           </span>
                         </div>
-                        <p className="text-xs text-zinc-300 font-medium mt-1">
-                          {evt.title || 'Placement Session'}
-                        </p>
-                        <div className="flex items-center gap-2 text-xs text-zinc-500 mt-1 font-mono">
-                          {evt.venue && <span>📍 {evt.venue}</span>}
-                          {evt.mode && <span>· {evt.mode}</span>}
+                        <p className="text-xs text-zinc-300 mt-0.5">{evt.title || evt.companyName}</p>
+                        <div className="flex items-center gap-2 text-xs text-zinc-500 mt-1">
+                          {evt.venue && (
+                            <span className="flex items-center gap-1">
+                              <MapPin className="w-3 h-3 text-emerald-400" />
+                              {evt.venue}
+                            </span>
+                          )}
+                          {evt.venue && evt.mode && <span>·</span>}
+                          {evt.mode && <span className="capitalize">{evt.mode}</span>}
                         </div>
                       </div>
                     </div>
 
-                    <div className="flex items-center gap-3 self-end sm:self-center flex-shrink-0">
+                    <div className="flex items-center gap-4 self-end sm:self-center">
                       <div className="text-right">
-                        <p className="text-xs font-semibold text-zinc-200">
-                          {evt.startTime ? formatDateTime(evt.startTime) : 'Date TBA'}
-                        </p>
+                        <span className="text-xs font-semibold text-zinc-200 font-mono block">
+                          {evt.startTime
+                            ? new Date(evt.startTime).toLocaleDateString('en-IN', {
+                                day: 'numeric',
+                                month: 'short',
+                                hour: '2-digit',
+                                minute: '2-digit',
+                              })
+                            : 'Date TBA'}
+                        </span>
                       </div>
-                      {evt.startTime && (
-                        <a
-                          href={`https://calendar.google.com/calendar/render?action=TEMPLATE&text=${encodeURIComponent(evt.title || 'Placement Event')}&dates=${new Date(evt.startTime).toISOString().replace(/-|:|\.\d+/g, '')}/${new Date(new Date(evt.startTime).getTime() + 3600000).toISOString().replace(/-|:|\.\d+/g, '')}&location=${encodeURIComponent(evt.venue || 'VIT Campus / Online')}`}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="p-2 rounded-xl bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 text-xs font-semibold transition-all flex items-center gap-1.5"
-                          title="Add to Google Calendar"
+
+                      <div className="flex items-center gap-1.5">
+                        <Link
+                          href={`/companies/${evt.companyId}`}
+                          className="px-3 py-1.5 rounded-xl bg-zinc-900 hover:bg-zinc-800 text-xs font-semibold text-zinc-300 hover:text-white transition-all border border-zinc-800"
                         >
-                          <CalendarIcon className="w-3.5 h-3.5" />
-                          <span>Sync</span>
-                        </a>
-                      )}
+                          View Drive
+                        </Link>
+                        {evt.startTime && (
+                          <a
+                            href={`https://calendar.google.com/calendar/render?action=TEMPLATE&text=${encodeURIComponent(evt.title || 'Placement Event')}&dates=${new Date(evt.startTime).toISOString().replace(/-|:|\.\d+/g, '')}/${new Date(new Date(evt.startTime).getTime() + 3600000).toISOString().replace(/-|:|\.\d+/g, '')}&location=${encodeURIComponent(evt.venue || 'VIT Campus / Online')}`}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="p-1.5 rounded-xl bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-400 border border-indigo-500/20 transition-all flex items-center justify-center"
+                            title="Add to Google Calendar"
+                          >
+                            <CalendarIcon className="w-4 h-4" />
+                          </a>
+                        )}
+                      </div>
                     </div>
                   </div>
                 );
@@ -432,86 +493,153 @@ export default function CalendarClient({ events }: CalendarClientProps) {
         </div>
       )}
 
-      {/* Selected Event Modal */}
-      {selectedEvent && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-md animate-fade-in">
-          <div className="bg-[#12121c]/95 border border-zinc-800 rounded-3xl max-w-md w-full p-6 sm:p-7 shadow-2xl space-y-5">
-            <div className="flex items-start justify-between">
+      {/* Interactive Day Schedule Popup Modal (Tasks Drawer) */}
+      {selectedDayData && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-md animate-fade-in"
+          onClick={() => setSelectedDayData(null)}
+        >
+          <div
+            className="bg-[#12121c]/95 border border-zinc-800 rounded-3xl max-w-lg w-full p-6 sm:p-7 shadow-2xl space-y-5 animate-scale-up"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Modal Header */}
+            <div className="flex items-start justify-between border-b border-zinc-800/80 pb-4">
               <div className="flex items-center gap-3.5">
-                <div className="w-11 h-11 rounded-2xl bg-gradient-to-tr from-indigo-500/20 to-violet-500/20 border border-indigo-500/30 flex items-center justify-center text-indigo-400 font-extrabold text-lg">
-                  {selectedEvent.companyName.charAt(0)}
+                <div className="w-12 h-12 rounded-2xl bg-indigo-500/10 border border-indigo-500/30 flex items-center justify-center text-indigo-400 font-extrabold text-xl shadow-lg shadow-indigo-500/10">
+                  {selectedDayData.dayNumber}
                 </div>
                 <div>
-                  <h3 className="text-lg font-bold text-white">{selectedEvent.companyName}</h3>
-                  <span
-                    className={cn(
-                      'inline-block px-2.5 py-0.5 rounded-md text-[10px] font-bold uppercase tracking-wider mt-1 border',
-                      getEventBadgeColor(selectedEvent.eventType)
-                    )}
-                  >
-                    {selectedEvent.eventType.replace('_', ' ')}
-                  </span>
+                  <h3 className="text-base sm:text-lg font-extrabold text-white tracking-tight">
+                    {selectedDayData.date.toLocaleDateString('en-IN', {
+                      weekday: 'long',
+                      day: 'numeric',
+                      month: 'long',
+                      year: 'numeric',
+                    })}
+                  </h3>
+                  <div className="flex items-center gap-2 mt-1">
+                    <span className="text-[11px] font-semibold text-indigo-400 font-mono px-2 py-0.5 rounded-full bg-indigo-500/10 border border-indigo-500/20">
+                      {selectedDayData.events.length} {selectedDayData.events.length === 1 ? 'Placement Event' : 'Placement Events'}
+                    </span>
+                  </div>
                 </div>
               </div>
               <button
-                onClick={() => setSelectedEvent(null)}
-                className="p-1.5 rounded-xl text-zinc-500 hover:text-white hover:bg-zinc-800 transition-colors"
+                onClick={() => setSelectedDayData(null)}
+                className="p-2 rounded-xl text-zinc-400 hover:text-white hover:bg-zinc-800 transition-colors"
+                aria-label="Close"
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
 
-            <div className="space-y-3 pt-2 text-xs bg-zinc-950/60 p-4 rounded-2xl border border-zinc-800/80">
-              <h4 className="text-sm font-bold text-zinc-200">{selectedEvent.title}</h4>
-
-              {selectedEvent.startTime && (
-                <div className="flex items-center gap-2.5 text-zinc-400">
-                  <Clock className="w-4 h-4 text-indigo-400 flex-shrink-0" />
-                  <span className="font-mono text-zinc-300">
-                    {new Date(selectedEvent.startTime).toLocaleString('en-IN', {
-                      dateStyle: 'full',
-                      timeStyle: 'short',
-                    })}
-                  </span>
+            {/* Events List for Selected Day */}
+            <div className="space-y-3 max-h-[55vh] overflow-y-auto pr-1">
+              {selectedDayData.events.length === 0 ? (
+                <div className="py-10 text-center bg-zinc-950/40 rounded-2xl border border-zinc-800/60 p-6">
+                  <CalendarCheck className="w-10 h-10 text-zinc-600 mx-auto mb-2.5" />
+                  <p className="text-sm font-bold text-zinc-300">No events scheduled for this date</p>
+                  <p className="text-xs text-zinc-500 mt-1 max-w-xs mx-auto">
+                    You can schedule PPTs, assessments, or interviews anytime via the AI Assistant chat!
+                  </p>
                 </div>
-              )}
+              ) : (
+                selectedDayData.events.map((evt) => {
+                  const eventColors = EVENT_TYPE_COLORS[evt.eventType as EventType] || EVENT_TYPE_COLORS.other;
+                  return (
+                    <div
+                      key={evt.id}
+                      className="p-4 bg-zinc-950/70 rounded-2xl border border-zinc-800/80 hover:border-zinc-700 transition-all space-y-3 group"
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="flex items-center gap-3">
+                          <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-indigo-500/20 to-violet-500/20 border border-indigo-500/30 flex items-center justify-center text-indigo-300 font-extrabold text-base">
+                            {evt.companyName.charAt(0)}
+                          </div>
+                          <div>
+                            <h4 className="text-sm font-extrabold text-white group-hover:text-indigo-300 transition-colors">
+                              {evt.companyName}
+                            </h4>
+                            <span
+                              className={cn(
+                                'inline-block px-2 py-0.5 rounded-md text-[10px] font-bold uppercase tracking-wider mt-0.5 border',
+                                getEventBadgeColor(evt.eventType)
+                              )}
+                            >
+                              {EVENT_TYPE_LABELS[evt.eventType as EventType] || evt.eventType.replace('_', ' ')}
+                            </span>
+                          </div>
+                        </div>
 
-              {selectedEvent.venue && (
-                <div className="flex items-center gap-2.5 text-zinc-400">
-                  <MapPin className="w-4 h-4 text-emerald-400 flex-shrink-0" />
-                  <span>{selectedEvent.venue}</span>
-                </div>
+                        {evt.startTime && (
+                          <span className="text-xs font-bold text-zinc-200 font-mono bg-zinc-900 px-2.5 py-1 rounded-xl border border-zinc-800">
+                            {new Date(evt.startTime).toLocaleTimeString('en-IN', {
+                              hour: '2-digit',
+                              minute: '2-digit',
+                            })}
+                          </span>
+                        )}
+                      </div>
+
+                      <p className="text-xs font-semibold text-zinc-300 pl-0.5">
+                        {evt.title || evt.companyName}
+                      </p>
+
+                      <div className="flex flex-wrap items-center gap-3 text-xs text-zinc-400 pt-1 border-t border-zinc-900">
+                        {evt.venue && (
+                          <div className="flex items-center gap-1.5">
+                            <MapPin className="w-3.5 h-3.5 text-emerald-400 flex-shrink-0" />
+                            <span>{evt.venue}</span>
+                          </div>
+                        )}
+                        {evt.mode && evt.mode !== 'unknown' && (
+                          <span className="capitalize px-2 py-0.5 rounded-md bg-zinc-900 border border-zinc-800 text-[11px]">
+                            {evt.mode}
+                          </span>
+                        )}
+                      </div>
+
+                      {/* Action Buttons */}
+                      <div className="pt-2 flex items-center justify-between gap-2 border-t border-zinc-900">
+                        <Link
+                          href={`/companies/${evt.companyId}`}
+                          className="inline-flex items-center gap-1.5 text-xs font-semibold text-indigo-400 hover:text-indigo-300 transition-colors"
+                        >
+                          View Drive Profile
+                          <ExternalLink className="w-3.5 h-3.5" />
+                        </Link>
+
+                        {evt.startTime && (
+                          <a
+                            href={`https://calendar.google.com/calendar/render?action=TEMPLATE&text=${encodeURIComponent(evt.title || 'Placement Event')}&dates=${new Date(evt.startTime).toISOString().replace(/-|:|\.\d+/g, '')}/${new Date(new Date(evt.startTime).getTime() + 3600000).toISOString().replace(/-|:|\.\d+/g, '')}&location=${encodeURIComponent(evt.venue || 'VIT Campus / Online')}`}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold shadow-md shadow-indigo-600/30 transition-all active:scale-95"
+                          >
+                            <CalendarIcon className="w-3.5 h-3.5" />
+                            Add to Google Calendar
+                          </a>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })
               )}
             </div>
 
-            <div className="pt-2 flex items-center justify-between gap-3">
-              <Link
-                href={`/companies/${selectedEvent.companyId}`}
-                className="inline-flex items-center gap-1.5 text-xs font-semibold text-indigo-400 hover:text-indigo-300 transition-colors"
+            {/* Modal Footer */}
+            <div className="pt-2 flex items-center justify-between text-xs text-zinc-500 border-t border-zinc-800/80">
+              <span className="flex items-center gap-1">
+                <Sparkles className="w-3.5 h-3.5 text-indigo-400" />
+                Tap any date to inspect scheduled rounds
+              </span>
+              <button
+                onClick={() => setSelectedDayData(null)}
+                className="px-4 py-1.5 rounded-xl bg-zinc-900 hover:bg-zinc-800 text-xs font-semibold text-zinc-300 hover:text-white transition-all border border-zinc-800"
               >
-                View Company Profile
-                <ExternalLink className="w-3.5 h-3.5" />
-              </Link>
-
-              <div className="flex items-center gap-2">
-                {selectedEvent.startTime && (
-                  <a
-                    href={`https://calendar.google.com/calendar/render?action=TEMPLATE&text=${encodeURIComponent(selectedEvent.title || 'Placement Event')}&dates=${new Date(selectedEvent.startTime).toISOString().replace(/-|:|\.\d+/g, '')}/${new Date(new Date(selectedEvent.startTime).getTime() + 3600000).toISOString().replace(/-|:|\.\d+/g, '')}&location=${encodeURIComponent(selectedEvent.venue || 'VIT Campus / Online')}`}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="px-3 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold shadow-md shadow-indigo-600/25 transition-all flex items-center gap-1.5"
-                  >
-                    <CalendarIcon className="w-3.5 h-3.5" />
-                    Add to Calendar
-                  </a>
-                )}
-                <button
-                  onClick={() => setSelectedEvent(null)}
-                  className="px-3 py-1.5 rounded-xl bg-zinc-900 hover:bg-zinc-800 text-xs font-semibold text-zinc-400 hover:text-zinc-200 transition-all border border-zinc-800"
-                >
-                  Close
-                </button>
-              </div>
+                Close
+              </button>
             </div>
           </div>
         </div>
