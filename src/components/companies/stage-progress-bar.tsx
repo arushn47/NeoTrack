@@ -196,22 +196,26 @@ export default function StageProgressBar({
   const testStartTime = rawTestTime ? new Date(rawTestTime) : null;
   const isTestInPast = testStartTime ? testStartTime.getTime() < now.getTime() : false;
 
-  // Determine stage states
+  // Determine stage states based on application status directly
   let currentStageIndex = 0;
-  let stageStatusText = 'Awaiting Test Shortlist';
+  let stageStatusText = 'Applied · In Screening';
 
-  if (status === 'selected' || status === 'offer_received') {
-    currentStageIndex = 4;
-    stageStatusText = '🎉 Offer Received!';
-  } else if (status === 'interview_scheduled' || interviewEvent) {
-    currentStageIndex = 3;
-    stageStatusText = 'Interview Stage';
-  } else if (status === 'shortlisted' || status === 'test_scheduled' || testEvent) {
-    currentStageIndex = 2; // Active on Test stage
-    if (isTestInPast) {
-      stageStatusText = 'Test Completed · Awaiting Results';
-    } else {
-      if (testStartTime) {
+  switch (status) {
+    case 'selected':
+    case 'offer_received':
+      currentStageIndex = 4;
+      stageStatusText = '🎉 Offer Received!';
+      break;
+    case 'interview_scheduled':
+      currentStageIndex = 3;
+      stageStatusText = 'Interview Stage';
+      break;
+    case 'shortlisted':
+    case 'test_scheduled':
+      currentStageIndex = 2;
+      if (isTestInPast) {
+        stageStatusText = 'Test Completed · Awaiting Results';
+      } else if (testStartTime) {
         const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
         const monthName = months[testStartTime.getMonth()];
         const day = testStartTime.getDate();
@@ -225,13 +229,31 @@ export default function StageProgressBar({
       } else {
         stageStatusText = 'Shortlisted for Test 🎉';
       }
-    }
-  } else if (status === 'ppt_scheduled' || pptEvent) {
-    currentStageIndex = 1;
-    stageStatusText = 'PPT Scheduled';
-  } else {
-    currentStageIndex = 0;
-    stageStatusText = 'Applied · Awaiting Shortlist';
+      break;
+    case 'ppt_scheduled':
+      currentStageIndex = 1;
+      stageStatusText = 'PPT Scheduled';
+      break;
+    case 'applied':
+      currentStageIndex = 0;
+      stageStatusText = 'Applied · In Screening';
+      break;
+    default:
+      // Fallback: infer from detected events if status is generic
+      if (interviewEvent) {
+        currentStageIndex = 3;
+        stageStatusText = 'Interview Stage';
+      } else if (testEvent) {
+        currentStageIndex = 2;
+        stageStatusText = isTestInPast ? 'Test Completed' : 'Test Scheduled';
+      } else if (pptEvent) {
+        currentStageIndex = 1;
+        stageStatusText = 'PPT Scheduled';
+      } else {
+        currentStageIndex = 0;
+        stageStatusText = 'Applied · In Screening';
+      }
+      break;
   }
 
   return (
