@@ -6,6 +6,7 @@ import {
   Calendar as CalendarIcon,
   ChevronLeft,
   ChevronRight,
+  ChevronDown,
   Clock,
   MapPin,
   Building2,
@@ -43,6 +44,7 @@ export default function CalendarClient({ events }: CalendarClientProps) {
   const [selectedEvent, setSelectedEvent] = useState<CalendarEvent | null>(null);
   const [viewMode, setViewMode] = useState<'grid' | 'timeline'>('grid');
   const [selectedEventType, setSelectedEventType] = useState<'all' | 'test' | 'interview' | 'ppt' | 'deadline'>('all');
+  const [showPastEvents, setShowPastEvents] = useState(false);
 
   const year = currentDate.getFullYear();
   const month = currentDate.getMonth();
@@ -533,21 +535,37 @@ export default function CalendarClient({ events }: CalendarClientProps) {
               )}
             </div>
 
-            {/* Past Events — collapsed/muted at bottom */}
+            {/* Past Events — collapsible at bottom */}
             {pastEvents.length > 0 && (
-              <div className="border-t border-zinc-800/60 pt-5">
-                <div className="flex items-center gap-2 mb-3">
-                  <Clock className="w-4 h-4 text-zinc-600" />
-                  <span className="text-xs font-bold text-zinc-600 uppercase tracking-wider">
-                    Past Events
-                  </span>
-                  <span className="text-[11px] text-zinc-700 font-mono">
-                    {pastEvents.length} event{pastEvents.length !== 1 ? 's' : ''}
-                  </span>
-                </div>
-                <div className="divide-y divide-zinc-800/30">
-                  {pastEvents.map((evt) => renderRow(evt, true))}
-                </div>
+              <div className="border-t border-zinc-800/60 pt-4">
+                {/* Toggle Button */}
+                <button
+                  onClick={() => setShowPastEvents((v) => !v)}
+                  className="w-full flex items-center justify-between px-3 py-2.5 rounded-2xl bg-zinc-900/50 hover:bg-zinc-900 border border-zinc-800/60 hover:border-zinc-700 transition-all group"
+                >
+                  <div className="flex items-center gap-2">
+                    <Clock className="w-3.5 h-3.5 text-zinc-600 group-hover:text-zinc-400 transition-colors" />
+                    <span className="text-xs font-bold text-zinc-600 group-hover:text-zinc-400 uppercase tracking-wider transition-colors">
+                      Past Events
+                    </span>
+                    <span className="text-[10px] font-semibold text-zinc-700 bg-zinc-800/80 border border-zinc-700/50 px-2 py-0.5 rounded-full font-mono">
+                      {pastEvents.length}
+                    </span>
+                  </div>
+                  <ChevronDown
+                    className={cn(
+                      'w-4 h-4 text-zinc-600 group-hover:text-zinc-400 transition-all duration-300',
+                      showPastEvents ? 'rotate-180' : 'rotate-0'
+                    )}
+                  />
+                </button>
+
+                {/* Collapsible Content */}
+                {showPastEvents && (
+                  <div className="mt-3 divide-y divide-zinc-800/30 animate-fade-in">
+                    {pastEvents.map((evt) => renderRow(evt, true))}
+                  </div>
+                )}
               </div>
             )}
           </div>
