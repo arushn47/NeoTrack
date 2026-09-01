@@ -428,53 +428,44 @@ export async function performReprocess(userId: string) {
 
     const hasPptEvent = allExtractedEvents.some((evt) => evt.eventType === 'ppt');
 
-    // ── STATUS COMPUTATION (Strict not_shortlisted vs rejected distinction) ──
+    // ── STATUS COMPUTATION (Strict not_shortlisted vs rejected vs positive match distinction) ──
     let computedStatus = 'not_applied';
 
-    if (isWithdrawn) {
+    // 1. Definite Positive Candidate Shortlist / Selection Matches ALWAYS take precedence:
+    if (isMatchedInSelectionList) {
+      computedStatus = 'selected';
+    } else if (isMatchedInNextRound) {
+      computedStatus = 'interview_scheduled';
+    } else if (isMatchedInTest) {
+      computedStatus = 'test_scheduled';
+    } else if (isWithdrawn) {
+      // 2. Candidate opted out / withdrawn and was not matched in any positive shortlist
       computedStatus = 'declined';
     } else if (selectionEmails.length > 0) {
-      // Final selection list is out!
-      if (isMatchedInSelectionList) {
-        computedStatus = 'selected';
-      } else if (isMatchedInTest || isMatchedInNextRound) {
-        // Candidate reached the test/interview stage, but was not selected in final list -> rejected
+      // Final selection list is out! Candidate was not selected
+      if (hasConfirmedRegistration) {
         computedStatus = 'rejected';
-      } else if (hasConfirmedRegistration) {
-        // Candidate applied, but was never shortlisted for test -> not_shortlisted
-        computedStatus = 'not_shortlisted';
       } else {
         computedStatus = 'not_applied';
       }
     } else if (nextRoundEmails.length > 0) {
-      // Next round / interview announcement is out!
-      if (isMatchedInNextRound) {
-        computedStatus = 'interview_scheduled';
-      } else if (isMatchedInTest) {
-        // Candidate took the test, but was not shortlisted for interview -> rejected (eliminated in test)
-        computedStatus = 'rejected';
-      } else if (hasConfirmedRegistration) {
-        // Candidate applied, but was never shortlisted for test -> not_shortlisted
+      // Next round / interview announcement is out! Candidate was not shortlisted for interview
+      if (hasConfirmedRegistration) {
         computedStatus = 'not_shortlisted';
       } else {
         computedStatus = 'not_applied';
       }
     } else if (testShortlistEmails.length > 0) {
       // Initial test schedule / screening shortlist
-      if (isMatchedInTest) {
-        computedStatus = 'test_scheduled';
-      } else if (hasConfirmedRegistration) {
-        // Check if this email had an explicit shortlist of candidates
+      if (hasConfirmedRegistration) {
         const isExplicitShortlist = testShortlistEmails.some((e) =>
           /shortlist|shortlisted candidates|students list|eligible candidates/i.test(
             `${e.subject || ''} ${e.body_snippet || ''}`
           )
         );
         if (isExplicitShortlist) {
-          // Candidate applied, but was cut at the shortlist round (never got to write the test)
           computedStatus = 'not_shortlisted';
         } else {
-          // General open test broadcast -> test_scheduled
           computedStatus = 'test_scheduled';
         }
       } else {
