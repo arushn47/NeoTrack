@@ -449,33 +449,10 @@ export async function performReprocess(userId: string) {
     } else if (isWithdrawn) {
       // 2. Candidate opted out / withdrawn and was not matched in any positive shortlist
       computedStatus = 'declined';
-    } else if (selectionEmails.length > 0) {
-      // Final selection list is out! Candidate was not selected
-      if (hasConfirmedRegistration) {
-        computedStatus = 'rejected';
-      } else {
-        computedStatus = 'not_applied';
-      }
-    } else if (nextRoundEmails.length > 0) {
-      // Next round / interview announcement is out! Candidate was not shortlisted for interview
+    } else if (selectionEmails.length > 0 || nextRoundEmails.length > 0 || testShortlistEmails.length > 0) {
+      // Test, next round, or selection emails were released, but candidate was NEVER matched in any shortlist!
       if (hasConfirmedRegistration) {
         computedStatus = 'not_shortlisted';
-      } else {
-        computedStatus = 'not_applied';
-      }
-    } else if (testShortlistEmails.length > 0) {
-      // Initial test schedule / screening shortlist
-      if (hasConfirmedRegistration) {
-        const isExplicitShortlist = testShortlistEmails.some((e) =>
-          /shortlist|shortlisted candidates|students list|eligible candidates/i.test(
-            `${e.subject || ''} ${e.body_snippet || ''}`
-          )
-        );
-        if (isExplicitShortlist) {
-          computedStatus = 'not_shortlisted';
-        } else {
-          computedStatus = 'test_scheduled';
-        }
       } else {
         computedStatus = 'not_applied';
       }
