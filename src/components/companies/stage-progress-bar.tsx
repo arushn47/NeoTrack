@@ -25,36 +25,53 @@ export interface StageProgressBarProps {
   status: string;
   events?: CompanyEventSummary[];
   className?: string;
+  interactive?: boolean;
+  onStageClick?: (stageIndex: number, stageId: string, suggestedStatus: string) => void;
 }
 
 const STAGES = [
-  { id: 'applied', label: 'Applied', icon: FileCheck2 },
-  { id: 'ppt', label: 'PPT', icon: Presentation },
-  { id: 'test', label: 'Online Test', icon: Code2 },
-  { id: 'interview', label: 'Interview', icon: Users2 },
-  { id: 'selected', label: 'Selected', icon: Award },
+  { id: 'applied', label: 'Applied', icon: FileCheck2, suggestedStatus: 'applied' },
+  { id: 'ppt', label: 'PPT', icon: Presentation, suggestedStatus: 'ppt_scheduled' },
+  { id: 'test', label: 'Online Test', icon: Code2, suggestedStatus: 'test_scheduled' },
+  { id: 'interview', label: 'Interview', icon: Users2, suggestedStatus: 'interview_scheduled' },
+  { id: 'selected', label: 'Selected', icon: Award, suggestedStatus: 'selected' },
 ];
 
 export default function StageProgressBar({
   status,
   events = [],
   className,
+  interactive = false,
+  onStageClick,
 }: StageProgressBarProps) {
   // Helper getters for event properties
   const getEventType = (e: CompanyEventSummary) => (e.event_type || e.eventType || '').toLowerCase();
   const getStartTime = (e: CompanyEventSummary) => e.start_time || e.startTime || null;
 
+  const handleNodeClick = (idx: number, stage: typeof STAGES[0]) => {
+    if (interactive && onStageClick) {
+      onStageClick(idx, stage.id, stage.suggestedStatus);
+    }
+  };
+
   // 1. Handle Negative Terminal States
   if (status === 'withdrawn' || status === 'declined') {
     return (
-      <div className={cn('p-2.5 rounded-xl bg-zinc-800/80 border border-zinc-700/50 text-xs flex items-center justify-between', className)}>
-        <span className="flex items-center gap-1.5 font-semibold text-zinc-400">
-          <LogOut className="w-3.5 h-3.5 text-zinc-400 flex-shrink-0" />
-          Opted Out
+      <div className={cn('p-3 rounded-2xl bg-zinc-900/60 border border-zinc-800 text-xs flex items-center justify-between', className)}>
+        <span className="flex items-center gap-2 font-semibold text-zinc-400">
+          <LogOut className="w-4 h-4 text-zinc-500 flex-shrink-0" />
+          Opted Out / Declined
         </span>
-        <span className="text-[11px] text-zinc-500 font-medium">
-          Drive Inactive
-        </span>
+        {interactive && (
+          <span className="text-[11px] text-indigo-400 font-medium cursor-pointer hover:underline" onClick={() => onStageClick?.(0, 'applied', 'applied')}>
+            Click to re-activate stage ›
+          </span>
+        )}
+        {!interactive && (
+          <span className="text-[11px] text-zinc-500 font-medium">
+            Drive Inactive
+          </span>
+        )}
       </div>
     );
   }
@@ -77,7 +94,6 @@ export default function StageProgressBar({
     let eliminatedText = '';
 
     if (status === 'rejected') {
-      // Reached and wrote test (or interview) -> failed that round
       if (interviewEvent) {
         furthestIdx = 2; // Passed applied, ppt, test
         eliminatedIdx = 3; // Failed interview
@@ -88,17 +104,16 @@ export default function StageProgressBar({
         eliminatedText = 'Wrote Test · Did Not Qualify';
       }
     } else {
-      // not_shortlisted - Applied but cut at initial shortlist / screening round
       furthestIdx = 0; // Passed applied only
       eliminatedIdx = 1; // Screened out at shortlist / PPT round
       eliminatedText = 'Out at Shortlist Round';
     }
 
     return (
-      <div className={cn('space-y-2 py-1', className)}>
+      <div className={cn('space-y-2.5 py-1', className)}>
         {/* Visual Stepper Bar with Red X at Elimination Stage */}
         <div className="relative flex items-center justify-between px-1">
-          <div className="absolute left-3 right-3 top-1/2 -translate-y-1/2 h-1 bg-border-default rounded-full z-0" />
+          <div className="absolute left-3 right-3 top-1/2 -translate-y-1/2 h-1 bg-zinc-800 rounded-full z-0" />
           <div
             className="absolute left-3 top-1/2 -translate-y-1/2 h-1 bg-rose-500/80 rounded-full z-0 transition-all duration-300"
             style={{ width: `${eliminatedIdx * 25}%` }}
@@ -109,23 +124,32 @@ export default function StageProgressBar({
             const isPassed = idx <= furthestIdx && !isEliminated;
 
             return (
-              <div key={stage.id} className="relative z-10 flex flex-col items-center group">
+              <div
+                key={stage.id}
+                onClick={() => handleNodeClick(idx, stage)}
+                className={cn(
+                  'relative z-10 flex flex-col items-center group',
+                  interactive && 'cursor-pointer select-none'
+                )}
+                title={interactive ? `Click to set stage to ${stage.label}` : stage.label}
+              >
                 <div
                   className={cn(
-                    'w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold transition-all',
+                    'w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold transition-all duration-200',
                     isPassed && 'bg-emerald-500 text-white shadow-sm shadow-emerald-500/30',
                     isEliminated
                       ? 'bg-rose-500 text-white ring-4 ring-rose-500/20 scale-110 shadow-sm shadow-rose-500/50'
-                      : !isPassed && 'bg-bg-elevated text-text-tertiary border border-border-default'
+                      : !isPassed && 'bg-bg-elevated text-text-tertiary border border-border-default',
+                    interactive && 'group-hover:scale-125 group-hover:ring-4 group-hover:ring-indigo-500/40'
                   )}
-                  title={stage.label}
                 >
                   {isPassed ? '✓' : isEliminated ? '✕' : idx + 1}
                 </div>
                 <span
                   className={cn(
-                    'text-[9px] font-semibold mt-1 whitespace-nowrap',
-                    isPassed ? 'text-emerald-400 font-medium' : isEliminated ? 'text-rose-400 font-bold' : 'text-text-tertiary'
+                    'text-[9px] font-semibold mt-1 whitespace-nowrap transition-colors',
+                    isPassed ? 'text-emerald-400 font-medium' : isEliminated ? 'text-rose-400 font-bold' : 'text-text-tertiary',
+                    interactive && 'group-hover:text-white'
                   )}
                 >
                   {stage.label}
@@ -150,14 +174,20 @@ export default function StageProgressBar({
 
   if (status === 'not_applied') {
     return (
-      <div className={cn('p-2.5 rounded-xl bg-slate-800/40 border border-slate-700/40 text-xs flex items-center justify-between', className)}>
-        <span className="flex items-center gap-1.5 font-medium text-slate-300">
-          <Presentation className="w-3.5 h-3.5 text-slate-400 flex-shrink-0" />
+      <div className={cn('p-3 rounded-2xl bg-zinc-900/60 border border-zinc-800 text-xs flex items-center justify-between', className)}>
+        <span className="flex items-center gap-2 font-semibold text-zinc-400">
+          <Presentation className="w-4 h-4 text-zinc-500 flex-shrink-0" />
           Drive Announced
         </span>
-        <span className="text-[11px] text-slate-400 font-medium">
-          Not Applied
-        </span>
+        {interactive ? (
+          <span className="text-[11px] text-indigo-400 font-medium cursor-pointer hover:underline" onClick={() => onStageClick?.(0, 'applied', 'applied')}>
+            Click to mark Applied ›
+          </span>
+        ) : (
+          <span className="text-[11px] text-zinc-500 font-medium">
+            Not Applied
+          </span>
+        )}
       </div>
     );
   }
@@ -181,9 +211,20 @@ export default function StageProgressBar({
     if (isTestInPast) {
       stageStatusText = 'Test Completed · Awaiting Results';
     } else {
-      stageStatusText = testStartTime
-        ? `Test: ${testStartTime.toLocaleDateString([], { month: 'short', day: 'numeric' })} @ ${testStartTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`
-        : 'Shortlisted for Test 🎉';
+      if (testStartTime) {
+        const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+        const monthName = months[testStartTime.getMonth()];
+        const day = testStartTime.getDate();
+        let hours = testStartTime.getHours();
+        const minutes = String(testStartTime.getMinutes()).padStart(2, '0');
+        const ampm = hours >= 12 ? 'PM' : 'AM';
+        hours = hours % 12;
+        hours = hours ? hours : 12;
+        const hourStr = String(hours).padStart(2, '0');
+        stageStatusText = `Test: ${monthName} ${day} @ ${hourStr}:${minutes} ${ampm}`;
+      } else {
+        stageStatusText = 'Shortlisted for Test 🎉';
+      }
     }
   } else if (status === 'ppt_scheduled' || pptEvent) {
     currentStageIndex = 1;
@@ -194,34 +235,41 @@ export default function StageProgressBar({
   }
 
   return (
-    <div className={cn('space-y-2 py-1', className)}>
+    <div className={cn('space-y-2.5 py-1', className)}>
       {/* Visual Stepper Bar */}
       <div className="relative flex items-center justify-between px-1">
         {/* Background track */}
-        <div className="absolute left-3 right-3 top-1/2 -translate-y-1/2 h-1 bg-border-default rounded-full z-0" />
+        <div className="absolute top-1/2 left-3 right-3 h-1 -translate-y-1/2 bg-zinc-800 rounded-full z-0" />
 
-        {/* Active filled track */}
+        {/* Active progress track */}
         <div
-          className="absolute left-3 top-1/2 -translate-y-1/2 h-1 bg-gradient-to-r from-accent to-cyan-400 rounded-full transition-all duration-300 z-0"
+          className="absolute top-1/2 left-3 h-1 -translate-y-1/2 bg-indigo-500 rounded-full transition-all duration-500 z-0"
           style={{ width: `${(currentStageIndex / (STAGES.length - 1)) * 100}%` }}
         />
 
-        {/* Steps */}
         {STAGES.map((stage, idx) => {
           const isCompleted = idx < currentStageIndex;
           const isCurrent = idx === currentStageIndex;
           const isPending = idx > currentStageIndex;
 
           return (
-            <div key={stage.id} className="relative z-10 flex flex-col items-center group">
+            <div
+              key={stage.id}
+              onClick={() => handleNodeClick(idx, stage)}
+              className={cn(
+                'relative z-10 flex flex-col items-center group',
+                interactive && 'cursor-pointer select-none'
+              )}
+              title={interactive ? `Click to set stage to ${stage.label}` : stage.label}
+            >
               <div
                 className={cn(
-                  'w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold transition-all',
-                  isCurrent && 'bg-accent text-white ring-4 ring-accent/20 scale-110 shadow-sm shadow-accent/50 animate-pulse',
+                  'w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold transition-all duration-200',
+                  isCurrent && 'bg-indigo-600 text-white ring-4 ring-indigo-500/25 scale-110 shadow-md shadow-indigo-600/40',
                   isCompleted && 'bg-emerald-500 text-white shadow-sm shadow-emerald-500/30',
-                  isPending && 'bg-bg-elevated text-text-tertiary border border-border-default'
+                  isPending && 'bg-[#181824] text-zinc-400 border border-zinc-700 hover:border-zinc-500',
+                  interactive && 'group-hover:scale-125 group-hover:ring-4 group-hover:ring-indigo-500/40'
                 )}
-                title={stage.label}
               >
                 {isCompleted ? '✓' : idx + 1}
               </div>
@@ -229,10 +277,11 @@ export default function StageProgressBar({
                 className={cn(
                   'text-[9px] font-semibold mt-1 whitespace-nowrap transition-colors',
                   isCurrent
-                    ? 'text-accent font-bold'
+                    ? 'text-indigo-400 font-bold'
                     : isCompleted
                     ? 'text-emerald-400 font-medium'
-                    : 'text-text-tertiary'
+                    : 'text-zinc-500',
+                  interactive && 'group-hover:text-white'
                 )}
               >
                 {stage.label}
@@ -243,18 +292,19 @@ export default function StageProgressBar({
       </div>
 
       {/* Stage Context Text Helper */}
-      <div className="flex items-center justify-between text-[11px] pt-1.5 border-t border-border-default/40">
-        <span className="text-text-secondary font-medium">
+      <div className="flex items-center justify-between text-[11px] pt-1.5 border-t border-zinc-800/80">
+        <span className="text-zinc-400 font-medium">
           Stage {currentStageIndex + 1} of 5:{' '}
-          <strong className="text-text-primary">{STAGES[currentStageIndex].label}</strong>
+          <strong className="text-white">{STAGES[currentStageIndex].label}</strong>
         </span>
         <span
+          suppressHydrationWarning
           className={cn(
             'font-semibold text-[11px]',
             isTestInPast && currentStageIndex === 2
               ? 'text-cyan-400'
               : status === 'shortlisted'
-              ? 'text-accent'
+              ? 'text-indigo-400'
               : status === 'selected'
               ? 'text-green-400'
               : 'text-amber-400'

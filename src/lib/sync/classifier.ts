@@ -41,6 +41,18 @@ interface ClassificationRule {
 }
 
 const CLASSIFICATION_RULES: ClassificationRule[] = [
+  // --- NON-PLACEMENT / PROMOTIONAL SENDER FILTER ---
+  {
+    classification: 'irrelevant',
+    confidence: 'high',
+    match: (s, b, sender) =>
+      /bookmyshow|pinterest|manutd|netflix|spotify|quora|chess\.com|myntra|plumgoodness|truecaller|dribbble|rockstargames|ifttt|openrouter|emergent\.sh|resumeworded|insideapple|mygate|newsgram\.hp|digital\.metamail|cron-job|vercel|onlinegdb/i.test(
+        sender
+      ) ||
+      (/bookmyshow/i.test(s + ' ' + b) && !/placement|vitbhopal|cdc/i.test(sender)),
+    reason: 'Non-placement marketing, entertainment, or personal newsletter sender',
+  },
+
   // --- HIGH CONFIDENCE ---
   {
     classification: 'shortlist',
@@ -507,6 +519,16 @@ export function extractCompanyName(
   bodySnippet?: string,
   receivedAt?: Date | string
 ): string | null {
+  // 0. Immediately reject non-placement / marketing / personal senders
+  if (
+    /bookmyshow|pinterest|manutd|netflix|spotify|quora|chess\.com|myntra|plumgoodness|truecaller|dribbble|rockstargames|ifttt|openrouter|emergent\.sh|resumeworded|insideapple|mygate|newsgram\.hp|digital\.metamail|cron-job|vercel|onlinegdb/i.test(
+      _senderEmail || ''
+    ) ||
+    (/bookmyshow/i.test(subject + ' ' + (bodySnippet || '')) && !/placement|vitbhopal|cdc/i.test(_senderEmail || ''))
+  ) {
+    return null;
+  }
+
   // 1. Ignore generic coursework, practice tests, mock tests, codeathons, portal invites
   if (
     /you\s+are\s+invited|invited\s+to\s+join|assessment\s+portal|mock\s+test|practice\s+(?:test|assessment)|codeathon|nerd\s+season|learning\s+contents|you\s+have\s+been\s+enrolled|complete\s+today/i.test(
@@ -562,12 +584,16 @@ export function extractCompanyName(
       return 'Honeywell Technology Solutions Lab';
     }
   }
-  // Disambiguate Apple SDET vs Apple SRE
-  const isAppleEmail =
-    /\bapple\b/i.test(lowerCleaned) ||
-    /\bapple\b/i.test(lowerBody);
 
-  if (isAppleEmail) {
+  // Disambiguate Apple SDET vs Apple SRE
+  // Must be an actual placement email about Apple (not just an app store link or marketing newsletter)
+  const isApplePlacementSubject = /\bapple\b/i.test(lowerCleaned) && !/insideapple|apple\s+store|app\s+store/i.test(lowerCleaned);
+  const isApplePlacementBody =
+    /\bapple\b/i.test(lowerBody) &&
+    /\b(?:super\s+dream|placement|internship|hiring|shortlist|sdet|sre|cdc|vitbhopal|neopat|coderpad)\b/i.test(lowerBody) &&
+    !/bookmyshow|pinterest|insideapple|apple\s+store|app\s+store/i.test(_senderEmail || '');
+
+  if (isApplePlacementSubject || isApplePlacementBody) {
     if (lowerCleaned.includes('sdet') || lowerBody.includes('sdet') || lowerBody.includes('lc102') || lowerBody.includes('lc 102')) {
       return 'Apple SDET';
     }

@@ -263,12 +263,73 @@ export default function CompanyDetailClient({ company }: CompanyDetailClientProp
       </div>
 
       {/* Hiring Process Pipeline Stepper */}
-      <div className="p-6 bg-[#101018]/90 backdrop-blur-2xl border border-zinc-800/80 rounded-3xl shadow-xl shadow-black/20">
-        <h3 className="text-xs font-bold text-zinc-400 uppercase tracking-wider mb-3 flex items-center gap-2">
-          <Sparkles className="w-3.5 h-3.5 text-indigo-400" />
-          Hiring Pipeline Progression
-        </h3>
-        <StageProgressBar status={status} events={company.events} className="py-2" />
+      <div className="p-6 bg-[#101018]/90 backdrop-blur-2xl border border-zinc-800/80 rounded-3xl shadow-xl shadow-black/20 space-y-4">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-zinc-800/60 pb-3">
+          <div>
+            <h3 className="text-xs font-bold text-zinc-300 uppercase tracking-wider flex items-center gap-2">
+              <Sparkles className="w-3.5 h-3.5 text-indigo-400" />
+              Hiring Pipeline Progression
+            </h3>
+            <p className="text-[11px] text-zinc-500 mt-0.5">
+              Click on any stage circle or use the quick buttons below to freely adjust your pipeline stage.
+            </p>
+          </div>
+
+          {company.application?.manualOverride && (
+            <div className="flex items-center gap-2 self-start sm:self-center">
+              <span className="text-[10px] font-bold text-amber-400 bg-amber-500/10 border border-amber-500/20 px-2.5 py-1 rounded-xl">
+                Manual Override Active
+              </span>
+            </div>
+          )}
+        </div>
+
+        {/* Clickable Stepper Bar */}
+        <StageProgressBar
+          status={status}
+          events={company.events}
+          interactive
+          onStageClick={(_idx, _id, suggestedStatus) => handleStatusChange(suggestedStatus)}
+          className="py-1"
+        />
+
+        {/* Interactive Quick Stage Override Selector */}
+        <div className="pt-2 border-t border-zinc-800/60 space-y-2">
+          <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider block">
+            Quick Stage Switcher:
+          </span>
+
+          <div className="flex flex-wrap items-center gap-1.5">
+            {[
+              { value: 'applied', label: '1. Applied', activeBg: 'bg-zinc-800 text-white border-zinc-600' },
+              { value: 'ppt_scheduled', label: '2. PPT', activeBg: 'bg-blue-500/20 text-blue-300 border-blue-500/40' },
+              { value: 'test_scheduled', label: '3. Online Test', activeBg: 'bg-amber-500/20 text-amber-300 border-amber-500/40' },
+              { value: 'interview_scheduled', label: '4. Interview', activeBg: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40' },
+              { value: 'selected', label: '5. Selected 🎉', activeBg: 'bg-green-500/20 text-green-300 border-green-500/40' },
+              { value: 'not_shortlisted', label: 'Not Shortlisted', activeBg: 'bg-rose-500/20 text-rose-300 border-rose-500/40' },
+              { value: 'rejected', label: 'Eliminated in Test', activeBg: 'bg-red-500/20 text-red-300 border-red-500/40' },
+              { value: 'declined', label: 'Declined / Opted Out', activeBg: 'bg-zinc-800 text-zinc-300 border-zinc-600' },
+            ].map((btn) => {
+              const isCurrent = status === btn.value;
+              return (
+                <button
+                  key={btn.value}
+                  disabled={isUpdating}
+                  onClick={() => handleStatusChange(btn.value)}
+                  className={cn(
+                    'px-3 py-1.5 rounded-xl text-xs font-semibold border transition-all active:scale-95 flex items-center gap-1.5',
+                    isCurrent
+                      ? `${btn.activeBg} ring-2 ring-indigo-500/40 shadow-sm font-bold`
+                      : 'bg-zinc-950/60 hover:bg-zinc-900 text-zinc-400 hover:text-zinc-200 border-zinc-800'
+                  )}
+                >
+                  {isCurrent && <CheckCircle2 className="w-3 h-3 text-indigo-400" />}
+                  <span>{btn.label}</span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
       </div>
 
       {/* Tabs Header */}

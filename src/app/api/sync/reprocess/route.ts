@@ -264,6 +264,16 @@ export async function performReprocess(userId: string) {
             continue;
           }
 
+          // Guard: Never cross-match Apple SDET and Apple SRE
+          if (
+            (neoName.includes('sdet') && normalized.includes('sre')) ||
+            (neoName.includes('sre') && normalized.includes('sdet')) ||
+            (!neoName.includes('sdet') && !neoName.includes('sre') && (normalized.includes('sdet') || normalized.includes('sre'))) ||
+            (!normalized.includes('sdet') && !normalized.includes('sre') && (neoName.includes('sdet') || neoName.includes('sre')))
+          ) {
+            continue;
+          }
+
           if (neoName.length >= 4 && normalized.length >= 4) {
             if (neoName === normalized || neoName.includes(normalized) || normalized.includes(neoName)) {
               matchedCompanyId = comp.id;
