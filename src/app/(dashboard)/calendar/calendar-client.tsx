@@ -145,6 +145,7 @@ export default function CalendarClient({ events }: CalendarClientProps) {
 
   const [currentDate, setCurrentDate] = useState(() => new Date());
   const [selectedDateStr, setSelectedDateStr] = useState(() => toDateStr(new Date()));
+  const [modalDateStr, setModalDateStr] = useState<string | null>(null);
   const [showPastEvents, setShowPastEvents] = useState(false);
   const [viewMode, setViewMode] = useState<'month' | 'timeline'>('month');
 
@@ -286,9 +287,9 @@ export default function CalendarClient({ events }: CalendarClientProps) {
               {calendarDays.map((d, idx) => {
                 const dayEvents = eventsByDate.get(d.dateString) || [];
                 const isToday = d.dateString === todayStr;
-                const isSelected = d.dateString === selectedDateStr;
+                const isSelected = d.dateString === modalDateStr;
                 return (
-                  <div key={idx} onClick={() => setSelectedDateStr(isSelected ? '' : d.dateString)} className={cn('min-h-[90px] p-2 cursor-pointer transition-all', !d.isCurrentMonth && 'opacity-30', isSelected && 'bg-indigo-500/5', d.isCurrentMonth && 'hover:bg-zinc-900/50')}>
+                  <div key={idx} onClick={() => dayEvents.length > 0 && setModalDateStr(d.dateString)} className={cn('min-h-[90px] p-2 transition-all', !d.isCurrentMonth && 'opacity-30', isSelected && 'bg-indigo-500/5', dayEvents.length > 0 ? 'cursor-pointer hover:bg-zinc-900/50' : 'cursor-default')}>
                     <div className="flex items-center justify-between mb-1">
                       <span className={cn('w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold', isToday ? 'bg-indigo-600 text-white' : 'text-zinc-300 hover:bg-zinc-800')}>{d.dayNumber}</span>
                       {dayEvents.length > 0 && <span className="text-[9px] font-bold text-zinc-500">{dayEvents.length}</span>}
@@ -353,24 +354,56 @@ export default function CalendarClient({ events }: CalendarClientProps) {
             </div>
           </div>
 
-          {/* Desktop: selected day peek */}
-          {selectedDateStr && (eventsByDate.get(selectedDateStr) || []).length > 0 && (
-            <div className="hidden md:block mt-4 bg-[#101018]/90 border border-zinc-800/80 rounded-2xl p-5">
-              <div className="flex items-center justify-between mb-4">
-                <div>
-                  <p className="text-xs font-bold text-zinc-500 uppercase tracking-wider">{new Date(selectedDateStr + 'T00:00:00').toLocaleDateString('en-IN', { weekday: 'long' })}</p>
-                  <h3 className="text-base font-extrabold text-white">
-                    {new Date(selectedDateStr + 'T00:00:00').toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric' })}
-                    {selectedDateStr === todayStr && <span className="ml-2 text-xs font-bold text-indigo-400 bg-indigo-500/10 border border-indigo-500/20 px-2 py-0.5 rounded-full">Today</span>}
-                  </h3>
+          {/* Desktop: Day detail modal */}
+          {modalDateStr && (() => {
+            const modalEvents = (eventsByDate.get(modalDateStr) || []).sort((a, b) =>
+              new Date(a.startTime || 0).getTime() - new Date(b.startTime || 0).getTime()
+            );
+            const modalDate = new Date(modalDateStr + 'T00:00:00');
+            return (
+              <div
+                className="hidden md:flex fixed inset-0 z-50 items-center justify-center p-6 bg-black/70 backdrop-blur-md"
+                onClick={() => setModalDateStr(null)}
+              >
+                <div
+                  className="bg-[#0e0e16]/98 border border-zinc-800 rounded-3xl w-full max-w-2xl shadow-2xl shadow-black/60 overflow-hidden"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  {/* Modal Header */}
+                  <div className="flex items-center justify-between px-6 pt-6 pb-4 border-b border-zinc-800/80">
+                    <div className="flex items-center gap-4">
+                      <div className="w-12 h-12 rounded-2xl bg-indigo-500/10 border border-indigo-500/25 flex items-center justify-center text-indigo-400 font-extrabold text-xl">
+                        {modalDate.getDate()}
+                      </div>
+                      <div>
+                        <p className="text-xs font-bold text-zinc-500 uppercase tracking-wider">
+                          {modalDate.toLocaleDateString('en-IN', { weekday: 'long' })}
+                        </p>
+                        <h3 className="text-lg font-extrabold text-white">
+                          {modalDate.toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric' })}
+                        </h3>
+                        <span className="text-[11px] font-semibold text-indigo-400 bg-indigo-500/10 border border-indigo-500/20 px-2 py-0.5 rounded-full">
+                          {modalEvents.length} placement event{modalEvents.length !== 1 ? 's' : ''}
+                        </span>
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => setModalDateStr(null)}
+                      className="p-2 rounded-xl text-zinc-400 hover:text-white hover:bg-zinc-800 transition-colors"
+                    >
+                      <X className="w-5 h-5" />
+                    </button>
+                  </div>
+                  {/* Event cards */}
+                  <div className="p-5 space-y-2.5 max-h-[60vh] overflow-y-auto">
+                    {modalEvents.map((evt) => (
+                      <EventCard key={evt.id} evt={evt} onClose={() => setModalDateStr(null)} />
+                    ))}
+                  </div>
                 </div>
-                <button onClick={() => setSelectedDateStr('')} className="p-1.5 rounded-xl text-zinc-500 hover:text-white hover:bg-zinc-800 transition-colors"><X className="w-4 h-4" /></button>
               </div>
-              <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
-                {(eventsByDate.get(selectedDateStr) || []).map((evt) => <EventCard key={evt.id} evt={evt} onClose={() => setSelectedDateStr('')} />)}
-              </div>
-            </div>
-          )}
+            );
+          })()}
         </>
       )}
 
