@@ -139,11 +139,12 @@ function EventCard({ evt, onClose }: { evt: CalendarEvent; onClose?: () => void 
 }
 
 export default function CalendarClient({ events }: CalendarClientProps) {
+  // Compute today on client-side only to avoid SSR/hydration mismatch
   const today = useMemo(() => new Date(), []);
   const todayStr = useMemo(() => toDateStr(today), [today]);
 
-  const [currentDate, setCurrentDate] = useState(today);
-  const [selectedDateStr, setSelectedDateStr] = useState(todayStr);
+  const [currentDate, setCurrentDate] = useState(() => new Date());
+  const [selectedDateStr, setSelectedDateStr] = useState(() => toDateStr(new Date()));
   const [showPastEvents, setShowPastEvents] = useState(false);
   const [viewMode, setViewMode] = useState<'month' | 'timeline'>('month');
 
@@ -182,7 +183,9 @@ export default function CalendarClient({ events }: CalendarClientProps) {
   }, [year, month]);
 
   const weekDays = useMemo(() => {
-    const selected = new Date(selectedDateStr + 'T00:00:00');
+    // Guard against empty or invalid selectedDateStr (e.g. '' or 'NaN-NaN-NaN')
+    const parsed = new Date(selectedDateStr + 'T00:00:00');
+    const selected = isNaN(parsed.getTime()) ? new Date() : parsed;
     const startOfWeek = new Date(selected);
     startOfWeek.setDate(selected.getDate() - selected.getDay());
     return Array.from({ length: 7 }, (_, i) => {
