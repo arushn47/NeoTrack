@@ -337,23 +337,28 @@ export default function CalendarClient({ events }: CalendarClientProps) {
                     });
                   }}
                   className={cn(
-                    'min-h-[120px] p-2.5 flex flex-col justify-between transition-all cursor-pointer group select-none',
+                    'min-h-[120px] p-2.5 flex flex-col justify-between transition-colors cursor-pointer group select-none relative',
                     d.isCurrentMonth
-                      ? 'bg-[#101018] hover:bg-zinc-900/80 hover:shadow-inner'
-                      : 'bg-zinc-950/40 opacity-35 hover:opacity-75',
-                    isToday && 'ring-2 ring-inset ring-indigo-500/80 bg-indigo-500/5'
+                      ? 'bg-[#101018] hover:bg-zinc-900/60'
+                      : 'bg-zinc-950/40 opacity-30 hover:opacity-60',
+                    isToday && 'bg-indigo-500/[0.06]'
                   )}
                 >
+                  {/* Today Top Indicator Line */}
+                  {isToday && (
+                    <div className="absolute top-0 left-0 right-0 h-0.5 bg-indigo-500" />
+                  )}
+
                   {/* Date Number Header */}
                   <div className="flex items-center justify-between pointer-events-none">
                     <span
                       className={cn(
-                        'text-xs font-bold w-6 h-6 rounded-full flex items-center justify-center font-mono transition-transform group-hover:scale-110',
+                        'text-xs font-bold w-6 h-6 rounded-full flex items-center justify-center font-mono transition-colors',
                         isToday
-                          ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/40'
+                          ? 'bg-indigo-600 text-white shadow-sm shadow-indigo-600/30'
                           : dayEvents.length > 0
-                          ? 'bg-zinc-800 text-white font-extrabold'
-                          : 'text-zinc-400'
+                          ? 'bg-zinc-800 text-white font-extrabold group-hover:bg-zinc-700'
+                          : 'text-zinc-400 group-hover:text-zinc-200'
                       )}
                     >
                       {d.dayNumber}
@@ -380,10 +385,9 @@ export default function CalendarClient({ events }: CalendarClientProps) {
                           });
                         }}
                         className={cn(
-                          'w-full text-left px-2 py-1 rounded-lg border text-[11px] font-semibold truncate block transition-all hover:scale-[1.02] shadow-sm',
+                          'w-full text-left px-2 py-1 rounded-lg border text-[11px] font-semibold truncate block transition-all hover:brightness-110 active:scale-[0.98] shadow-sm cursor-pointer',
                           getEventBadgeColor(evt.eventType)
                         )}
-                        title={evt.title || evt.eventType}
                       >
                         <span>{formatChipText(evt)}</span>
                       </div>
