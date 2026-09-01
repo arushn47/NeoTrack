@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useRef } from 'react';
 import Link from 'next/link';
 import {
   Calendar as CalendarIcon,
@@ -9,17 +9,12 @@ import {
   ChevronDown,
   Clock,
   MapPin,
-  Building2,
-  ExternalLink,
   X,
-  Sparkles,
-  LayoutGrid,
-  List,
   Zap,
   CalendarCheck,
+  ExternalLink,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { formatDateTime } from '@/lib/utils';
 import { EVENT_TYPE_LABELS, EVENT_TYPE_COLORS } from '@/constants/event-types';
 import type { EventType } from '@/constants/event-types';
 
@@ -39,688 +34,385 @@ interface CalendarClientProps {
   events: CalendarEvent[];
 }
 
+const toDateStr = (d: Date) => {
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
+  return `${yyyy}-${mm}-${dd}`;
+};
+
+const MONTH_NAMES = [
+  'January','February','March','April','May','June',
+  'July','August','September','October','November','December',
+];
+const DAY_SHORT = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+
+function getBadgeColor(eventType: string) {
+  const map: Record<string, string> = {
+    ppt: 'bg-blue-500/15 text-blue-300 border-blue-500/30',
+    online_test: 'bg-amber-500/15 text-amber-300 border-amber-500/30',
+    coding_test: 'bg-orange-500/15 text-orange-300 border-orange-500/30',
+    technical_interview: 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30',
+    hr_interview: 'bg-teal-500/15 text-teal-300 border-teal-500/30',
+    final_interview: 'bg-green-500/15 text-green-300 border-green-500/30',
+    registration_deadline: 'bg-red-500/15 text-red-300 border-red-500/30',
+  };
+  return map[eventType] || 'bg-zinc-800 text-zinc-300 border-zinc-700';
+}
+
+function getDotColor(eventType: string) {
+  const map: Record<string, string> = {
+    ppt: 'bg-blue-400',
+    online_test: 'bg-amber-400',
+    coding_test: 'bg-orange-400',
+    technical_interview: 'bg-emerald-400',
+    hr_interview: 'bg-teal-400',
+    final_interview: 'bg-green-400',
+    registration_deadline: 'bg-red-400',
+  };
+  return map[eventType] || 'bg-indigo-400';
+}
+
+function formatTime(iso: string) {
+  const d = new Date(iso);
+  let h = d.getHours();
+  const m = String(d.getMinutes()).padStart(2, '0');
+  const ampm = h >= 12 ? 'pm' : 'am';
+  h = h % 12 || 12;
+  return `${h}:${m} ${ampm}`;
+}
+
+function EventCard({ evt, onClose }: { evt: CalendarEvent; onClose?: () => void }) {
+  const gcalUrl = evt.startTime
+    ? `https://calendar.google.com/calendar/render?action=TEMPLATE&text=${encodeURIComponent(evt.title || 'Placement Event')}&dates=${new Date(evt.startTime).toISOString().replace(/-|:|\.\d+/g, '')}/${new Date(new Date(evt.startTime).getTime() + 3600000).toISOString().replace(/-|:|\.\d+/g, '')}&location=${encodeURIComponent(evt.venue || 'VIT Campus / Online')}`
+    : null;
+  return (
+    <div className="flex items-start gap-3 p-3.5 bg-zinc-900/70 hover:bg-zinc-900 rounded-2xl border border-zinc-800/70 hover:border-zinc-700 transition-all group">
+      <div className={cn('w-1 self-stretch rounded-full flex-shrink-0', getDotColor(evt.eventType))} />
+      <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-indigo-500/20 to-violet-500/20 border border-indigo-500/25 flex items-center justify-center text-indigo-300 font-extrabold text-base flex-shrink-0">
+        {evt.companyName.charAt(0)}
+      </div>
+      <div className="flex-1 min-w-0">
+        <div className="flex items-start justify-between gap-2">
+          <div className="min-w-0">
+            <p className="text-sm font-bold text-white group-hover:text-indigo-300 transition-colors leading-tight truncate">
+              {evt.companyName}
+            </p>
+            <span className={cn('inline-block mt-0.5 px-1.5 py-0.5 rounded-md text-[9px] font-bold uppercase tracking-wider border', getBadgeColor(evt.eventType))}>
+              {EVENT_TYPE_LABELS[evt.eventType as EventType] || evt.eventType.replace(/_/g, ' ')}
+            </span>
+          </div>
+          {evt.startTime && (
+            <span className="text-[11px] font-bold text-zinc-300 font-mono flex-shrink-0 bg-zinc-800/60 px-2 py-1 rounded-lg border border-zinc-700/50">
+              {formatTime(evt.startTime)}
+            </span>
+          )}
+        </div>
+        {(evt.venue || evt.mode) && (
+          <div className="flex items-center gap-1.5 mt-1.5 text-[11px] text-zinc-500">
+            <MapPin className="w-3 h-3 text-emerald-400 flex-shrink-0" />
+            <span className="truncate">{[evt.venue, evt.mode !== 'unknown' ? evt.mode : null].filter(Boolean).join(' · ')}</span>
+          </div>
+        )}
+        <div className="flex items-center gap-2 mt-2.5">
+          <Link
+            href={`/companies/${evt.companyId}`}
+            onClick={onClose}
+            className="text-[11px] font-semibold text-indigo-400 hover:text-indigo-300 flex items-center gap-1 transition-colors"
+          >
+            View Drive <ExternalLink className="w-3 h-3" />
+          </Link>
+          {gcalUrl && (
+            <a
+              href={gcalUrl}
+              target="_blank"
+              rel="noreferrer"
+              className="ml-auto text-[11px] font-semibold text-zinc-400 hover:text-white flex items-center gap-1 transition-colors"
+            >
+              <CalendarIcon className="w-3 h-3" /> + Calendar
+            </a>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function CalendarClient({ events }: CalendarClientProps) {
-  const [currentDate, setCurrentDate] = useState(new Date());
-  const [selectedEvent, setSelectedEvent] = useState<CalendarEvent | null>(null);
-  const [viewMode, setViewMode] = useState<'grid' | 'timeline'>('grid');
-  const [selectedEventType, setSelectedEventType] = useState<'all' | 'test' | 'interview' | 'ppt' | 'deadline'>('all');
+  const today = useMemo(() => new Date(), []);
+  const todayStr = useMemo(() => toDateStr(today), [today]);
+
+  const [currentDate, setCurrentDate] = useState(today);
+  const [selectedDateStr, setSelectedDateStr] = useState(todayStr);
   const [showPastEvents, setShowPastEvents] = useState(false);
+  const [viewMode, setViewMode] = useState<'month' | 'timeline'>('month');
 
   const year = currentDate.getFullYear();
   const month = currentDate.getMonth();
 
-  // Calendar month days calculation
-  const calendarDays = useMemo(() => {
-    const firstDayOfMonth = new Date(year, month, 1).getDay();
-    const daysInMonth = new Date(year, month + 1, 0).getDate();
-    const daysInPrevMonth = new Date(year, month, 0).getDate();
-
-    const days: { dayNumber: number; isCurrentMonth: boolean; dateString: string }[] = [];
-
-    // Prev month padding
-    for (let i = firstDayOfMonth - 1; i >= 0; i--) {
-      const d = daysInPrevMonth - i;
-      const prevDate = new Date(year, month - 1, d);
-      days.push({
-        dayNumber: d,
-        isCurrentMonth: false,
-        dateString: prevDate.toISOString().split('T')[0],
-      });
-    }
-
-    // Current month days
-    for (let i = 1; i <= daysInMonth; i++) {
-      const currDate = new Date(year, month, i);
-      const yyyy = currDate.getFullYear();
-      const mm = String(currDate.getMonth() + 1).padStart(2, '0');
-      const dd = String(currDate.getDate()).padStart(2, '0');
-      days.push({
-        dayNumber: i,
-        isCurrentMonth: true,
-        dateString: `${yyyy}-${mm}-${dd}`,
-      });
-    }
-
-    // Next month padding to fill complete grid of 35 or 42
-    const totalSlots = days.length <= 35 ? 35 : 42;
-    const remaining = totalSlots - days.length;
-    for (let i = 1; i <= remaining; i++) {
-      const nextDate = new Date(year, month + 1, i);
-      const yyyy = nextDate.getFullYear();
-      const mm = String(nextDate.getMonth() + 1).padStart(2, '0');
-      const dd = String(nextDate.getDate()).padStart(2, '0');
-      days.push({
-        dayNumber: i,
-        isCurrentMonth: false,
-        dateString: `${yyyy}-${mm}-${dd}`,
-      });
-    }
-
-    return days;
-  }, [year, month]);
-
-  const filteredEvents = useMemo(() => {
-    if (selectedEventType === 'all') return events;
-    if (selectedEventType === 'test') {
-      return events.filter((e) => ['online_test', 'coding_test'].includes(e.eventType));
-    }
-    if (selectedEventType === 'interview') {
-      return events.filter((e) => ['technical_interview', 'hr_interview', 'final_interview'].includes(e.eventType));
-    }
-    if (selectedEventType === 'ppt') {
-      return events.filter((e) => e.eventType === 'ppt');
-    }
-    if (selectedEventType === 'deadline') {
-      return events.filter((e) => e.eventType === 'registration_deadline');
-    }
-    return events;
-  }, [events, selectedEventType]);
-
   const eventsByDate = useMemo(() => {
     const map = new Map<string, CalendarEvent[]>();
-    for (const evt of filteredEvents) {
+    for (const evt of events) {
       if (evt.startTime) {
-        const d = new Date(evt.startTime);
-        const yyyy = d.getFullYear();
-        const mm = String(d.getMonth() + 1).padStart(2, '0');
-        const dd = String(d.getDate()).padStart(2, '0');
-        const key = `${yyyy}-${mm}-${dd}`;
+        const key = toDateStr(new Date(evt.startTime));
         if (!map.has(key)) map.set(key, []);
         map.get(key)!.push(evt);
       }
     }
     return map;
-  }, [filteredEvents]);
+  }, [events]);
 
-  const [selectedDayData, setSelectedDayData] = useState<{
-    dateString: string;
-    dayNumber: number;
-    date: Date;
-    events: CalendarEvent[];
-  } | null>(null);
-
-  const formatChipText = (evt: CalendarEvent) => {
-    let cleanTitle = evt.title || evt.eventType;
-    if (cleanTitle.toLowerCase().startsWith(evt.companyName.toLowerCase())) {
-      cleanTitle = cleanTitle.slice(evt.companyName.length).replace(/^[\s\-–—:]+/, '').trim();
+  const calendarDays = useMemo(() => {
+    const firstDay = new Date(year, month, 1).getDay();
+    const daysInMonth = new Date(year, month + 1, 0).getDate();
+    const daysInPrevMonth = new Date(year, month, 0).getDate();
+    const days: { dayNumber: number; isCurrentMonth: boolean; dateString: string }[] = [];
+    for (let i = firstDay - 1; i >= 0; i--) {
+      const d = daysInPrevMonth - i;
+      days.push({ dayNumber: d, isCurrentMonth: false, dateString: toDateStr(new Date(year, month - 1, d)) });
     }
-    return `${evt.companyName} · ${cleanTitle || evt.eventType}`;
+    for (let i = 1; i <= daysInMonth; i++) {
+      days.push({ dayNumber: i, isCurrentMonth: true, dateString: toDateStr(new Date(year, month, i)) });
+    }
+    const total = days.length <= 35 ? 35 : 42;
+    for (let i = 1; i <= total - days.length; i++) {
+      days.push({ dayNumber: i, isCurrentMonth: false, dateString: toDateStr(new Date(year, month + 1, i)) });
+    }
+    return days;
+  }, [year, month]);
+
+  const weekDays = useMemo(() => {
+    const selected = new Date(selectedDateStr + 'T00:00:00');
+    const startOfWeek = new Date(selected);
+    startOfWeek.setDate(selected.getDate() - selected.getDay());
+    return Array.from({ length: 7 }, (_, i) => {
+      const d = new Date(startOfWeek);
+      d.setDate(startOfWeek.getDate() + i);
+      return { date: d, dateString: toDateStr(d), dayNumber: d.getDate(), dayName: DAY_SHORT[d.getDay()] };
+    });
+  }, [selectedDateStr]);
+
+  const selectedDayEvents = useMemo(
+    () => (eventsByDate.get(selectedDateStr) || []).sort((a, b) =>
+      new Date(a.startTime || 0).getTime() - new Date(b.startTime || 0).getTime()
+    ),
+    [eventsByDate, selectedDateStr]
+  );
+
+  const nowTime = useMemo(() => new Date(), []);
+  const upcomingEvents = useMemo(
+    () => events.filter((e) => e.startTime && new Date(e.startTime) >= nowTime)
+      .sort((a, b) => new Date(a.startTime!).getTime() - new Date(b.startTime!).getTime()),
+    [events, nowTime]
+  );
+  const pastTimelineEvents = useMemo(
+    () => events.filter((e) => !e.startTime || new Date(e.startTime) < nowTime)
+      .sort((a, b) => new Date(b.startTime || 0).getTime() - new Date(a.startTime || 0).getTime()),
+    [events, nowTime]
+  );
+
+  const handlePrev = () => {
+    if (viewMode === 'month') {
+      setCurrentDate(new Date(year, month - 1, 1));
+    } else {
+      const d = new Date(selectedDateStr + 'T00:00:00');
+      d.setDate(d.getDate() - 7);
+      setSelectedDateStr(toDateStr(d));
+    }
   };
-
-  const monthNames = [
-    'January', 'February', 'March', 'April', 'May', 'June',
-    'July', 'August', 'September', 'October', 'November', 'December',
-  ];
-
-  const handlePrevMonth = () => {
-    setCurrentDate(new Date(year, month - 1, 1));
+  const handleNext = () => {
+    if (viewMode === 'month') {
+      setCurrentDate(new Date(year, month + 1, 1));
+    } else {
+      const d = new Date(selectedDateStr + 'T00:00:00');
+      d.setDate(d.getDate() + 7);
+      setSelectedDateStr(toDateStr(d));
+    }
   };
-
-  const handleNextMonth = () => {
-    setCurrentDate(new Date(year, month + 1, 1));
-  };
-
   const handleToday = () => {
-    setCurrentDate(new Date());
+    setCurrentDate(today);
+    setSelectedDateStr(todayStr);
   };
-
-  const getEventBadgeColor = (eventType: string) => {
-    const colors: Record<string, string> = {
-      ppt: 'bg-blue-500/15 text-blue-300 border-blue-500/30 hover:bg-blue-500/25',
-      online_test: 'bg-amber-500/15 text-amber-300 border-amber-500/30 hover:bg-amber-500/25',
-      coding_test: 'bg-orange-500/15 text-orange-300 border-orange-500/30 hover:bg-orange-500/25',
-      technical_interview: 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30 hover:bg-emerald-500/25',
-      hr_interview: 'bg-teal-500/15 text-teal-300 border-teal-500/30 hover:bg-teal-500/25',
-      final_interview: 'bg-green-500/15 text-green-300 border-green-500/30 hover:bg-green-500/25',
-      registration_deadline: 'bg-red-500/15 text-red-300 border-red-500/30 hover:bg-red-500/25',
-    };
-    return colors[eventType] || 'bg-zinc-800 text-zinc-300 border-zinc-700 hover:bg-zinc-700';
-  };
-
-  const todayStr = useMemo(() => {
-    const now = new Date();
-    const yyyy = now.getFullYear();
-    const mm = String(now.getMonth() + 1).padStart(2, '0');
-    const dd = String(now.getDate()).padStart(2, '0');
-    return `${yyyy}-${mm}-${dd}`;
-  }, []);
 
   return (
-    <div className="space-y-6 animate-fade-in max-w-7xl mx-auto selection:bg-indigo-500/20">
+    <div className="animate-fade-in max-w-7xl mx-auto selection:bg-indigo-500/20">
       {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+      <div className="flex items-center justify-between mb-5">
         <div>
-          <h1 className="text-2xl sm:text-3xl font-extrabold text-white tracking-tight flex items-center gap-3">
-            <span className="p-2 rounded-2xl bg-indigo-500/10 border border-indigo-500/20 text-indigo-400 shadow-md shadow-indigo-500/10">
-              <CalendarIcon className="w-6 h-6" />
+          <h1 className="text-2xl sm:text-3xl font-extrabold text-white tracking-tight flex items-center gap-2.5">
+            <span className="p-2 rounded-2xl bg-indigo-500/10 border border-indigo-500/20 text-indigo-400">
+              <CalendarIcon className="w-5 h-5 sm:w-6 sm:h-6" />
             </span>
             Placement Schedule
           </h1>
-          <p className="text-xs sm:text-sm text-zinc-400 mt-1">
-            Visual calendar and action timeline for upcoming tests, interview slots, and drive sessions.
-          </p>
+          <p className="text-xs text-zinc-500 mt-1 ml-1">Tests, PPTs & interviews — all in one place</p>
         </div>
-
-        {/* View mode toggle + Month navigator */}
-        <div className="flex items-center gap-3 self-start sm:self-center flex-wrap">
-          {/* Grid vs Timeline mode toggle */}
-          <div className="flex items-center p-1 bg-[#101018] rounded-2xl border border-zinc-800">
-            <button
-              onClick={() => setViewMode('grid')}
-              className={cn(
-                'flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold transition-all',
-                viewMode === 'grid'
-                  ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/30'
-                  : 'text-zinc-400 hover:text-zinc-200'
-              )}
-            >
-              <LayoutGrid className="w-3.5 h-3.5" />
-              Grid
-            </button>
-            <button
-              onClick={() => setViewMode('timeline')}
-              className={cn(
-                'flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold transition-all',
-                viewMode === 'timeline'
-                  ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/30'
-                  : 'text-zinc-400 hover:text-zinc-200'
-              )}
-            >
-              <List className="w-3.5 h-3.5" />
-              Timeline
-            </button>
-          </div>
-
-          {/* Month Navigation */}
-          <div className="flex items-center gap-1.5 bg-[#101018] px-2 py-1 rounded-2xl border border-zinc-800">
-            <button
-              onClick={handleToday}
-              className="px-2.5 py-1 text-xs font-semibold text-zinc-300 hover:text-white transition-colors"
-            >
-              Today
-            </button>
-            <div className="h-4 w-px bg-zinc-800" />
-            <button
-              onClick={handlePrevMonth}
-              className="p-1 rounded-lg text-zinc-400 hover:text-white hover:bg-zinc-800/60 transition-colors"
-              aria-label="Previous Month"
-            >
-              <ChevronLeft className="w-4 h-4" />
-            </button>
-            <span className="text-xs font-bold text-white px-2 min-w-[120px] text-center font-mono">
-              {monthNames[month]} {year}
-            </span>
-            <button
-              onClick={handleNextMonth}
-              className="p-1 rounded-lg text-zinc-400 hover:text-white hover:bg-zinc-800/60 transition-colors"
-              aria-label="Next Month"
-            >
-              <ChevronRight className="w-4 h-4" />
-            </button>
-          </div>
+        <div className="flex items-center bg-zinc-900 border border-zinc-800 rounded-2xl p-1 gap-1">
+          <button onClick={() => setViewMode('month')} className={cn('px-3 py-1.5 rounded-xl text-xs font-bold transition-all', viewMode === 'month' ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/30' : 'text-zinc-400 hover:text-zinc-200')}>Month</button>
+          <button onClick={() => setViewMode('timeline')} className={cn('px-3 py-1.5 rounded-xl text-xs font-bold transition-all', viewMode === 'timeline' ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/30' : 'text-zinc-400 hover:text-zinc-200')}>Timeline</button>
         </div>
       </div>
 
-      {/* Filter Tabs */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-zinc-800/80 pb-4">
-        {/* Category Pills */}
-        <div className="flex items-center gap-2 overflow-x-auto pb-1 sm:pb-0 scrollbar-none">
-          {[
-            { id: 'all' as const, label: 'All Events' },
-            { id: 'test' as const, label: 'Online Tests' },
-            { id: 'interview' as const, label: 'Interviews' },
-            { id: 'ppt' as const, label: 'PPTs' },
-            { id: 'deadline' as const, label: 'Deadlines' },
-          ].map((tab) => {
-            const isSelected = selectedEventType === tab.id;
-            return (
-              <button
-                key={tab.id}
-                onClick={() => setSelectedEventType(tab.id)}
-                className={cn(
-                  'px-3.5 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition-all duration-200 active:scale-95',
-                  isSelected
-                    ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/30'
-                    : 'bg-[#101018] hover:bg-[#141420] text-zinc-400 hover:text-zinc-200 border border-zinc-800'
-                )}
-              >
-                {tab.label}
-              </button>
-            );
-          })}
+      {/* Nav bar */}
+      <div className="flex items-center justify-between mb-4 px-1">
+        <button onClick={handleToday} className="text-xs font-bold text-indigo-400 hover:text-indigo-300 bg-indigo-500/10 border border-indigo-500/20 px-3 py-1.5 rounded-xl transition-all hover:bg-indigo-500/15">Today</button>
+        <div className="flex items-center gap-2">
+          <button onClick={handlePrev} className="p-1.5 rounded-xl text-zinc-400 hover:text-white hover:bg-zinc-800 transition-colors"><ChevronLeft className="w-4 h-4" /></button>
+          <span className="text-sm font-bold text-white min-w-[130px] text-center">
+            {viewMode === 'month' ? `${MONTH_NAMES[month]} ${year}` : `${weekDays[0].dayNumber}\u2013${weekDays[6].dayNumber} ${MONTH_NAMES[new Date(selectedDateStr + 'T00:00:00').getMonth()]} ${year}`}
+          </span>
+          <button onClick={handleNext} className="p-1.5 rounded-xl text-zinc-400 hover:text-white hover:bg-zinc-800 transition-colors"><ChevronRight className="w-4 h-4" /></button>
         </div>
-
-        {/* Legend dots */}
-        <div className="flex flex-wrap items-center gap-3 text-xs">
-          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-blue-500/10 text-blue-400 border border-blue-500/20 font-medium">
-            <span className="w-1.5 h-1.5 rounded-full bg-blue-400" />
-            PPT
-          </span>
-          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-amber-500/10 text-amber-300 border border-amber-500/20 font-medium">
-            <span className="w-1.5 h-1.5 rounded-full bg-amber-400" />
-            Assessment
-          </span>
-          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-emerald-500/10 text-emerald-300 border border-emerald-500/20 font-medium">
-            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
-            Interview
-          </span>
+        <div className="hidden sm:flex items-center gap-2 text-xs">
+          {[['bg-blue-400','PPT'],['bg-amber-400','Test'],['bg-emerald-400','Interview']].map(([color, label]) => (
+            <span key={label} className="flex items-center gap-1 text-zinc-400"><span className={cn('w-2 h-2 rounded-full', color)} />{label}</span>
+          ))}
         </div>
+        <div className="sm:hidden w-16" />
       </div>
 
-      {/* Mode 1: Month Grid View */}
-      {viewMode === 'grid' && (
-        <div className="bg-[#101018]/90 backdrop-blur-2xl border border-zinc-800/80 rounded-3xl overflow-hidden shadow-2xl shadow-black/30">
-          {/* Day of Week Headers */}
-          <div className="grid grid-cols-7 border-b border-zinc-800 bg-zinc-950/80 text-center py-3 text-xs font-bold text-zinc-400 uppercase tracking-wider">
-            <span>Sun</span>
-            <span>Mon</span>
-            <span>Tue</span>
-            <span>Wed</span>
-            <span>Thu</span>
-            <span>Fri</span>
-            <span>Sat</span>
-          </div>
-
-          {/* Days Grid */}
-          <div className="grid grid-cols-7 auto-rows-fr divide-x divide-y divide-zinc-800/60">
-            {calendarDays.map((d, index) => {
-              const dayEvents = eventsByDate.get(d.dateString) || [];
-              const isToday = d.dateString === todayStr;
-
-              return (
-                <div
-                  key={index}
-                  onClick={() => {
-                    setSelectedDayData({
-                      dateString: d.dateString,
-                      dayNumber: d.dayNumber,
-                      date: new Date(`${d.dateString}T00:00:00`),
-                      events: dayEvents,
-                    });
-                  }}
-                  className={cn(
-                    'min-h-[120px] p-2.5 flex flex-col justify-between transition-colors cursor-pointer group select-none relative',
-                    d.isCurrentMonth
-                      ? 'bg-[#101018] hover:bg-zinc-900/60'
-                      : 'bg-zinc-950/40 opacity-30 hover:opacity-60',
-                    isToday && 'bg-indigo-500/[0.06]'
-                  )}
-                >
-                  {/* Today Top Indicator Line */}
-                  {isToday && (
-                    <div className="absolute top-0 left-0 right-0 h-0.5 bg-indigo-500" />
-                  )}
-
-                  {/* Date Number Header */}
-                  <div className="flex items-center justify-between pointer-events-none">
-                    <span
-                      className={cn(
-                        'text-xs font-bold w-6 h-6 rounded-full flex items-center justify-center font-mono transition-colors',
-                        isToday
-                          ? 'bg-indigo-600 text-white shadow-sm shadow-indigo-600/30'
-                          : dayEvents.length > 0
-                          ? 'bg-zinc-800 text-white font-extrabold group-hover:bg-zinc-700'
-                          : 'text-zinc-400 group-hover:text-zinc-200'
-                      )}
-                    >
-                      {d.dayNumber}
-                    </span>
-                    {dayEvents.length > 0 && (
-                      <span className="text-[10px] text-indigo-400 font-bold font-mono px-1.5 py-0.5 rounded-md bg-indigo-500/10 border border-indigo-500/20">
-                        {dayEvents.length} {dayEvents.length === 1 ? 'event' : 'events'}
-                      </span>
-                    )}
+      {/* Month view */}
+      {viewMode === 'month' && (
+        <>
+          {/* Desktop grid */}
+          <div className="hidden md:block bg-[#101018]/90 backdrop-blur-2xl border border-zinc-800/80 rounded-3xl overflow-hidden shadow-2xl shadow-black/30">
+            <div className="grid grid-cols-7 border-b border-zinc-800 bg-zinc-950/80 text-center py-3 text-xs font-bold text-zinc-400 uppercase tracking-wider">
+              {DAY_SHORT.map((d) => <span key={d}>{d}</span>)}
+            </div>
+            <div className="grid grid-cols-7 auto-rows-fr divide-x divide-y divide-zinc-800/60">
+              {calendarDays.map((d, idx) => {
+                const dayEvents = eventsByDate.get(d.dateString) || [];
+                const isToday = d.dateString === todayStr;
+                const isSelected = d.dateString === selectedDateStr;
+                return (
+                  <div key={idx} onClick={() => setSelectedDateStr(isSelected ? '' : d.dateString)} className={cn('min-h-[90px] p-2 cursor-pointer transition-all', !d.isCurrentMonth && 'opacity-30', isSelected && 'bg-indigo-500/5', d.isCurrentMonth && 'hover:bg-zinc-900/50')}>
+                    <div className="flex items-center justify-between mb-1">
+                      <span className={cn('w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold', isToday ? 'bg-indigo-600 text-white' : 'text-zinc-300 hover:bg-zinc-800')}>{d.dayNumber}</span>
+                      {dayEvents.length > 0 && <span className="text-[9px] font-bold text-zinc-500">{dayEvents.length}</span>}
+                    </div>
+                    <div className="space-y-0.5">
+                      {dayEvents.slice(0, 3).map((evt) => (
+                        <div key={evt.id} className="flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[10px] font-semibold truncate bg-zinc-900/60 border border-zinc-800/30">
+                          <span className={cn('w-1.5 h-1.5 rounded-full flex-shrink-0', getDotColor(evt.eventType))} />
+                          <span className="truncate text-zinc-300">{evt.companyName}</span>
+                        </div>
+                      ))}
+                      {dayEvents.length > 3 && <p className="text-[9px] text-indigo-400 font-bold pl-1">+{dayEvents.length - 3} more</p>}
+                    </div>
                   </div>
+                );
+              })}
+            </div>
+          </div>
 
-                  {/* Day Events List */}
-                  <div className="space-y-1.5 mt-2 overflow-hidden">
-                    {dayEvents.slice(0, 3).map((evt) => (
-                      <div
-                        key={evt.id}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setSelectedDayData({
-                            dateString: d.dateString,
-                            dayNumber: d.dayNumber,
-                            date: new Date(`${d.dateString}T00:00:00`),
-                            events: dayEvents,
-                          });
-                        }}
-                        className={cn(
-                          'w-full text-left px-2 py-1 rounded-lg border text-[11px] font-semibold truncate block transition-all hover:brightness-110 active:scale-[0.98] shadow-sm cursor-pointer',
-                          getEventBadgeColor(evt.eventType)
-                        )}
-                      >
-                        <span>{formatChipText(evt)}</span>
+          {/* Mobile: week strip + day list */}
+          <div className="md:hidden space-y-4">
+            <div className="bg-[#101018]/90 border border-zinc-800/80 rounded-2xl p-3">
+              <div className="grid grid-cols-7 gap-1">
+                {weekDays.map((wd) => {
+                  const dots = (eventsByDate.get(wd.dateString) || []).slice(0, 3);
+                  const isToday = wd.dateString === todayStr;
+                  const isSelected = wd.dateString === selectedDateStr;
+                  return (
+                    <button key={wd.dateString} onClick={() => setSelectedDateStr(wd.dateString)} className="flex flex-col items-center gap-1 py-2 rounded-xl">
+                      <span className={cn('text-[10px] font-bold uppercase tracking-wider', isToday ? 'text-indigo-400' : 'text-zinc-500')}>{wd.dayName}</span>
+                      <span className={cn('w-8 h-8 rounded-full flex items-center justify-center text-sm font-extrabold transition-all', isSelected ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/40' : isToday ? 'text-indigo-400 border border-indigo-500/40' : 'text-zinc-300 hover:bg-zinc-800')}>{wd.dayNumber}</span>
+                      <div className="flex gap-0.5 h-1.5">
+                        {dots.map((e, i) => <span key={i} className={cn('w-1.5 h-1.5 rounded-full', getDotColor(e.eventType))} />)}
                       </div>
-                    ))}
-                    {dayEvents.length > 3 && (
-                      <span className="text-[10px] text-indigo-400 pl-1 block font-bold">
-                        +{dayEvents.length - 3} more (tap to view)
-                      </span>
-                    )}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      )}
-
-      {/* Mode 2: Timeline / List View */}
-      {viewMode === 'timeline' && (() => {
-        const now = new Date();
-        const upcomingEvents = filteredEvents
-          .filter((e) => e.startTime && new Date(e.startTime) >= now)
-          .sort((a, b) => new Date(a.startTime!).getTime() - new Date(b.startTime!).getTime());
-        const pastEvents = filteredEvents
-          .filter((e) => !e.startTime || new Date(e.startTime) < now)
-          .sort((a, b) => new Date(b.startTime || 0).getTime() - new Date(a.startTime || 0).getTime());
-
-        const renderRow = (evt: CalendarEvent, isPast: boolean) => {
-          const eventColors = EVENT_TYPE_COLORS[evt.eventType as EventType] || EVENT_TYPE_COLORS.other;
-          return (
-            <div
-              key={evt.id}
-              className={cn(
-                'flex flex-col sm:flex-row sm:items-center justify-between gap-3 py-4 transition-all rounded-2xl px-3 group',
-                isPast
-                  ? 'opacity-40 hover:opacity-70'
-                  : 'hover:bg-zinc-900/40'
-              )}
-            >
-              <div className="flex items-start gap-3.5">
-                <div className={cn('w-3 h-3 rounded-full mt-1.5 flex-shrink-0', isPast ? 'bg-zinc-600' : eventColors.dot)} />
-                <div>
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <h4 className={cn(
-                      'text-sm font-bold transition-colors',
-                      isPast ? 'text-zinc-400' : 'text-white group-hover:text-indigo-300'
-                    )}>
-                      {evt.companyName}
-                    </h4>
-                    <span
-                      className={cn(
-                        'text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-md border',
-                        isPast ? 'bg-zinc-900 text-zinc-500 border-zinc-700' : getEventBadgeColor(evt.eventType)
-                      )}
-                    >
-                      {EVENT_TYPE_LABELS[evt.eventType as EventType] || evt.eventType.replace('_', ' ')}
-                    </span>
-                    {isPast && (
-                      <span className="text-[10px] font-semibold text-zinc-600 bg-zinc-900 border border-zinc-800 px-2 py-0.5 rounded-md">
-                        Past
-                      </span>
-                    )}
-                  </div>
-                  <p className="text-xs text-zinc-400 mt-0.5">{evt.title || evt.companyName}</p>
-                  <div className="flex items-center gap-2 text-xs text-zinc-500 mt-1">
-                    {evt.venue && (
-                      <span className="flex items-center gap-1">
-                        <MapPin className="w-3 h-3 text-emerald-400" />
-                        {evt.venue}
-                      </span>
-                    )}
-                    {evt.venue && evt.mode && <span>·</span>}
-                    {evt.mode && <span className="capitalize">{evt.mode}</span>}
-                  </div>
-                </div>
-              </div>
-
-              <div className="flex items-center gap-4 self-end sm:self-center">
-                <div className="text-right">
-                  <span className={cn(
-                    'text-xs font-semibold font-mono block',
-                    isPast ? 'text-zinc-500' : 'text-zinc-200'
-                  )}>
-                    {evt.startTime
-                      ? new Date(evt.startTime).toLocaleDateString('en-IN', {
-                          day: 'numeric',
-                          month: 'short',
-                          hour: '2-digit',
-                          minute: '2-digit',
-                        })
-                      : 'Date TBA'}
-                  </span>
-                </div>
-
-                <div className="flex items-center gap-1.5">
-                  <Link
-                    href={`/companies/${evt.companyId}`}
-                    className="px-3 py-1.5 rounded-xl bg-zinc-900 hover:bg-zinc-800 text-xs font-semibold text-zinc-300 hover:text-white transition-all border border-zinc-800"
-                  >
-                    View Drive
-                  </Link>
-                  {evt.startTime && !isPast && (
-                    <a
-                      href={`https://calendar.google.com/calendar/render?action=TEMPLATE&text=${encodeURIComponent(evt.title || 'Placement Event')}&dates=${new Date(evt.startTime).toISOString().replace(/-|:|\\.\\d+/g, '')}/${new Date(new Date(evt.startTime).getTime() + 3600000).toISOString().replace(/-|:|\\.\\d+/g, '')}&location=${encodeURIComponent(evt.venue || 'VIT Campus / Online')}`}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="p-1.5 rounded-xl bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-400 border border-indigo-500/20 transition-all flex items-center justify-center"
-                      title="Add to Google Calendar"
-                    >
-                      <CalendarIcon className="w-4 h-4" />
-                    </a>
-                  )}
-                </div>
+                    </button>
+                  );
+                })}
               </div>
             </div>
-          );
-        };
-
-        return (
-          <div className="bg-[#101018]/90 backdrop-blur-2xl border border-zinc-800/80 rounded-3xl overflow-hidden shadow-2xl p-5 sm:p-6 space-y-6">
-            {/* Upcoming Events Section */}
-            <div>
-              <div className="flex items-center gap-2 mb-3">
-                <Zap className="w-4 h-4 text-indigo-400" />
-                <span className="text-xs font-bold text-zinc-300 uppercase tracking-wider">
-                  Upcoming
-                </span>
-                <span className="text-[11px] text-zinc-500 font-mono">
-                  {upcomingEvents.length} event{upcomingEvents.length !== 1 ? 's' : ''}
-                </span>
+            <div className="bg-[#101018]/90 border border-zinc-800/80 rounded-2xl p-4">
+              <div className="flex items-center justify-between mb-4">
+                <div>
+                  <p className="text-xs font-bold text-zinc-500 uppercase tracking-wider">{new Date(selectedDateStr + 'T00:00:00').toLocaleDateString('en-IN', { weekday: 'long' })}</p>
+                  <p className="text-lg font-extrabold text-white">
+                    {new Date(selectedDateStr + 'T00:00:00').toLocaleDateString('en-IN', { day: 'numeric', month: 'long' })}
+                    {selectedDateStr === todayStr && <span className="ml-2 text-xs font-bold text-indigo-400 bg-indigo-500/10 border border-indigo-500/20 px-2 py-0.5 rounded-full align-middle">Today</span>}
+                  </p>
+                </div>
+                {selectedDayEvents.length > 0 && <span className="text-xs font-bold text-zinc-400 bg-zinc-800/60 border border-zinc-700/50 px-2.5 py-1 rounded-xl">{selectedDayEvents.length} event{selectedDayEvents.length !== 1 ? 's' : ''}</span>}
               </div>
-
-              {upcomingEvents.length === 0 ? (
-                <div className="py-10 text-center bg-zinc-900/30 rounded-2xl border border-zinc-800/50">
-                  <CalendarCheck className="w-10 h-10 text-zinc-600 mx-auto mb-2" />
-                  <p className="text-sm font-semibold text-zinc-400">No upcoming events</p>
-                  <p className="text-xs text-zinc-600 mt-1">You're all caught up! New events will appear here when shortlisted.</p>
+              {selectedDayEvents.length === 0 ? (
+                <div className="py-10 text-center">
+                  <CalendarCheck className="w-10 h-10 text-zinc-700 mx-auto mb-2" />
+                  <p className="text-sm font-semibold text-zinc-500">No events this day</p>
+                  <p className="text-xs text-zinc-700 mt-1">Tap another day to see its schedule</p>
                 </div>
               ) : (
-                <div className="divide-y divide-zinc-800/60">
-                  {upcomingEvents.map((evt) => renderRow(evt, false))}
+                <div className="space-y-2.5">
+                  {selectedDayEvents.map((evt) => <EventCard key={evt.id} evt={evt} />)}
                 </div>
               )}
             </div>
+          </div>
 
-            {/* Past Events — collapsible at bottom */}
-            {pastEvents.length > 0 && (
-              <div className="border-t border-zinc-800/60 pt-4">
-                {/* Toggle Button */}
-                <button
-                  onClick={() => setShowPastEvents((v) => !v)}
-                  className="w-full flex items-center justify-between px-3 py-2.5 rounded-2xl bg-zinc-900/50 hover:bg-zinc-900 border border-zinc-800/60 hover:border-zinc-700 transition-all group"
-                >
-                  <div className="flex items-center gap-2">
-                    <Clock className="w-3.5 h-3.5 text-zinc-600 group-hover:text-zinc-400 transition-colors" />
-                    <span className="text-xs font-bold text-zinc-600 group-hover:text-zinc-400 uppercase tracking-wider transition-colors">
-                      Past Events
-                    </span>
-                    <span className="text-[10px] font-semibold text-zinc-700 bg-zinc-800/80 border border-zinc-700/50 px-2 py-0.5 rounded-full font-mono">
-                      {pastEvents.length}
-                    </span>
-                  </div>
-                  <ChevronDown
-                    className={cn(
-                      'w-4 h-4 text-zinc-600 group-hover:text-zinc-400 transition-all duration-300',
-                      showPastEvents ? 'rotate-180' : 'rotate-0'
-                    )}
-                  />
-                </button>
+          {/* Desktop: selected day peek */}
+          {selectedDateStr && (eventsByDate.get(selectedDateStr) || []).length > 0 && (
+            <div className="hidden md:block mt-4 bg-[#101018]/90 border border-zinc-800/80 rounded-2xl p-5">
+              <div className="flex items-center justify-between mb-4">
+                <div>
+                  <p className="text-xs font-bold text-zinc-500 uppercase tracking-wider">{new Date(selectedDateStr + 'T00:00:00').toLocaleDateString('en-IN', { weekday: 'long' })}</p>
+                  <h3 className="text-base font-extrabold text-white">
+                    {new Date(selectedDateStr + 'T00:00:00').toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric' })}
+                    {selectedDateStr === todayStr && <span className="ml-2 text-xs font-bold text-indigo-400 bg-indigo-500/10 border border-indigo-500/20 px-2 py-0.5 rounded-full">Today</span>}
+                  </h3>
+                </div>
+                <button onClick={() => setSelectedDateStr('')} className="p-1.5 rounded-xl text-zinc-500 hover:text-white hover:bg-zinc-800 transition-colors"><X className="w-4 h-4" /></button>
+              </div>
+              <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                {(eventsByDate.get(selectedDateStr) || []).map((evt) => <EventCard key={evt.id} evt={evt} onClose={() => setSelectedDateStr('')} />)}
+              </div>
+            </div>
+          )}
+        </>
+      )}
 
-                {/* Collapsible Content */}
-                {showPastEvents && (
-                  <div className="mt-3 divide-y divide-zinc-800/30 animate-fade-in">
-                    {pastEvents.map((evt) => renderRow(evt, true))}
-                  </div>
-                )}
+      {/* Timeline view */}
+      {viewMode === 'timeline' && (
+        <div className="bg-[#101018]/90 backdrop-blur-2xl border border-zinc-800/80 rounded-3xl p-5 sm:p-6 space-y-6">
+          <div>
+            <div className="flex items-center gap-2 mb-4">
+              <Zap className="w-4 h-4 text-indigo-400" />
+              <span className="text-xs font-bold text-zinc-300 uppercase tracking-wider">Upcoming</span>
+              <span className="text-[10px] text-zinc-600 font-mono bg-zinc-800/60 px-2 py-0.5 rounded-full border border-zinc-700/50">{upcomingEvents.length}</span>
+            </div>
+            {upcomingEvents.length === 0 ? (
+              <div className="py-10 text-center bg-zinc-900/30 rounded-2xl border border-zinc-800/50">
+                <CalendarCheck className="w-10 h-10 text-zinc-700 mx-auto mb-2" />
+                <p className="text-sm font-semibold text-zinc-500">No upcoming events</p>
+                <p className="text-xs text-zinc-700 mt-1">You&apos;ll appear here when shortlisted for new rounds</p>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {upcomingEvents.map((evt) => <EventCard key={evt.id} evt={evt} />)}
               </div>
             )}
           </div>
-        );
-      })()}
-
-      {/* Interactive Day Schedule Popup Modal (Tasks Drawer) */}
-      {selectedDayData && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-md animate-fade-in"
-          onClick={() => setSelectedDayData(null)}
-        >
-          <div
-            className="bg-[#12121c]/95 border border-zinc-800 rounded-3xl max-w-lg w-full p-6 sm:p-7 shadow-2xl space-y-5 animate-scale-up"
-            onClick={(e) => e.stopPropagation()}
-          >
-            {/* Modal Header */}
-            <div className="flex items-start justify-between border-b border-zinc-800/80 pb-4">
-              <div className="flex items-center gap-3.5">
-                <div className="w-12 h-12 rounded-2xl bg-indigo-500/10 border border-indigo-500/30 flex items-center justify-center text-indigo-400 font-extrabold text-xl shadow-lg shadow-indigo-500/10">
-                  {selectedDayData.dayNumber}
+          {pastTimelineEvents.length > 0 && (
+            <div className="border-t border-zinc-800/60 pt-5">
+              <button onClick={() => setShowPastEvents((v) => !v)} className="w-full flex items-center justify-between px-3 py-2.5 rounded-2xl bg-zinc-900/50 hover:bg-zinc-900 border border-zinc-800/60 hover:border-zinc-700 transition-all group">
+                <div className="flex items-center gap-2">
+                  <Clock className="w-3.5 h-3.5 text-zinc-600 group-hover:text-zinc-400 transition-colors" />
+                  <span className="text-xs font-bold text-zinc-600 group-hover:text-zinc-400 uppercase tracking-wider transition-colors">Past Events</span>
+                  <span className="text-[10px] font-mono text-zinc-700 bg-zinc-800/80 border border-zinc-700/50 px-2 py-0.5 rounded-full">{pastTimelineEvents.length}</span>
                 </div>
-                <div>
-                  <h3 className="text-base sm:text-lg font-extrabold text-white tracking-tight">
-                    {selectedDayData.date.toLocaleDateString('en-IN', {
-                      weekday: 'long',
-                      day: 'numeric',
-                      month: 'long',
-                      year: 'numeric',
-                    })}
-                  </h3>
-                  <div className="flex items-center gap-2 mt-1">
-                    <span className="text-[11px] font-semibold text-indigo-400 font-mono px-2 py-0.5 rounded-full bg-indigo-500/10 border border-indigo-500/20">
-                      {selectedDayData.events.length} {selectedDayData.events.length === 1 ? 'Placement Event' : 'Placement Events'}
-                    </span>
-                  </div>
-                </div>
-              </div>
-              <button
-                onClick={() => setSelectedDayData(null)}
-                className="p-2 rounded-xl text-zinc-400 hover:text-white hover:bg-zinc-800 transition-colors"
-                aria-label="Close"
-              >
-                <X className="w-5 h-5" />
+                <ChevronDown className={cn('w-4 h-4 text-zinc-600 group-hover:text-zinc-400 transition-all duration-300', showPastEvents ? 'rotate-180' : '')} />
               </button>
-            </div>
-
-            {/* Events List for Selected Day */}
-            <div className="space-y-3 max-h-[55vh] overflow-y-auto pr-1">
-              {selectedDayData.events.length === 0 ? (
-                <div className="py-10 text-center bg-zinc-950/40 rounded-2xl border border-zinc-800/60 p-6">
-                  <CalendarCheck className="w-10 h-10 text-zinc-600 mx-auto mb-2.5" />
-                  <p className="text-sm font-bold text-zinc-300">No events scheduled for this date</p>
-                  <p className="text-xs text-zinc-500 mt-1 max-w-xs mx-auto">
-                    You can schedule PPTs, assessments, or interviews anytime via the AI Assistant chat!
-                  </p>
-                </div>
-              ) : (
-                selectedDayData.events.map((evt) => {
-                  const eventColors = EVENT_TYPE_COLORS[evt.eventType as EventType] || EVENT_TYPE_COLORS.other;
-                  return (
-                    <div
-                      key={evt.id}
-                      className="p-4 bg-zinc-950/70 rounded-2xl border border-zinc-800/80 hover:border-zinc-700 transition-all space-y-3 group"
-                    >
-                      <div className="flex items-start justify-between gap-3">
-                        <div className="flex items-center gap-3">
-                          <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-indigo-500/20 to-violet-500/20 border border-indigo-500/30 flex items-center justify-center text-indigo-300 font-extrabold text-base">
-                            {evt.companyName.charAt(0)}
-                          </div>
-                          <div>
-                            <h4 className="text-sm font-extrabold text-white group-hover:text-indigo-300 transition-colors">
-                              {evt.companyName}
-                            </h4>
-                            <span
-                              className={cn(
-                                'inline-block px-2 py-0.5 rounded-md text-[10px] font-bold uppercase tracking-wider mt-0.5 border',
-                                getEventBadgeColor(evt.eventType)
-                              )}
-                            >
-                              {EVENT_TYPE_LABELS[evt.eventType as EventType] || evt.eventType.replace('_', ' ')}
-                            </span>
-                          </div>
-                        </div>
-
-                        {evt.startTime && (
-                          <span className="text-xs font-bold text-zinc-200 font-mono bg-zinc-900 px-2.5 py-1 rounded-xl border border-zinc-800">
-                            {new Date(evt.startTime).toLocaleTimeString('en-IN', {
-                              hour: '2-digit',
-                              minute: '2-digit',
-                            })}
-                          </span>
-                        )}
-                      </div>
-
-                      <p className="text-xs font-semibold text-zinc-300 pl-0.5">
-                        {evt.title || evt.companyName}
-                      </p>
-
-                      <div className="flex flex-wrap items-center gap-3 text-xs text-zinc-400 pt-1 border-t border-zinc-900">
-                        {evt.venue && (
-                          <div className="flex items-center gap-1.5">
-                            <MapPin className="w-3.5 h-3.5 text-emerald-400 flex-shrink-0" />
-                            <span>{evt.venue}</span>
-                          </div>
-                        )}
-                        {evt.mode && evt.mode !== 'unknown' && (
-                          <span className="capitalize px-2 py-0.5 rounded-md bg-zinc-900 border border-zinc-800 text-[11px]">
-                            {evt.mode}
-                          </span>
-                        )}
-                      </div>
-
-                      {/* Action Buttons */}
-                      <div className="pt-2 flex items-center justify-between gap-2 border-t border-zinc-900">
-                        <Link
-                          href={`/companies/${evt.companyId}`}
-                          className="inline-flex items-center gap-1.5 text-xs font-semibold text-indigo-400 hover:text-indigo-300 transition-colors"
-                        >
-                          View Drive Profile
-                          <ExternalLink className="w-3.5 h-3.5" />
-                        </Link>
-
-                        {evt.startTime && (
-                          <a
-                            href={`https://calendar.google.com/calendar/render?action=TEMPLATE&text=${encodeURIComponent(evt.title || 'Placement Event')}&dates=${new Date(evt.startTime).toISOString().replace(/-|:|\.\d+/g, '')}/${new Date(new Date(evt.startTime).getTime() + 3600000).toISOString().replace(/-|:|\.\d+/g, '')}&location=${encodeURIComponent(evt.venue || 'VIT Campus / Online')}`}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold shadow-md shadow-indigo-600/30 transition-all active:scale-95"
-                          >
-                            <CalendarIcon className="w-3.5 h-3.5" />
-                            Add to Google Calendar
-                          </a>
-                        )}
-                      </div>
+              {showPastEvents && (
+                <div className="mt-3 space-y-2 animate-fade-in">
+                  {pastTimelineEvents.map((evt) => (
+                    <div key={evt.id} className="opacity-40 hover:opacity-70 transition-opacity">
+                      <EventCard evt={evt} />
                     </div>
-                  );
-                })
+                  ))}
+                </div>
               )}
             </div>
-
-            {/* Modal Footer */}
-            <div className="pt-2 flex items-center justify-between text-xs text-zinc-500 border-t border-zinc-800/80">
-              <span className="flex items-center gap-1">
-                <Sparkles className="w-3.5 h-3.5 text-indigo-400" />
-                Tap any date to inspect scheduled rounds
-              </span>
-              <button
-                onClick={() => setSelectedDayData(null)}
-                className="px-4 py-1.5 rounded-xl bg-zinc-900 hover:bg-zinc-800 text-xs font-semibold text-zinc-300 hover:text-white transition-all border border-zinc-800"
-              >
-                Close
-              </button>
-            </div>
-          </div>
+          )}
         </div>
       )}
     </div>
