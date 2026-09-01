@@ -311,29 +311,32 @@ export default function DashboardClient({
 
       {/* Upcoming Placement Schedule Card */}
       <div className="rounded-3xl bg-[#101018]/95 backdrop-blur-2xl border border-zinc-800/80 overflow-hidden shadow-2xl shadow-black/40">
-        <div className="flex items-center justify-between px-6 py-4 border-b border-zinc-800/80 bg-zinc-950/40">
-          <div className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-xl bg-indigo-500/10 border border-indigo-500/25 flex items-center justify-center text-indigo-400 flex-shrink-0 shadow-sm shadow-indigo-500/10">
+        <div className="flex items-center justify-between gap-3 px-4 sm:px-6 py-3.5 sm:py-4 border-b border-zinc-800/80 bg-zinc-950/40">
+          <div className="flex items-center gap-2.5 sm:gap-3 min-w-0 flex-1">
+            <div className="w-8 h-8 sm:w-9 sm:h-9 rounded-xl bg-indigo-500/10 border border-indigo-500/25 flex items-center justify-center text-indigo-400 flex-shrink-0 shadow-sm shadow-indigo-500/10">
               <Calendar className="w-4 h-4" />
             </div>
-            <div>
-              <h2 className="text-sm font-bold text-white flex items-center gap-2">
-                <span>Upcoming Placement Schedule</span>
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-2 flex-wrap">
+                <h2 className="text-sm sm:text-base font-bold text-white tracking-tight">
+                  Upcoming Schedule
+                </h2>
                 <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 font-mono">
                   {upcomingEvents.length}
                 </span>
-              </h2>
-              <p className="text-xs text-zinc-400 mt-0.5">
-                Next tests, interviews, and pre-placement talks synced from CDC emails
+              </div>
+              <p className="text-[11px] sm:text-xs text-zinc-400 mt-0.5 truncate sm:whitespace-normal">
+                Next tests, interviews & PPTs from CDC circulars
               </p>
             </div>
           </div>
 
           <Link
             href="/calendar"
-            className="flex items-center gap-1 text-xs font-semibold text-indigo-400 hover:text-indigo-300 transition-colors bg-indigo-500/10 hover:bg-indigo-500/20 px-3.5 py-1.5 rounded-xl border border-indigo-500/20"
+            className="flex items-center gap-1 text-xs font-semibold text-indigo-400 hover:text-indigo-300 transition-all bg-indigo-500/10 hover:bg-indigo-500/20 px-3 py-1.5 rounded-xl border border-indigo-500/20 flex-shrink-0"
           >
-            <span>View Calendar</span>
+            <span className="hidden sm:inline">View Calendar</span>
+            <span className="sm:hidden">Calendar</span>
             <ChevronRight className="w-3.5 h-3.5" />
           </Link>
         </div>
