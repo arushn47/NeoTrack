@@ -353,44 +353,51 @@ export default function DashboardClient({
             <div className="divide-y divide-zinc-800/60">
               {upcomingEvents.map((event) => {
                 const eventColors = EVENT_TYPE_COLORS[event.event_type as EventType] || EVENT_TYPE_COLORS.other;
+                const cleanVenue = event.venue ? event.venue.replace(/[\r\n]+/g, ' ').trim() : null;
+                const formattedDate = event.start_time ? formatDateTime(event.start_time) : '—';
+
                 return (
                   <div
                     key={event.id}
-                    className="flex items-center gap-4 py-3.5 hover:bg-zinc-900/40 transition-all group rounded-xl px-2"
+                    className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 py-3.5 hover:bg-zinc-900/40 transition-all group rounded-xl px-2.5"
                   >
-                    <div className={cn('w-2.5 h-2.5 rounded-full flex-shrink-0', eventColors.dot)} />
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-semibold text-white truncate group-hover:text-indigo-300 transition-colors">
-                        {event.title || EVENT_TYPE_LABELS[event.event_type as EventType] || event.event_type}
-                      </p>
-                      <div className="flex items-center gap-2 text-xs text-zinc-400 mt-1">
-                        {event.venue && <span>{event.venue}</span>}
-                        {event.venue && <span>·</span>}
-                        {event.mode && event.mode !== 'unknown' && (
-                          <span className="capitalize">{event.mode} · </span>
-                        )}
-                        <span className={cn('font-medium', eventColors.text)}>
-                          {EVENT_TYPE_LABELS[event.event_type as EventType]}
-                        </span>
+                    <div className="flex items-start gap-3 min-w-0 flex-1">
+                      <div className={cn('w-2.5 h-2.5 rounded-full flex-shrink-0 mt-1.5', eventColors.dot)} />
+                      <div className="min-w-0 flex-1">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <p className="text-sm font-semibold text-white group-hover:text-indigo-300 transition-colors">
+                            {event.title || EVENT_TYPE_LABELS[event.event_type as EventType] || event.event_type}
+                          </p>
+                          <span className={cn('text-[10px] font-bold px-2 py-0.5 rounded-full border border-white/10', eventColors.bg, eventColors.text)}>
+                            {EVENT_TYPE_LABELS[event.event_type as EventType]}
+                          </span>
+                        </div>
+                        <div className="flex flex-wrap items-center gap-1.5 text-xs text-zinc-400 mt-1">
+                          {cleanVenue && (
+                            <span className="truncate max-w-[220px] sm:max-w-xs">{cleanVenue}</span>
+                          )}
+                          {cleanVenue && event.mode && event.mode !== 'unknown' && <span>·</span>}
+                          {event.mode && event.mode !== 'unknown' && (
+                            <span className="capitalize">{event.mode}</span>
+                          )}
+                        </div>
                       </div>
                     </div>
 
-                    <div className="flex items-center gap-3 text-right flex-shrink-0">
-                      <div>
-                        <p className="text-xs font-semibold text-zinc-200">
-                          {event.start_time ? formatDateTime(event.start_time) : '—'}
-                        </p>
-                      </div>
+                    <div className="flex items-center justify-between sm:justify-end gap-3 pl-5 sm:pl-0 pt-1 sm:pt-0 border-t sm:border-t-0 border-zinc-800/40 sm:border-transparent flex-shrink-0">
+                      <p className="text-xs font-semibold text-zinc-200">
+                        {formattedDate}
+                      </p>
                       {event.start_time && (
                         <a
-                          href={`https://calendar.google.com/calendar/render?action=TEMPLATE&text=${encodeURIComponent(event.title || 'Placement Event')}&dates=${new Date(event.start_time).toISOString().replace(/-|:|\.\d+/g, '')}/${new Date(new Date(event.start_time).getTime() + 3600000).toISOString().replace(/-|:|\.\d+/g, '')}&location=${encodeURIComponent(event.venue || 'VIT Campus / Online')}`}
+                          href={`https://calendar.google.com/calendar/render?action=TEMPLATE&text=${encodeURIComponent(event.title || 'Placement Event')}&dates=${new Date(event.start_time).toISOString().replace(/-|:|\.\d+/g, '')}/${new Date(new Date(event.start_time).getTime() + 3600000).toISOString().replace(/-|:|\.\d+/g, '')}&location=${encodeURIComponent(cleanVenue || 'VIT Campus / Online')}`}
                           target="_blank"
                           rel="noreferrer"
-                          className="p-2 rounded-xl text-zinc-400 hover:text-indigo-300 hover:bg-indigo-500/10 border border-transparent hover:border-indigo-500/20 transition-all"
+                          className="p-1.5 sm:p-2 rounded-xl text-zinc-400 hover:text-indigo-300 hover:bg-indigo-500/10 border border-zinc-800 sm:border-transparent hover:border-indigo-500/20 transition-all"
                           title="Add to Google Calendar"
                           aria-label="Add to Google Calendar"
                         >
-                          <Calendar className="w-4 h-4" />
+                          <Calendar className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
                         </a>
                       )}
                     </div>

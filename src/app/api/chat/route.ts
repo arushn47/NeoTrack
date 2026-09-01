@@ -2,6 +2,8 @@ import { NextResponse } from 'next/server';
 import { getSession } from '@/lib/auth';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { normalizeCompanyName } from '@/lib/sync/classifier';
+import { parseDateTime, extractVenue } from '@/lib/sync/events';
+import { formatDateTime } from '@/lib/utils';
 
 /**
  * POST /api/chat
@@ -62,6 +64,76 @@ export async function POST(request: Request) {
     }
     return null;
   };
+
+  // 0. COMMAND: Add / Schedule Placement Event on Calendar
+  if (
+    (/add|schedule|create|set\s+(?:date|time|test|ppt|interview)|book/i.test(lowerMsg)) &&
+    (/test|ppt|interview|talk|assessment|round/i.test(lowerMsg))
+  ) {
+    const targetComp = findMentionedCompany();
+    const parsedDate = parseDateTime(message);
+
+    if (targetComp && parsedDate) {
+      let eventType = 'online_test';
+      let eventLabel = 'Online Assessment';
+      let appStatus = 'test_scheduled';
+
+      if (/ppt|pre[\s-]*placement/i.test(lowerMsg)) {
+        eventType = 'ppt';
+        eventLabel = 'Pre-Placement Talk (PPT)';
+        appStatus = 'ppt_scheduled';
+      } else if (/interview/i.test(lowerMsg)) {
+        eventType = 'technical_interview';
+        eventLabel = 'Technical Interview';
+        appStatus = 'interview_scheduled';
+      }
+
+      const venue = extractVenue(message) || 'Own Location / Online';
+      const mode = /campus|hall|lab|room|prp|auditorium/i.test(message) ? 'offline' : 'online';
+
+      const { data: insertedEvent } = await supabase
+        .from('events')
+        .insert({
+          user_id: session.userId,
+          company_id: targetComp.id,
+          event_type: eventType,
+          title: `${targetComp.name} - ${eventLabel}`,
+          start_time: parsedDate.toISOString(),
+          end_time: new Date(parsedDate.getTime() + 3600000).toISOString(),
+          venue,
+          mode,
+          confidence: 'high',
+          manual_override: true,
+        })
+        .select()
+        .single();
+
+      // Upgrade application status to reflect the scheduled event
+      const existingApp = appMap.get(targetComp.id);
+      if (!existingApp || existingApp.status === 'not_applied' || existingApp.status === 'applied') {
+        await supabase.from('applications').upsert(
+          {
+            user_id: session.userId,
+            company_id: targetComp.id,
+            status: appStatus,
+            status_source: 'ai_assistant_chat',
+            status_confidence: 'manual',
+            manual_override: true,
+            last_updated: new Date().toISOString(),
+          },
+          { onConflict: 'user_id,company_id' }
+        );
+      }
+
+      const formatted = formatDateTime(parsedDate.toISOString());
+
+      return NextResponse.json({
+        reply: `📅 Added **${targetComp.name} ${eventLabel}** on **${formatted}** (${venue}) directly to your Placement Calendar and Dashboard!`,
+        action: 'event_added',
+        event: insertedEvent,
+      });
+    }
+  }
 
   // 1. COMMAND: Update Status (Shortlisted, Selected, Rejected, Applied, Declined, Withdrawn)
   if (

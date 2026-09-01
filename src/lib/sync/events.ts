@@ -77,8 +77,8 @@ export function parseDateTime(text: string): Date | null {
   let month: number | null = null;
   let year = new Date().getFullYear();
 
-  // 1. Check DD-MM-YYYY or DD/MM/YYYY numeric format
-  const numMatch = text.match(/(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4}|\d{2})/);
+  // 1. Check DD-MM-YYYY, DD/MM/YYYY, or DD.MM.YYYY numeric format (e.g. "02.09.2026", "11-08-2026")
+  const numMatch = text.match(/(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{4}|\d{2})/);
   if (numMatch) {
     day = parseInt(numMatch[1], 10);
     month = parseInt(numMatch[2], 10) - 1;
@@ -87,7 +87,7 @@ export function parseDateTime(text: string): Date | null {
         ? 2000 + parseInt(numMatch[3], 10)
         : parseInt(numMatch[3], 10);
   } else {
-    // 2. Check Named Month format: "13th August 2026" or "August 13, 2026"
+    // 2. Check Named Month format: "13th August 2026", "2nd Sep 2026", "1st september"
     const nameMatch =
       text.match(
         new RegExp(
@@ -117,19 +117,20 @@ export function parseDateTime(text: string): Date | null {
 
   if (day === null || month === null) return null;
 
-  // 3. Extract Time (e.g. "by 02:30 PM", "by 7pm", "by 11.00 am", "at 9:30 am", "14:30")
+  // 3. Extract Time (e.g. "by 3.30 pm", "by 3.30 p", "at 11:30 AM", "by 7pm", "by 8 pm", "by 11.00 am sharp")
   let hours = 9;
   let minutes = 0;
 
   const timeMatch =
-    text.match(/(?:by|at|@|from)?\s*(\d{1,2})(?::|\.)?(\d{2})?\s*(am|pm|a\.m\.|p\.m\.)/i) ||
+    text.match(/(?:by|at|@|from)?\s*(\d{1,2})(?::|\.)?(\d{2})?\s*(am|pm|a\.m\.|p\.m\.|p\b|a\b)/i) ||
     text.match(/(?:by|at|@|from)?\s*(\d{1,2})(?::|\.)(\d{2})\s*(?:hours|hrs|sharp)?/i);
 
   if (timeMatch) {
     let h = parseInt(timeMatch[1], 10);
-    const isPm = timeMatch[3] && timeMatch[3].toLowerCase().startsWith('p');
+    const indicator = timeMatch[3] ? timeMatch[3].toLowerCase() : '';
+    const isPm = indicator.startsWith('p');
     if (isPm && h < 12) h += 12;
-    if (!isPm && timeMatch[3] && h === 12) h = 0;
+    if (!isPm && indicator && h === 12) h = 0;
     hours = h;
     if (timeMatch[2]) minutes = parseInt(timeMatch[2], 10);
   }
@@ -240,15 +241,27 @@ export function extractEvents(email: ParsedEmail): ExtractedEvent[] {
  */
 export function extractVenue(text: string): string | null {
   const venueMatch = text.match(
-    /(?:venue|location|room|hall|lab|place)\s*[:\-–—]\s*(.+?)(?:\r?\n|$|\.)/i
+    /(?:venue|location|room|hall|lab|place)\s*[:\-–—]\s*([^\r\n.]+)/i
   );
   if (venueMatch && venueMatch[1]) {
-    return venueMatch[1].trim().slice(0, 100);
+    const raw = venueMatch[1].trim();
+    if (raw.length > 0 && raw.length <= 50) return raw;
   }
 
-  const atMatch = text.match(/@\s*([A-Za-z0-9\s,.\-]{5,60})/);
+  const atMatch = text.match(/@\s*([A-Za-z0-9\s,\-]{3,45})(?:\r?\n|$|\.|\()/);
   if (atMatch && atMatch[1]) {
-    return atMatch[1].trim();
+    const raw = atMatch[1].trim();
+    if (/own\s+location/i.test(raw)) return 'Own Location';
+    if (/pearl\s+research\s+park|prp/i.test(raw)) return 'Pearl Research Park (PRP)';
+    if (/anna\s+auditorium/i.test(raw)) return 'Anna Auditorium';
+    if (/channa\s+reddy/i.test(raw)) return 'Channa Reddy Auditorium';
+    if (/sarojini\s+naidu/i.test(raw)) return 'Sarojini Naidu Gallery';
+    if (/respective\s+campus/i.test(raw)) return 'Respective Campus Venues';
+    return raw;
+  }
+
+  if (/own\s+location/i.test(text)) {
+    return 'Own Location';
   }
 
   if (/online|virtual|teams|zoom|meet|google\s+meet/i.test(text)) {
