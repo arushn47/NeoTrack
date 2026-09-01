@@ -266,6 +266,11 @@ export const COMPANY_ALIASES: Record<string, string> = {
   'ey (ernst & young)': 'EY GDS',
   'pwc': 'PwC',
   'pricewaterhousecoopers': 'PwC',
+  'apple sdet': 'Apple SDET',
+  'apple-sdet': 'Apple SDET',
+  'apple sre': 'Apple SRE',
+  'apple-sre': 'Apple SRE',
+  'apple': 'Apple SDET',
   'google': 'Google',
   'microsoft': 'Microsoft',
   'amazon': 'Amazon',
@@ -557,6 +562,32 @@ export function extractCompanyName(
       return 'Honeywell Technology Solutions Lab';
     }
   }
+  // Disambiguate Apple SDET vs Apple SRE
+  const isAppleEmail =
+    /\bapple\b/i.test(lowerCleaned) ||
+    /\bapple\b/i.test(lowerBody);
+
+  if (isAppleEmail) {
+    if (lowerCleaned.includes('sdet') || lowerBody.includes('sdet') || lowerBody.includes('lc102') || lowerBody.includes('lc 102')) {
+      return 'Apple SDET';
+    }
+    if (lowerCleaned.includes('sre') || lowerBody.includes('sre') || lowerBody.includes('new role') || lowerBody.includes('lc101') || lowerBody.includes('lc 101')) {
+      return 'Apple SRE';
+    }
+    // Date-based disambiguation for identical NeoPAT registration & eligibility emails:
+    // Aug 21-23, 2026 was the Apple SDET drive
+    // Aug 24+ 2026 was the Apple SRE drive (announced on Aug 24 as "New Role")
+    if (receivedAt) {
+      const d = new Date(receivedAt);
+      if (d < new Date('2026-08-24T00:00:00Z')) {
+        return 'Apple SDET';
+      } else {
+        return 'Apple SRE';
+      }
+    }
+    return 'Apple SDET';
+  }
+
   const sortedAliases = Object.keys(COMPANY_ALIASES).sort((a, b) => b.length - a.length);
   for (const alias of sortedAliases) {
     const canonical = COMPANY_ALIASES[alias];
