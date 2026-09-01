@@ -406,96 +406,153 @@ export default function CalendarClient({ events }: CalendarClientProps) {
       )}
 
       {/* Mode 2: Timeline / List View */}
-      {viewMode === 'timeline' && (
-        <div className="bg-[#101018]/90 backdrop-blur-2xl border border-zinc-800/80 rounded-3xl overflow-hidden shadow-2xl p-5 sm:p-6 space-y-4">
-          {filteredEvents.length === 0 ? (
-            <div className="py-16 text-center">
-              <CalendarCheck className="w-12 h-12 text-zinc-600 mx-auto mb-3" />
-              <h3 className="text-base font-bold text-white">No Scheduled Events</h3>
-              <p className="text-xs text-zinc-400 mt-1 max-w-sm mx-auto">
-                No active placement assessments or interview rounds found for the selected filter.
-              </p>
-            </div>
-          ) : (
-            <div className="divide-y divide-zinc-800/60">
-              {filteredEvents.map((evt) => {
-                const eventColors = EVENT_TYPE_COLORS[evt.eventType as EventType] || EVENT_TYPE_COLORS.other;
-                return (
-                  <div
-                    key={evt.id}
-                    className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 py-4 hover:bg-zinc-900/40 transition-all rounded-2xl px-3 group"
-                  >
-                    <div className="flex items-start gap-3.5">
-                      <div className={cn('w-3 h-3 rounded-full mt-1.5 flex-shrink-0', eventColors.dot)} />
-                      <div>
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <h4 className="text-sm font-bold text-white group-hover:text-indigo-300 transition-colors">
-                            {evt.companyName}
-                          </h4>
-                          <span
-                            className={cn(
-                              'text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-md border',
-                              getEventBadgeColor(evt.eventType)
-                            )}
-                          >
-                            {EVENT_TYPE_LABELS[evt.eventType as EventType] || evt.eventType.replace('_', ' ')}
-                          </span>
-                        </div>
-                        <p className="text-xs text-zinc-300 mt-0.5">{evt.title || evt.companyName}</p>
-                        <div className="flex items-center gap-2 text-xs text-zinc-500 mt-1">
-                          {evt.venue && (
-                            <span className="flex items-center gap-1">
-                              <MapPin className="w-3 h-3 text-emerald-400" />
-                              {evt.venue}
-                            </span>
-                          )}
-                          {evt.venue && evt.mode && <span>·</span>}
-                          {evt.mode && <span className="capitalize">{evt.mode}</span>}
-                        </div>
-                      </div>
-                    </div>
+      {viewMode === 'timeline' && (() => {
+        const now = new Date();
+        const upcomingEvents = filteredEvents
+          .filter((e) => e.startTime && new Date(e.startTime) >= now)
+          .sort((a, b) => new Date(a.startTime!).getTime() - new Date(b.startTime!).getTime());
+        const pastEvents = filteredEvents
+          .filter((e) => !e.startTime || new Date(e.startTime) < now)
+          .sort((a, b) => new Date(b.startTime || 0).getTime() - new Date(a.startTime || 0).getTime());
 
-                    <div className="flex items-center gap-4 self-end sm:self-center">
-                      <div className="text-right">
-                        <span className="text-xs font-semibold text-zinc-200 font-mono block">
-                          {evt.startTime
-                            ? new Date(evt.startTime).toLocaleDateString('en-IN', {
-                                day: 'numeric',
-                                month: 'short',
-                                hour: '2-digit',
-                                minute: '2-digit',
-                              })
-                            : 'Date TBA'}
-                        </span>
-                      </div>
-
-                      <div className="flex items-center gap-1.5">
-                        <Link
-                          href={`/companies/${evt.companyId}`}
-                          className="px-3 py-1.5 rounded-xl bg-zinc-900 hover:bg-zinc-800 text-xs font-semibold text-zinc-300 hover:text-white transition-all border border-zinc-800"
-                        >
-                          View Drive
-                        </Link>
-                        {evt.startTime && (
-                          <a
-                            href={`https://calendar.google.com/calendar/render?action=TEMPLATE&text=${encodeURIComponent(evt.title || 'Placement Event')}&dates=${new Date(evt.startTime).toISOString().replace(/-|:|\.\d+/g, '')}/${new Date(new Date(evt.startTime).getTime() + 3600000).toISOString().replace(/-|:|\.\d+/g, '')}&location=${encodeURIComponent(evt.venue || 'VIT Campus / Online')}`}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="p-1.5 rounded-xl bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-400 border border-indigo-500/20 transition-all flex items-center justify-center"
-                            title="Add to Google Calendar"
-                          >
-                            <CalendarIcon className="w-4 h-4" />
-                          </a>
-                        )}
-                      </div>
-                    </div>
+        const renderRow = (evt: CalendarEvent, isPast: boolean) => {
+          const eventColors = EVENT_TYPE_COLORS[evt.eventType as EventType] || EVENT_TYPE_COLORS.other;
+          return (
+            <div
+              key={evt.id}
+              className={cn(
+                'flex flex-col sm:flex-row sm:items-center justify-between gap-3 py-4 transition-all rounded-2xl px-3 group',
+                isPast
+                  ? 'opacity-40 hover:opacity-70'
+                  : 'hover:bg-zinc-900/40'
+              )}
+            >
+              <div className="flex items-start gap-3.5">
+                <div className={cn('w-3 h-3 rounded-full mt-1.5 flex-shrink-0', isPast ? 'bg-zinc-600' : eventColors.dot)} />
+                <div>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <h4 className={cn(
+                      'text-sm font-bold transition-colors',
+                      isPast ? 'text-zinc-400' : 'text-white group-hover:text-indigo-300'
+                    )}>
+                      {evt.companyName}
+                    </h4>
+                    <span
+                      className={cn(
+                        'text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-md border',
+                        isPast ? 'bg-zinc-900 text-zinc-500 border-zinc-700' : getEventBadgeColor(evt.eventType)
+                      )}
+                    >
+                      {EVENT_TYPE_LABELS[evt.eventType as EventType] || evt.eventType.replace('_', ' ')}
+                    </span>
+                    {isPast && (
+                      <span className="text-[10px] font-semibold text-zinc-600 bg-zinc-900 border border-zinc-800 px-2 py-0.5 rounded-md">
+                        Past
+                      </span>
+                    )}
                   </div>
-                );
-              })}
+                  <p className="text-xs text-zinc-400 mt-0.5">{evt.title || evt.companyName}</p>
+                  <div className="flex items-center gap-2 text-xs text-zinc-500 mt-1">
+                    {evt.venue && (
+                      <span className="flex items-center gap-1">
+                        <MapPin className="w-3 h-3 text-emerald-400" />
+                        {evt.venue}
+                      </span>
+                    )}
+                    {evt.venue && evt.mode && <span>·</span>}
+                    {evt.mode && <span className="capitalize">{evt.mode}</span>}
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-4 self-end sm:self-center">
+                <div className="text-right">
+                  <span className={cn(
+                    'text-xs font-semibold font-mono block',
+                    isPast ? 'text-zinc-500' : 'text-zinc-200'
+                  )}>
+                    {evt.startTime
+                      ? new Date(evt.startTime).toLocaleDateString('en-IN', {
+                          day: 'numeric',
+                          month: 'short',
+                          hour: '2-digit',
+                          minute: '2-digit',
+                        })
+                      : 'Date TBA'}
+                  </span>
+                </div>
+
+                <div className="flex items-center gap-1.5">
+                  <Link
+                    href={`/companies/${evt.companyId}`}
+                    className="px-3 py-1.5 rounded-xl bg-zinc-900 hover:bg-zinc-800 text-xs font-semibold text-zinc-300 hover:text-white transition-all border border-zinc-800"
+                  >
+                    View Drive
+                  </Link>
+                  {evt.startTime && !isPast && (
+                    <a
+                      href={`https://calendar.google.com/calendar/render?action=TEMPLATE&text=${encodeURIComponent(evt.title || 'Placement Event')}&dates=${new Date(evt.startTime).toISOString().replace(/-|:|\\.\\d+/g, '')}/${new Date(new Date(evt.startTime).getTime() + 3600000).toISOString().replace(/-|:|\\.\\d+/g, '')}&location=${encodeURIComponent(evt.venue || 'VIT Campus / Online')}`}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="p-1.5 rounded-xl bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-400 border border-indigo-500/20 transition-all flex items-center justify-center"
+                      title="Add to Google Calendar"
+                    >
+                      <CalendarIcon className="w-4 h-4" />
+                    </a>
+                  )}
+                </div>
+              </div>
             </div>
-          )}
-        </div>
-      )}
+          );
+        };
+
+        return (
+          <div className="bg-[#101018]/90 backdrop-blur-2xl border border-zinc-800/80 rounded-3xl overflow-hidden shadow-2xl p-5 sm:p-6 space-y-6">
+            {/* Upcoming Events Section */}
+            <div>
+              <div className="flex items-center gap-2 mb-3">
+                <Zap className="w-4 h-4 text-indigo-400" />
+                <span className="text-xs font-bold text-zinc-300 uppercase tracking-wider">
+                  Upcoming
+                </span>
+                <span className="text-[11px] text-zinc-500 font-mono">
+                  {upcomingEvents.length} event{upcomingEvents.length !== 1 ? 's' : ''}
+                </span>
+              </div>
+
+              {upcomingEvents.length === 0 ? (
+                <div className="py-10 text-center bg-zinc-900/30 rounded-2xl border border-zinc-800/50">
+                  <CalendarCheck className="w-10 h-10 text-zinc-600 mx-auto mb-2" />
+                  <p className="text-sm font-semibold text-zinc-400">No upcoming events</p>
+                  <p className="text-xs text-zinc-600 mt-1">You're all caught up! New events will appear here when shortlisted.</p>
+                </div>
+              ) : (
+                <div className="divide-y divide-zinc-800/60">
+                  {upcomingEvents.map((evt) => renderRow(evt, false))}
+                </div>
+              )}
+            </div>
+
+            {/* Past Events — collapsed/muted at bottom */}
+            {pastEvents.length > 0 && (
+              <div className="border-t border-zinc-800/60 pt-5">
+                <div className="flex items-center gap-2 mb-3">
+                  <Clock className="w-4 h-4 text-zinc-600" />
+                  <span className="text-xs font-bold text-zinc-600 uppercase tracking-wider">
+                    Past Events
+                  </span>
+                  <span className="text-[11px] text-zinc-700 font-mono">
+                    {pastEvents.length} event{pastEvents.length !== 1 ? 's' : ''}
+                  </span>
+                </div>
+                <div className="divide-y divide-zinc-800/30">
+                  {pastEvents.map((evt) => renderRow(evt, true))}
+                </div>
+              </div>
+            )}
+          </div>
+        );
+      })()}
 
       {/* Interactive Day Schedule Popup Modal (Tasks Drawer) */}
       {selectedDayData && (
