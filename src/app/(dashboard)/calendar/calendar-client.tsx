@@ -1,6 +1,7 @@
 'use client';
 
-import { useState, useMemo, useRef } from 'react';
+import { useState, useMemo, useRef, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import Link from 'next/link';
 import {
   Calendar as CalendarIcon,
@@ -148,6 +149,26 @@ export default function CalendarClient({ events }: CalendarClientProps) {
   const [modalDateStr, setModalDateStr] = useState<string | null>(null);
   const [showPastEvents, setShowPastEvents] = useState(false);
   const [viewMode, setViewMode] = useState<'month' | 'timeline'>('month');
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  // Lock body scroll and listen for Escape key when modal is open
+  useEffect(() => {
+    if (!modalDateStr) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setModalDateStr(null);
+    };
+    const originalOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    window.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.body.style.overflow = originalOverflow;
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [modalDateStr]);
 
   const year = currentDate.getFullYear();
   const month = currentDate.getMonth();
@@ -354,56 +375,62 @@ export default function CalendarClient({ events }: CalendarClientProps) {
             </div>
           </div>
 
-          {/* Desktop: Day detail modal */}
-          {modalDateStr && (() => {
-            const modalEvents = (eventsByDate.get(modalDateStr) || []).sort((a, b) =>
-              new Date(a.startTime || 0).getTime() - new Date(b.startTime || 0).getTime()
-            );
-            const modalDate = new Date(modalDateStr + 'T00:00:00');
-            return (
-              <div
-                className="hidden md:flex fixed inset-0 z-50 items-center justify-center p-6 bg-black/70 backdrop-blur-md"
-                onClick={() => setModalDateStr(null)}
-              >
+          {/* Desktop: Day detail modal rendered via Portal to cover entire viewport uniformly */}
+          {mounted && modalDateStr && createPortal(
+            (() => {
+              const modalEvents = (eventsByDate.get(modalDateStr) || []).sort((a, b) =>
+                new Date(a.startTime || 0).getTime() - new Date(b.startTime || 0).getTime()
+              );
+              const modalDate = new Date(modalDateStr + 'T00:00:00');
+              return (
                 <div
-                  className="bg-[#0e0e16]/98 border border-zinc-800 rounded-3xl w-full max-w-2xl shadow-2xl shadow-black/60 overflow-hidden"
-                  onClick={(e) => e.stopPropagation()}
+                  className="fixed inset-0 z-[9999] flex items-center justify-center p-4 sm:p-6 bg-black/80 backdrop-blur-md animate-in fade-in duration-200"
+                  onClick={() => setModalDateStr(null)}
                 >
-                  {/* Modal Header */}
-                  <div className="flex items-center justify-between px-6 pt-6 pb-4 border-b border-zinc-800/80">
-                    <div className="flex items-center gap-4">
-                      <div className="w-12 h-12 rounded-2xl bg-indigo-500/10 border border-indigo-500/25 flex items-center justify-center text-indigo-400 font-extrabold text-xl">
-                        {modalDate.getDate()}
+                  <div
+                    className="bg-[#0e0e16] border border-zinc-800/90 rounded-3xl w-full max-w-xl shadow-2xl shadow-black/80 overflow-hidden animate-in zoom-in-95 duration-200"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    {/* Modal Header */}
+                    <div className="flex items-center justify-between px-6 py-5 border-b border-zinc-800/80 bg-zinc-950/40">
+                      <div className="flex items-center gap-3.5">
+                        <div className="w-11 h-11 rounded-2xl bg-indigo-500/10 border border-indigo-500/25 flex items-center justify-center text-indigo-400 font-extrabold text-lg">
+                          {modalDate.getDate()}
+                        </div>
+                        <div>
+                          <p className="text-[11px] font-bold text-zinc-500 uppercase tracking-wider">
+                            {modalDate.toLocaleDateString('en-IN', { weekday: 'long' })}
+                          </p>
+                          <h3 className="text-base sm:text-lg font-extrabold text-white leading-tight">
+                            {modalDate.toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric' })}
+                          </h3>
+                        </div>
                       </div>
-                      <div>
-                        <p className="text-xs font-bold text-zinc-500 uppercase tracking-wider">
-                          {modalDate.toLocaleDateString('en-IN', { weekday: 'long' })}
-                        </p>
-                        <h3 className="text-lg font-extrabold text-white">
-                          {modalDate.toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric' })}
-                        </h3>
-                        <span className="text-[11px] font-semibold text-indigo-400 bg-indigo-500/10 border border-indigo-500/20 px-2 py-0.5 rounded-full">
-                          {modalEvents.length} placement event{modalEvents.length !== 1 ? 's' : ''}
+                      <div className="flex items-center gap-2.5">
+                        <span className="text-[11px] font-semibold text-indigo-400 bg-indigo-500/10 border border-indigo-500/20 px-2.5 py-1 rounded-full">
+                          {modalEvents.length} {modalEvents.length === 1 ? 'event' : 'events'}
                         </span>
+                        <button
+                          onClick={() => setModalDateStr(null)}
+                          className="p-2 rounded-xl text-zinc-400 hover:text-white hover:bg-zinc-800 transition-colors"
+                          aria-label="Close"
+                        >
+                          <X className="w-5 h-5" />
+                        </button>
                       </div>
                     </div>
-                    <button
-                      onClick={() => setModalDateStr(null)}
-                      className="p-2 rounded-xl text-zinc-400 hover:text-white hover:bg-zinc-800 transition-colors"
-                    >
-                      <X className="w-5 h-5" />
-                    </button>
-                  </div>
-                  {/* Event cards */}
-                  <div className="p-5 space-y-2.5 max-h-[60vh] overflow-y-auto">
-                    {modalEvents.map((evt) => (
-                      <EventCard key={evt.id} evt={evt} onClose={() => setModalDateStr(null)} />
-                    ))}
+                    {/* Event cards */}
+                    <div className="p-5 space-y-2.5 max-h-[60vh] overflow-y-auto">
+                      {modalEvents.map((evt) => (
+                        <EventCard key={evt.id} evt={evt} onClose={() => setModalDateStr(null)} />
+                      ))}
+                    </div>
                   </div>
                 </div>
-              </div>
-            );
-          })()}
+              );
+            })(),
+            document.body
+          )}
         </>
       )}
 
