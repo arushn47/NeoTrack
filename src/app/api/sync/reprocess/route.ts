@@ -435,9 +435,17 @@ export async function performReprocess(userId: string) {
     if (isMatchedInSelectionList) {
       computedStatus = 'selected';
     } else if (isMatchedInNextRound) {
-      computedStatus = 'interview_scheduled';
+      if (selectionEmails.length > 0) {
+        computedStatus = 'rejected';
+      } else {
+        computedStatus = 'interview_scheduled';
+      }
     } else if (isMatchedInTest) {
-      computedStatus = 'test_scheduled';
+      if (selectionEmails.length > 0 || nextRoundEmails.length > 0) {
+        computedStatus = 'rejected';
+      } else {
+        computedStatus = 'test_scheduled';
+      }
     } else if (isWithdrawn) {
       // 2. Candidate opted out / withdrawn and was not matched in any positive shortlist
       computedStatus = 'declined';
