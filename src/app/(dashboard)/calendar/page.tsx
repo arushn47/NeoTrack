@@ -63,16 +63,13 @@ export default async function CalendarPage() {
       const isManual = (evt as any).manual_override;
       const isUpcoming = evt.start_time ? new Date(evt.start_time) >= now : false;
 
-      // Only exclude eliminated/opted-out companies if candidate was NEVER shortlisted for test AND it's not a manual/upcoming event
-      if (['not_shortlisted', 'rejected', 'not_applied'].includes(status) && !isShortlistedForDrive && !isManual) {
-        continue;
-      }
-      if (['withdrawn', 'declined'].includes(status) && !isShortlistedForDrive && !isManual && !isUpcoming) {
+      // Exclude eliminated or opted-out companies unless manually added by user
+      if (['not_shortlisted', 'rejected', 'not_applied', 'withdrawn', 'declined'].includes(status) && !isManual) {
         continue;
       }
 
-      const dateKey = evt.start_time ? evt.start_time.split('T')[0] : 'no-date';
-      const key = `${evt.company_id}:${evt.event_type}:${dateKey}:${evt.title}`;
+      // Deduplicate: 1 single timing per company stage (e.g. 1 PPT, 1 Assessment)
+      const key = `${evt.company_id}:${evt.event_type}`;
       if (!seenCalendarKeys.has(key)) {
         seenCalendarKeys.add(key);
         calendarEvents.push({

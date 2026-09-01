@@ -511,21 +511,45 @@ export async function performReprocess(userId: string) {
       { onConflict: 'user_id,company_id' }
     );
 
-    // Manage events: wipe existing events for this company and re-insert fresh ones
+    // Manage events: wipe existing events for this company
     await supabase.from('events').delete().eq('user_id', userId).eq('company_id', comp.id);
 
-    const isEliminated = ['rejected', 'not_shortlisted', 'not_applied'].includes(finalStatus);
-    const now = new Date();
+    const isOptedOutOrEliminated = ['declined', 'withdrawn', 'not_shortlisted', 'not_applied', 'rejected'].includes(finalStatus);
 
-    for (const evt of allExtractedEvents) {
-      if (!evt.startTime) continue;
-      const isUpcoming = evt.startTime >= now;
+    if (!isOptedOutOrEliminated) {
+      // Sort company emails chronologically (earliest to latest) so latest email timing takes precedence
+      const sortedEmails = [...companyEmails].sort((a, b) => {
+        const tA = a.received_at ? new Date(a.received_at).getTime() : 0;
+        const tB = b.received_at ? new Date(b.received_at).getTime() : 0;
+        return tA - tB;
+      });
 
-      // Only insert if company is active, or if candidate is matched in a future test/event
-      if (!isEliminated || isMatchedInTest || isUpcoming) {
-        // Skip past events for withdrawn/eliminated companies
-        if (!isUpcoming && isEliminated) continue;
+      // Deduplicate: 1 single timing per event stage. Newer email replaces earlier timing!
+      const latestEventsByType = new Map<string, any>();
+      for (const e of sortedEmails) {
+        const evts = extractEvents({
+          gmailMessageId: e.id,
+          threadId: null,
+          sender: '',
+          senderEmail: '',
+          subject: e.subject || '',
+          receivedAt: e.received_at ? new Date(e.received_at) : new Date(),
+          bodySnippet: e.body_snippet || '',
+          bodyPlain: e.body_snippet || '',
+          bodyHtml: '',
+          hasAttachments: false,
+          attachments: [],
+          labels: [],
+        });
 
+        for (const evt of evts) {
+          if (!evt.startTime) continue;
+          // Store/update with the latest email's extracted event
+          latestEventsByType.set(evt.eventType, evt);
+        }
+      }
+
+      for (const evt of Array.from(latestEventsByType.values())) {
         await supabase.from('events').insert({
           user_id: userId,
           company_id: comp.id,

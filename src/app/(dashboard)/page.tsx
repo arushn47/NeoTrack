@@ -99,17 +99,14 @@ export default async function DashboardPage() {
       if (event.start_time && event.start_time < nowIso) continue;
 
       const companyStatus = appStatusMap.get(event.company_id) || 'unknown';
-      const isShortlistedForDrive = shortlistedCompanyIds.has(event.company_id);
 
-      if (['not_shortlisted', 'rejected', 'not_applied'].includes(companyStatus) && !isShortlistedForDrive) {
-        continue;
-      }
-      if (['withdrawn', 'declined'].includes(companyStatus) && !isShortlistedForDrive) {
+      // Skip eliminated or opted-out companies
+      if (['not_shortlisted', 'rejected', 'not_applied', 'withdrawn', 'declined'].includes(companyStatus)) {
         continue;
       }
 
-      const dateKey = event.start_time ? event.start_time.split('T')[0] : 'no-date';
-      const key = `${event.company_id}:${event.event_type}:${dateKey}`;
+      // Deduplicate: 1 single timing per event stage
+      const key = `${event.company_id}:${event.event_type}`;
       if (!seenEventKeys.has(key)) {
         seenEventKeys.add(key);
         uniqueUpcomingEvents.push(event);
