@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useRef, useEffect } from 'react';
+import { useRouter } from 'next/navigation';
 import {
   MessageSquare,
   X,
@@ -65,6 +66,7 @@ function renderFormattedText(text: string) {
 }
 
 export default function ChatAssistant() {
+  const router = useRouter();
   const [isOpen, setIsOpen] = useState(false);
   const [isExpanded, setIsExpanded] = useState(false);
   const [input, setInput] = useState('');
@@ -118,9 +120,10 @@ export default function ChatAssistant() {
 
       setMessages((prev) => [...prev, botMsg]);
 
-      // If status was updated, trigger a subtle page reload or state refresh if needed
-      if (data.action === 'status_updated') {
+      // If status or event was updated, trigger instant state refresh across the UI
+      if (data.action === 'status_updated' || data.action === 'event_added') {
         window.dispatchEvent(new Event('placement_status_updated'));
+        router.refresh();
       }
     } catch (err) {
       setMessages((prev) => [

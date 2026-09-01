@@ -240,15 +240,34 @@ export function extractEvents(email: ParsedEmail): ExtractedEvent[] {
  * Handles patterns like "@ Respective campus venues", "LC 202", "VIT Vellore campus".
  */
 export function extractVenue(text: string): string | null {
+  if (!text) return null;
+
+  // 1. Explicit lab / campus mentions in user commands or emails
+  if (/\b(?:respective\s+labs?|computer\s+labs?|in\s+labs?|at\s+labs?|physical\s+at\s+labs?)\b/i.test(text)) {
+    return 'Respective Labs (Offline)';
+  }
+  if (/\b(?:physical|offline)\s+(?:at|in)\s+([A-Za-z0-9\s,\-]{2,40})/i.test(text)) {
+    const m = text.match(/\b(?:physical|offline)\s+(?:at|in)\s+([A-Za-z0-9\s,\-]{2,40})/i);
+    if (m && m[1]) {
+      const clean = m[1].replace(/\s*(?:not\s+online|online|and).*$/i, '').trim();
+      return `${clean} (Offline)`;
+    }
+  }
+  if (/\b(?:lab|computer\s+lab)\b/i.test(text)) {
+    if (/physical|offline|in\s+person|not\s+online/i.test(text)) return 'Respective Labs (Offline)';
+  }
+
+  // 2. Explicit "venue: <place>" or "location: <place>"
   const venueMatch = text.match(
-    /(?:venue|location|room|hall|lab|place)\s*[:\-–—]\s*([^\r\n.]+)/i
+    /(?:venue|location|room|hall|place)\s*[:\-–—]\s*([^\r\n.,]+)/i
   );
   if (venueMatch && venueMatch[1]) {
     const raw = venueMatch[1].trim();
     if (raw.length > 0 && raw.length <= 50) return raw;
   }
 
-  const atMatch = text.match(/@\s*([A-Za-z0-9\s,\-]{3,45})(?:\r?\n|$|\.|\()/);
+  // 3. Check @ <place>
+  const atMatch = text.match(/@\s*([A-Za-z0-9\s,\-]{3,45})(?:\r?\n|$|\.|\(|\b)/);
   if (atMatch && atMatch[1]) {
     const raw = atMatch[1].trim();
     if (/own\s+location/i.test(raw)) return 'Own Location';
@@ -257,15 +276,28 @@ export function extractVenue(text: string): string | null {
     if (/channa\s+reddy/i.test(raw)) return 'Channa Reddy Auditorium';
     if (/sarojini\s+naidu/i.test(raw)) return 'Sarojini Naidu Gallery';
     if (/respective\s+campus/i.test(raw)) return 'Respective Campus Venues';
+    if (/lab/i.test(raw)) return 'Respective Labs (Offline)';
     return raw;
   }
 
-  if (/own\s+location/i.test(text)) {
+  // 4. "at <building/room>"
+  const atPlaceMatch = text.match(/\bat\s+(SJT\s*\d+|PRP\s*\d+|TT\s*\d+|MB\s*\d+|SMV\s*\d+|CB\s*\d+|Sarojini\s+Naidu|Anna\s+Auditorium|Channa\s+Reddy|Pearl\s+Research\s+Park|CDC\s+Office)/i);
+  if (atPlaceMatch && atPlaceMatch[1]) {
+    return atPlaceMatch[1].trim();
+  }
+
+  if (/own\s+location/i.test(text) && !/not\s+own\s+location/i.test(text)) {
     return 'Own Location';
   }
 
-  if (/online|virtual|teams|zoom|meet|google\s+meet/i.test(text)) {
+  // 5. Check online vs offline
+  const isExplicitOffline = /physical|offline|in[\s-]person|not\s+online/i.test(text);
+  if (!isExplicitOffline && /online|virtual|teams|zoom|meet|google\s+meet/i.test(text)) {
     return 'Online / Virtual';
+  }
+
+  if (isExplicitOffline) {
+    return 'Campus / Offline';
   }
 
   return null;
@@ -275,6 +307,8 @@ function determineMode(
   text: string,
   venue: string | null
 ): 'online' | 'offline' | 'hybrid' | 'unknown' {
+  if (/not\s+online|physical|offline|in[\s-]person/i.test(text)) return 'offline';
+  if (venue && /offline|lab|hall|room|building|prp|sjt|auditorium/i.test(venue)) return 'offline';
   if (venue && /online|virtual|teams|zoom|meet/i.test(venue)) return 'online';
   if (/online|virtual|teams|zoom|meet/i.test(text)) return 'online';
   if (venue || /campus|hall|lab|room|building/i.test(text)) return 'offline';
