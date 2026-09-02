@@ -231,35 +231,92 @@ export default function CompanyDetailClient({ company }: CompanyDetailClientProp
         </div>
 
         {/* Quick Metadata Bar */}
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-2">
-          <div className="p-3.5 bg-zinc-950/60 rounded-2xl border border-zinc-800/80">
-            <span className="text-[10px] text-zinc-500 font-bold uppercase tracking-wider block">CTC / Package</span>
-            <span className="text-sm font-extrabold text-emerald-400 mt-1 block truncate">
-              {company.application?.ctc ? company.application.ctc.replace(/\*/g, '').trim() : 'Not specified'}
-            </span>
-          </div>
+        {(() => {
+          const travelReq = company.application?.notes;
+          const driveModeDisplay =
+            travelReq === 'vellore'
+              ? '✈️ VIT Vellore'
+              : travelReq === 'chennai'
+              ? '✈️ VIT Chennai'
+              : travelReq === 'bhopal_lab'
+              ? '🏫 Bhopal Labs'
+              : travelReq === 'online'
+              ? '💻 Online'
+              : 'To be announced';
 
-          <div className="p-3.5 bg-zinc-950/60 rounded-2xl border border-zinc-800/80">
-            <span className="text-[10px] text-zinc-500 font-bold uppercase tracking-wider block">Stipend</span>
-            <span className="text-sm font-bold text-zinc-200 mt-1 block truncate">
-              {company.application?.stipend ? company.application.stipend.replace(/\*/g, '').trim() : 'Not specified'}
-            </span>
-          </div>
+          // Helper to sanitize location string to pure city/state/country
+          const rawLocation = company.application?.location;
+          let cleanedLoc = rawLocation ? rawLocation.replace(/<[^>]+>/g, ' ').replace(/^[*,\.\s>\-]+/, '').replace(/[*,\.\s>\-]+$/, '').trim() : null;
+          if (cleanedLoc) {
+            cleanedLoc = cleanedLoc.replace(/\s*(?:All\s+the|All\s+interested|Placement\s+Office|On\s+(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)|Students\s+with|Registered\s+students|Registration|Note|Eligibility|Skills|Service|Work\s+Mode|Joining|Economy|Round\s+Trip|Depending\s+on|Below\s+attachment|Job\s+Description|JD).*$/i, '');
+            cleanedLoc = cleanedLoc.replace(/\b(?:internship|placement|drive|hiring|offer|job|role|any\s+honeywell\s+site)\b/gi, '');
+            cleanedLoc = cleanedLoc.replace(/^\s*(?:\(Core\):?|Core\):?)\s*/i, '');
+            cleanedLoc = cleanedLoc.replace(/[\.\,\:\-\(\)\–—]+$/, '').replace(/^[\.\,\:\-\(\)\–—]+/, '').replace(/\s+/g, ' ').trim();
+            cleanedLoc = cleanedLoc.replace(/,([^\s])/g, ', $1');
+            if (
+              !cleanedLoc ||
+              cleanedLoc.length < 2 ||
+              /please find|mail with|nonsense|come at|assistance|applicable|candidate|round\s+\d+|results|service agreement|forwarded message|candidates list|as per business|interested students|shortlisted stu|economy class|round\s+trip|placement office|online|^[>,\.\*\s]+$/i.test(cleanedLoc) ||
+              /^(?:vit\s+)?(?:vellore|chennai|bhopal(?:\s+labs)?)$/i.test(cleanedLoc.trim())
+            ) {
+              cleanedLoc = null;
+            }
+          }
 
-          <div className="p-3.5 bg-zinc-950/60 rounded-2xl border border-zinc-800/80">
-            <span className="text-[10px] text-zinc-500 font-bold uppercase tracking-wider block">Job Location</span>
-            <span className="text-sm font-bold text-zinc-200 mt-1 block truncate">
-              {company.application?.location ? company.application.location.replace(/\*/g, '').trim() : 'Pan India / Remote'}
-            </span>
-          </div>
+          const workLocationDisplay = cleanedLoc || 'Pan India / Remote';
 
-          <div className="p-3.5 bg-zinc-950/60 rounded-2xl border border-zinc-800/80">
-            <span className="text-[10px] text-zinc-500 font-bold uppercase tracking-wider block">Synced Circulars</span>
-            <span className="text-sm font-bold text-indigo-400 mt-1 block font-mono">
-              {company.emails.length} emails linked
-            </span>
-          </div>
-        </div>
+          return (
+            <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 pt-2">
+              <div className="p-3.5 bg-zinc-950/60 rounded-2xl border border-zinc-800/80">
+                <span className="text-[10px] text-zinc-500 font-bold uppercase tracking-wider block">CTC / Package</span>
+                <span className="text-sm font-extrabold text-emerald-400 mt-1 block truncate">
+                  {company.application?.ctc ? company.application.ctc.replace(/\*/g, '').trim() : 'Not specified'}
+                </span>
+              </div>
+
+              <div className="p-3.5 bg-zinc-950/60 rounded-2xl border border-zinc-800/80">
+                <span className="text-[10px] text-zinc-500 font-bold uppercase tracking-wider block">Stipend</span>
+                <span className="text-sm font-bold text-zinc-200 mt-1 block truncate">
+                  {company.application?.stipend ? company.application.stipend.replace(/\*/g, '').trim() : 'Not specified'}
+                </span>
+              </div>
+
+              <div className="p-3.5 bg-zinc-950/60 rounded-2xl border border-zinc-800/80">
+                <span className="text-[10px] text-zinc-500 font-bold uppercase tracking-wider block">Drive Mode / Travel</span>
+                <span
+                  className={cn(
+                    'text-sm font-bold mt-1 block truncate',
+                    driveModeDisplay.includes('Vellore')
+                      ? 'text-amber-300 font-extrabold'
+                      : driveModeDisplay.includes('Chennai')
+                      ? 'text-orange-300 font-extrabold'
+                      : driveModeDisplay.includes('Bhopal')
+                      ? 'text-indigo-300'
+                      : driveModeDisplay.includes('Online')
+                      ? 'text-emerald-300'
+                      : 'text-zinc-400'
+                  )}
+                >
+                  {driveModeDisplay}
+                </span>
+              </div>
+
+              <div className="p-3.5 bg-zinc-950/60 rounded-2xl border border-zinc-800/80">
+                <span className="text-[10px] text-zinc-500 font-bold uppercase tracking-wider block">Work Location</span>
+                <span className="text-sm font-bold text-zinc-200 mt-1 block truncate">
+                  {workLocationDisplay}
+                </span>
+              </div>
+
+              <div className="p-3.5 bg-zinc-950/60 rounded-2xl border border-zinc-800/80 col-span-2 sm:col-span-1">
+                <span className="text-[10px] text-zinc-500 font-bold uppercase tracking-wider block">Synced Circulars</span>
+                <span className="text-sm font-bold text-indigo-400 mt-1 block font-mono">
+                  {company.emails.length} emails linked
+                </span>
+              </div>
+            </div>
+          );
+        })()}
       </div>
 
       {/* Hiring Process Pipeline Stepper */}

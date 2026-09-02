@@ -2,7 +2,8 @@ import { NextResponse } from 'next/server';
 import { getSession } from '@/lib/auth';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { classifyEmail, extractCompanyName, normalizeCompanyName } from '@/lib/sync/classifier';
-import { extractEvents, extractJobDetails } from '@/lib/sync/events';
+import { extractEvents, extractJobDetails, extractTravelRequirement } from '@/lib/sync/events';
+import { isFuzzyCompanyMatch } from '@/lib/sync/engine';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 120;
@@ -93,7 +94,7 @@ export async function performReprocess(userId: string) {
 
   // 3. Phase 1: Establish Official NeoPAT Companies ONLY
   // ONLY emails from noreply.cdcinfo@vitstudent.ac.in define the company drives in NeoTrack!
-  const validCompanyMap = new Map<string, { id: string; canonicalName: string }>(); // name -> { id, canonicalName }
+  const validCompanyMap = new Map<string, { id: string; canonicalName: string; activeDriveDate: Date }>(); // name -> { id, canonicalName, activeDriveDate }
   const validCompanyIdSet = new Set<string>();
   const emailUpdates: Array<{ id: string; company_id: string | null; classification: string; is_relevant: boolean }> = [];
 
@@ -101,6 +102,7 @@ export async function performReprocess(userId: string) {
     const subject = email.subject || '';
     const sender = email.sender || '';
     const bodySnippet = email.body_snippet || '';
+    const emailDate = email.received_at ? new Date(email.received_at) : new Date();
 
     const classification = classifyEmail({
       gmailMessageId: email.id,
@@ -108,7 +110,7 @@ export async function performReprocess(userId: string) {
       sender,
       senderEmail: sender.match(/<([^>]+)>/)?.[1] || sender,
       subject,
-      receivedAt: email.received_at ? new Date(email.received_at) : new Date(),
+      receivedAt: emailDate,
       bodySnippet,
       bodyPlain: bodySnippet,
       bodyHtml: '',
@@ -134,7 +136,7 @@ export async function performReprocess(userId: string) {
           .single();
 
         if (existingComp) {
-          comp = { id: existingComp.id, canonicalName: normalized };
+          comp = { id: existingComp.id, canonicalName: normalized, activeDriveDate: emailDate };
         } else {
           // Check aliases
           const { data: aliasMatch } = await supabase
@@ -145,7 +147,7 @@ export async function performReprocess(userId: string) {
             .single();
 
           if (aliasMatch) {
-            comp = { id: aliasMatch.id, canonicalName: normalized };
+            comp = { id: aliasMatch.id, canonicalName: normalized, activeDriveDate: emailDate };
             await supabase
               .from('companies')
               .update({ name: normalized })
@@ -163,9 +165,14 @@ export async function performReprocess(userId: string) {
               .single();
 
             if (newComp) {
-              comp = { id: newComp.id, canonicalName: normalized };
+              comp = { id: newComp.id, canonicalName: normalized, activeDriveDate: emailDate };
             }
           }
+        }
+      } else {
+        // Update activeDriveDate to the latest registered/eligible drive cycle
+        if (emailDate > comp.activeDriveDate) {
+          comp.activeDriveDate = emailDate;
         }
       }
 
@@ -217,6 +224,7 @@ export async function performReprocess(userId: string) {
     const subject = email.subject || '';
     const sender = email.sender || '';
     const bodySnippet = email.body_snippet || '';
+    const emailDate = email.received_at ? new Date(email.received_at) : new Date();
 
     const classification = classifyEmail({
       gmailMessageId: email.id,
@@ -224,7 +232,7 @@ export async function performReprocess(userId: string) {
       sender,
       senderEmail: sender.match(/<([^>]+)>/)?.[1] || sender,
       subject,
-      receivedAt: email.received_at ? new Date(email.received_at) : new Date(),
+      receivedAt: emailDate,
       bodySnippet,
       bodyPlain: bodySnippet,
       bodyHtml: '',
@@ -243,42 +251,11 @@ export async function performReprocess(userId: string) {
       if (validCompanyMap.has(normalized)) {
         matchedCompanyId = validCompanyMap.get(normalized)!.id;
       } else {
-        // 2. Substring match with distinct company guards (longest name first)
-        const sortedValid = Array.from(validCompanyMap.entries()).sort((a, b) => b[0].length - a[0].length);
-        for (const [neoName, comp] of sortedValid) {
-          // Guard: Never cross-match EY GDS and EY SAP
-          if (
-            (neoName.includes('gds') && normalized.includes('sap')) ||
-            (neoName.includes('sap') && normalized.includes('gds')) ||
-            (!neoName.includes('sap') && !neoName.includes('gds') && (normalized.includes('sap') || normalized.includes('gds'))) ||
-            (!normalized.includes('sap') && !normalized.includes('gds') && (neoName.includes('sap') || neoName.includes('gds')))
-          ) {
-            continue;
-          }
-
-          // Guard: Never cross-match Honeywell Aerospace and Honeywell Technology Solutions Lab
-          if (
-            (neoName.includes('aerospace') && normalized.includes('technology')) ||
-            (neoName.includes('technology') && normalized.includes('aerospace'))
-          ) {
-            continue;
-          }
-
-          // Guard: Never cross-match Apple SDET and Apple SRE
-          if (
-            (neoName.includes('sdet') && normalized.includes('sre')) ||
-            (neoName.includes('sre') && normalized.includes('sdet')) ||
-            (!neoName.includes('sdet') && !neoName.includes('sre') && (normalized.includes('sdet') || normalized.includes('sre'))) ||
-            (!normalized.includes('sdet') && !normalized.includes('sre') && (neoName.includes('sdet') || neoName.includes('sre')))
-          ) {
-            continue;
-          }
-
-          if (neoName.length >= 4 && normalized.length >= 4) {
-            if (neoName === normalized || neoName.includes(normalized) || normalized.includes(neoName)) {
-              matchedCompanyId = comp.id;
-              break;
-            }
+        // 2. Token-based fuzzy match against legitimate NeoPAT companies
+        for (const comp of Array.from(validCompanyMap.values())) {
+          if (isFuzzyCompanyMatch(comp.canonicalName, companyName)) {
+            matchedCompanyId = comp.id;
+            break;
           }
         }
       }
@@ -359,14 +336,42 @@ export async function performReprocess(userId: string) {
         .map((cm) => (cm as unknown as { email_id: string }).email_id)
     );
 
+    // 1. Identify true official CDC registration circular with highest precision
+    const mainCircularEmail =
+      companyEmails.find((e) => {
+        const text = `${e.subject || ''}\n${e.body_snippet || ''}`;
+        return (
+          /name\s+of\s+the\s+company/i.test(text) &&
+          /eligibility\s+criteria/i.test(text) &&
+          /category/i.test(text)
+        );
+      }) ||
+      companyEmails.find((e) =>
+        /super\s*dream.*registration|dream.*registration|placement\s+registration|internship\s+registration|offer\s+registration/i.test(e.subject || '')
+      ) ||
+      companyEmails.find((e) =>
+        /date\s+of\s+visit/i.test(e.body_snippet || '') || /registration/i.test(e.subject || '')
+      ) ||
+      companyEmails[0];
+
+    const mainEmailText = `${mainCircularEmail.subject || ''}\n${mainCircularEmail.body_snippet || ''}`;
+    const mainJobDetails = extractJobDetails(mainEmailText);
+
+    // 2. Extract fallback details from all combined CDC emails only if main circular missed them
     const combinedEmailText = companyEmails
       .map((e) => `${e.subject || ''}\n${e.body_snippet || ''}`)
       .join('\n\n');
+    const fallbackJobDetails = extractJobDetails(combinedEmailText);
 
-    const extractedJob = extractJobDetails(combinedEmailText);
+    const extractedJob = {
+      role: mainJobDetails.role || fallbackJobDetails.role,
+      ctc: mainJobDetails.ctc || fallbackJobDetails.ctc,
+      stipend: mainJobDetails.stipend || fallbackJobDetails.stipend,
+      location: mainJobDetails.location || fallbackJobDetails.location,
+    };
 
     // Identify user actions & progression from emails
-    const isWithdrawn = companyEmails.some((e) => {
+    const withdrawalEmails = companyEmails.filter((e) => {
       const full = `${e.subject || ''} ${e.body_snippet || ''}`.toLowerCase();
       return (
         e.classification === 'withdrawal' ||
@@ -376,7 +381,12 @@ export async function performReprocess(userId: string) {
       );
     });
 
-    const hasConfirmedRegistration = companyEmails.some((e) => {
+    const latestWithdrawalTime = withdrawalEmails.reduce((max, e) => {
+      const t = e.received_at ? new Date(e.received_at).getTime() : 0;
+      return Math.max(max, t);
+    }, 0);
+
+    const registrationEmails = companyEmails.filter((e) => {
       const subj = (e.subject || '').toLowerCase();
       const full = `${subj} ${e.body_snippet || ''}`.toLowerCase();
       return (
@@ -387,26 +397,51 @@ export async function performReprocess(userId: string) {
       );
     });
 
-    // Progression stage emails
+    const latestRegistrationTime = registrationEmails.reduce((max, e) => {
+      const t = e.received_at ? new Date(e.received_at).getTime() : 0;
+      return Math.max(max, t);
+    }, 0);
+
+    // ONLY considered withdrawn if the withdrawal occurred AFTER the latest registration confirmation!
+    const isWithdrawn = withdrawalEmails.length > 0 && latestWithdrawalTime > latestRegistrationTime;
+    const hasConfirmedRegistration = registrationEmails.length > 0 && latestRegistrationTime >= latestWithdrawalTime;
+
+    const isAfterRegistration = (e: { received_at: string | null }) => {
+      if (!latestRegistrationTime) return true;
+      const t = e.received_at ? new Date(e.received_at).getTime() : 0;
+      return t >= (latestRegistrationTime - 2 * 60 * 1000);
+    };
+
+    // Progression stage emails (ONLY those on or after latest registration!)
     const selectionListPattern = /selection\s+list|congratulations.*offer|selected\s+candidates|final\s+select/i;
     const selectionEmails = companyEmails.filter((e) =>
-      selectionListPattern.test(e.subject || '')
+      isAfterRegistration(e) && selectionListPattern.test(e.subject || '')
     );
 
     const nextRoundPattern =
       /next\s+round\s+of\s+selection|next\s+round\s+is\s+scheduled|interview\s+(?:is\s+)?scheduled|technical\s+interview|hr\s+interview|final\s+interview|interview\s+shortlist|shortlist\s+for\s+interview|shortlisted\s+for\s+(?:the\s+)?interview/i;
     const nextRoundEmails = companyEmails.filter((e) =>
-      nextRoundPattern.test(`${e.subject || ''} ${e.body_snippet || ''}`)
+      isAfterRegistration(e) && nextRoundPattern.test(`${e.subject || ''} ${e.body_snippet || ''}`)
     );
 
-    const testShortlistPattern = /shortlist|online\s+test|coding\s+test|assessment|test\s+schedule/i;
+    const testShortlistPattern = /shortlist\s+(?:for|of)?|test\s+shortlist|shortlisted\s+candidates|shortlisted\s+students/i;
     const testShortlistEmails = companyEmails.filter((e) =>
-      testShortlistPattern.test(e.subject || '')
+      isAfterRegistration(e) && testShortlistPattern.test(e.subject || '')
+    );
+
+    const testPattern =
+      /online\s+test|coding\s+test|aptitude\s+test|assessment\s+test|assessment\s+is\s+scheduled|online\s+assessment|codility|hackerrank|mettl/i;
+    const testEmails = companyEmails.filter((e) =>
+      isAfterRegistration(e) && testPattern.test(`${e.subject || ''} ${e.body_snippet || ''}`)
     );
 
     const isMatchedInSelectionList = selectionEmails.some((e) => matchedEmailIds.has(e.id));
     const isMatchedInNextRound = nextRoundEmails.some((e) => matchedEmailIds.has(e.id));
-    const isMatchedInTest = testShortlistEmails.some((e) => matchedEmailIds.has(e.id));
+    const isMatchedInTest = companyEmails.some(
+      (e) =>
+        matchedEmailIds.has(e.id) &&
+        (testShortlistPattern.test(e.subject || '') || testPattern.test(`${e.subject || ''} ${e.body_snippet || ''}`))
+    );
 
     // Extract events
     const allExtractedEvents = companyEmails.flatMap((e) =>
@@ -426,7 +461,12 @@ export async function performReprocess(userId: string) {
       })
     );
 
-    const hasPptEvent = allExtractedEvents.some((evt) => evt.eventType === 'ppt');
+    const hasPptEvent = companyEmails.some((e) => {
+      if (!isAfterRegistration(e)) return false;
+      const subj = (e.subject || '').toLowerCase();
+      const body = (e.body_snippet || '').toLowerCase();
+      return /ppt|pre[\s-]*placement\s*talk/i.test(subj) || /pre[\s-]*placement\s*talk/i.test(body);
+    });
 
     // ── STATUS COMPUTATION (Strict not_shortlisted vs rejected vs positive match distinction) ──
     let computedStatus = 'not_applied';
@@ -447,21 +487,21 @@ export async function performReprocess(userId: string) {
         computedStatus = 'test_scheduled';
       }
     } else if (isWithdrawn) {
-      // 2. Candidate opted out / withdrawn and was not matched in any positive shortlist
+      // 2. Candidate opted out / withdrawn
       computedStatus = 'declined';
-    } else if (selectionEmails.length > 0 || nextRoundEmails.length > 0 || testShortlistEmails.length > 0) {
-      // Test, next round, or selection emails were released, but candidate was NEVER matched in any shortlist!
-      if (hasConfirmedRegistration) {
-        computedStatus = 'not_shortlisted';
-      } else {
-        computedStatus = 'not_applied';
-      }
     } else if (hasConfirmedRegistration) {
-      if (hasPptEvent) {
+      // 3. Candidate registered for this drive:
+      if (selectionEmails.length > 0 || nextRoundEmails.length > 0 || testShortlistEmails.length > 0 || testEmails.length > 0) {
+        // A test, interview, or selection list was released for this drive, and the user was NOT shortlisted in it
+        computedStatus = 'not_shortlisted';
+      } else if (hasPptEvent) {
         computedStatus = 'ppt_scheduled';
       } else {
         computedStatus = 'applied';
       }
+    } else if (selectionEmails.length > 0 || nextRoundEmails.length > 0 || testShortlistEmails.length > 0 || testEmails.length > 0) {
+      // Candidate never registered for this drive
+      computedStatus = 'not_applied';
     } else {
       computedStatus = 'not_applied';
     }
@@ -481,6 +521,19 @@ export async function performReprocess(userId: string) {
       finalRole = extractedJob.role && !/\byou\s*(?:are|have|re)\b/i.test(extractedJob.role) ? extractedJob.role : null;
     }
 
+    // Extract Drive Mode strictly from the main registration/announcement circular email
+    const travelReq = extractTravelRequirement(mainEmailText);
+
+    // Job Work Location (e.g. Remote, Bengaluru, Gurugram, Pan India)
+    let workLocation = extractedJob.location || null;
+    if (workLocation && /please find|attached shortlisted|services interested|as per business|nonsense|come at|economy class|round trip|placement office|\bpre$/i.test(workLocation)) {
+      workLocation = null;
+    }
+    if (workLocation) {
+      if (/remote/i.test(workLocation)) workLocation = 'Remote';
+      else if (/pan\s+india/i.test(workLocation)) workLocation = 'Pan India';
+    }
+
     await supabase.from('applications').upsert(
       {
         user_id: userId,
@@ -491,7 +544,8 @@ export async function performReprocess(userId: string) {
         role: finalRole,
         ctc: extractedJob.ctc || existingApp?.ctc || null,
         stipend: extractedJob.stipend || existingApp?.stipend || null,
-        location: extractedJob.location || existingApp?.location || null,
+        location: workLocation || 'Pan India / Remote',
+        notes: travelReq || null,
         last_updated: new Date().toISOString(),
       },
       { onConflict: 'user_id,company_id' }

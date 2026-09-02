@@ -150,6 +150,27 @@ export default function CalendarClient({ events }: CalendarClientProps) {
   const [showPastEvents, setShowPastEvents] = useState(false);
   const [viewMode, setViewMode] = useState<'month' | 'timeline'>('month');
   const [mounted, setMounted] = useState(false);
+  const [syncingGcal, setSyncingGcal] = useState(false);
+  const [gcalMessage, setGcalMessage] = useState<string | null>(null);
+
+  const handleSyncGoogleCalendar = async () => {
+    setSyncingGcal(true);
+    setGcalMessage(null);
+    try {
+      const res = await fetch('/api/calendar/push-all', { method: 'POST' });
+      const data = await res.json();
+      if (res.ok) {
+        setGcalMessage(data.message || `Synced ${data.syncedCount || 0} events to Google Calendar!`);
+      } else {
+        setGcalMessage('Make sure Google Calendar API is enabled on Google Cloud and your account is reconnected.');
+      }
+    } catch {
+      setGcalMessage('Sync failed. Please check network connection.');
+    } finally {
+      setSyncingGcal(false);
+      setTimeout(() => setGcalMessage(null), 5000);
+    }
+  };
 
   useEffect(() => {
     setMounted(true);
@@ -256,11 +277,35 @@ export default function CalendarClient({ events }: CalendarClientProps) {
           </h1>
           <p className="text-xs text-zinc-500 mt-1 ml-1">Tests, PPTs & interviews — all in one place</p>
         </div>
-        <div className="flex items-center bg-zinc-900 border border-zinc-800 rounded-2xl p-1 gap-1">
-          <button onClick={() => setViewMode('month')} className={cn('px-3 py-1.5 rounded-xl text-xs font-bold transition-all', viewMode === 'month' ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/30' : 'text-zinc-400 hover:text-zinc-200')}>Month</button>
-          <button onClick={() => setViewMode('timeline')} className={cn('px-3 py-1.5 rounded-xl text-xs font-bold transition-all', viewMode === 'timeline' ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/30' : 'text-zinc-400 hover:text-zinc-200')}>Timeline</button>
+        <div className="flex items-center gap-2.5">
+          <button
+            onClick={handleSyncGoogleCalendar}
+            disabled={syncingGcal}
+            className="flex items-center gap-2 px-3 py-1.5 rounded-2xl bg-gradient-to-r from-blue-600/20 to-indigo-600/20 hover:from-blue-600/30 hover:to-indigo-600/30 border border-blue-500/30 text-blue-300 text-xs font-bold transition-all shadow-sm active:scale-95 disabled:opacity-50"
+            title="Push all scheduled placement events directly to Google Calendar"
+          >
+            <CalendarCheck className={cn('w-3.5 h-3.5 text-blue-400', syncingGcal && 'animate-spin')} />
+            {syncingGcal ? 'Syncing...' : 'Sync Google Calendar'}
+          </button>
+          <div className="flex items-center bg-zinc-900 border border-zinc-800 rounded-2xl p-1 gap-1">
+            <button onClick={() => setViewMode('month')} className={cn('px-3 py-1.5 rounded-xl text-xs font-bold transition-all', viewMode === 'month' ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/30' : 'text-zinc-400 hover:text-zinc-200')}>Month</button>
+            <button onClick={() => setViewMode('timeline')} className={cn('px-3 py-1.5 rounded-xl text-xs font-bold transition-all', viewMode === 'timeline' ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/30' : 'text-zinc-400 hover:text-zinc-200')}>Timeline</button>
+          </div>
         </div>
       </div>
+
+      {/* Sync Feedback Toast */}
+      {gcalMessage && (
+        <div className="mb-4 p-3 rounded-2xl bg-indigo-500/10 border border-indigo-500/25 flex items-center justify-between text-xs text-indigo-200 animate-fade-in">
+          <div className="flex items-center gap-2">
+            <CalendarCheck className="w-4 h-4 text-indigo-400 flex-shrink-0" />
+            <span>{gcalMessage}</span>
+          </div>
+          <button onClick={() => setGcalMessage(null)} className="text-zinc-400 hover:text-white p-1">
+            <X className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      )}
 
       {/* Nav bar */}
       <div className="flex items-center justify-between mb-4 px-1">

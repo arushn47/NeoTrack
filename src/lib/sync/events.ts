@@ -315,6 +315,72 @@ function determineMode(
   return 'unknown';
 }
 
+export type TravelRequirement = 'vellore' | 'chennai' | 'bhopal_lab' | 'online' | null;
+
+/**
+ * Extracts campus travel requirement / Mode for VIT Bhopal students strictly from the main circular email.
+ */
+export function extractTravelRequirement(text: string): TravelRequirement {
+  const clean = text
+    .replace(/[*_`>#]/g, ' ')
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&amp;/gi, '&')
+    .replace(/\s+/g, ' ');
+
+  // 1. Isolate the "Date of Visit" / Process Schedule section if present
+  const scheduleMatch = clean.match(/(?:Date\s+of\s+Visit|Process\s+details|Process\s+schedule|Hiring\s+process)[\s\S]{1,600}?(?=(?:Eligible|Eligibility|CTC|Stipend|Selection|Website|Last\s+date)|$)/i);
+  const targetText = scheduleMatch ? scheduleMatch[0] : clean;
+
+  // 2. Bhopal exemption check: e.g. "Virtual Interview : 31st August 2026 (AP & Bhopal Campus Students)"
+  if (/virtual\s+interview[^(]*?\(\s*(?:ap\s*&?\s*)?bhopal/i.test(targetText)) {
+    return 'online';
+  }
+
+  // 3. Explicit Travel to Vellore check (e.g. "Interview : @ Physical VIT Vellore campus", "Entire physical Process @ VIT Vellore")
+  if (
+    /@\s*(?:physical\s+)?vit\s+vellore/i.test(targetText) ||
+    /physical\s+interview[^.\n]*?(?:@\s*)?(?:physical\s+)?vit\s+vellore/i.test(targetText) ||
+    /interview[^.\n]*?(?:@\s*)?(?:physical\s+)?vit\s+vellore/i.test(targetText) ||
+    /interview[^.\n]*?at\s+vellore\s+campus/i.test(targetText) ||
+    /bhopal[^.\n]*?have\s+to\s+travel.*vellore/i.test(targetText) ||
+    /@\s*vit\s+vellore\s+campus\s*\(\s*entire\s+physical/i.test(targetText)
+  ) {
+    return 'vellore';
+  }
+
+  // 4. Explicit Travel to Chennai check
+  if (
+    /@\s*(?:physical\s+)?vit\s+chennai/i.test(targetText) ||
+    /physical\s+interview[^.\n]*?(?:@\s*)?(?:physical\s+)?vit\s+chennai/i.test(targetText) ||
+    /interview[^.\n]*?(?:@\s*)?(?:physical\s+)?vit\s+chennai/i.test(targetText) ||
+    /interview[^.\n]*?at\s+chennai\s+campus/i.test(targetText)
+  ) {
+    return 'chennai';
+  }
+
+  // 5. Respective Campus Labs (All stages in campus labs / venues at Bhopal)
+  if (
+    /@\s*respective\s+campus\s+(?:labs|venues|lab)/i.test(targetText) ||
+    /in\s+campus\s+lab\s+only/i.test(targetText) ||
+    /report\s+to\s+lc\s*\d+/i.test(targetText) ||
+    /@\s*lc\s*\d+/i.test(targetText)
+  ) {
+    return 'bhopal_lab';
+  }
+
+  // 6. Online / Virtual
+  if (
+    /\bvirtual\b/i.test(targetText) ||
+    /@\s*own\s+location/i.test(targetText) ||
+    /online\s+mode/i.test(targetText) ||
+    /@\s*online/i.test(targetText)
+  ) {
+    return 'online';
+  }
+
+  return null;
+}
+
 /**
  * Extracts Job Details (Role, CTC, Stipend, Location) from email text.
  */
@@ -334,56 +400,90 @@ export function extractJobDetails(text: string): ExtractedJobDetails {
   const unannouncedPattern = /will be (?:announced|informed|shared) later|tba|tbd|to be (?:announced|disclosed)|not disclosed/i;
 
   // 0. CSE Branch Eligibility Guard
-  // If email explicitly excludes CSE (e.g. "other than CSE", "CSE are not eligible"), ignore job details for B.Tech CSE Core student
   if (/other\s+than\s+(?:cse|computer)|(?:cse|computer|it)[^.\n]*?not\s+eligible|except\s+cse/i.test(cleanText)) {
     return { role: null, ctc: null, stipend: null, location: null, neoIdMatched: false, matchedNeoIdValue: null };
   }
 
-  // 1. CTC Extraction — only the base LPA number (e.g. "14 LPA"), JB/variable ignored
-  const ctcBlockMatch = cleanText.match(/\bCTC\b\s*[:\-–—\t]?\s*([\s\S]{1,400}?)(?:\b(?:Last date|Website|Location|Eligible|Eligibility|Stipend|Selection|Process|Registration)\b|$)/i);
+  // 1. CTC Extraction — handles single LPA, ranges (e.g. "8.5 - 10 LPA", "30 _ 31 LPA"), PPO formulas, and additions ("14+1 LPA")
+  const ctcBlockMatch = cleanText.match(/\b(?:CTC|Cost\s+to\s+Company|Salary|Package|Compensation|PPO\s+CTC|Gross\s+CTC|PPO)\b\s*[:\-–—\t]?\s*([\s\S]{1,500}?)(?:\b(?:Last date|Website|Location|Eligible|Eligibility|Stipend|Selection|Process|Registration)\b|$)/i);
   if (ctcBlockMatch && unannouncedPattern.test(ctcBlockMatch[1])) {
     ctc = null;
   } else {
     const ctcText = ctcBlockMatch ? ctcBlockMatch[1].trim() : cleanText;
+    
+    // 1. Remove all parentheses and bracket contents completely (e.g. "(RB -2+3+4)", "(If Converted)", "(10% Var)")
+    const cleanCtc = ctcText
+      .replace(/\([^)]*\)/g, ' ')
+      .replace(/\[[^\]]*\]/g, ' ')
+      .replace(/&nbsp;/gi, ' ')
+      .replace(/\s+/g, ' ');
 
-    // Match ALL occurrences of "Rs. X LPA" or "X LPA" — take the max (total/gross CTC)
-    const baseMatches = [...ctcText.matchAll(/(?:INR|₹|Rs\.?)\s*(\d+(?:\.\d+)?)\s*(?:LPA|L\s*PA|Lakhs?|Lac)\b/gi)];
-    if (baseMatches.length > 0) {
-      const values = baseMatches
-        .map(m => parseFloat(m[1]))
-        .filter(v => v > 0 && v < 200);
-      if (values.length > 0) {
-        ctc = `${Math.max(...values)} LPA`;
+    const nums: number[] = [];
+
+    // 2. Check for addition formulas: e.g. "14+1 LPA", "14 + 1"
+    const addMatches = [...cleanCtc.matchAll(/(\d+(?:\.\d+)?)\s*\+\s*(\d+(?:\.\d+)?)(?:\s*(?:LPA|L\s*PA|Lakhs?|Lacs?|Lac|\bL\b))?/gi)];
+    for (const m of addMatches) {
+      const sum = parseFloat(m[1]) + parseFloat(m[2]);
+      if (sum >= 3 && sum < 200) nums.push(sum);
+    }
+
+    // 3. Match ranges like "12 - 15 LPA", "30 _ 31 LPA", "8.5 to 10 LPA"
+    if (nums.length === 0) {
+      const rangeMatches = [...cleanCtc.matchAll(/(\d+(?:\.\d+)?)\s*(?:-|–|—|_|\bto\b)\s*(\d+(?:\.\d+)?)\s*(?:LPA|L\s*PA|Lakhs?|Lacs?|Lac|\bL\b)/gi)];
+      for (const m of rangeMatches) {
+        const v1 = parseFloat(m[1]);
+        const v2 = parseFloat(m[2]);
+        if (v1 >= 3 && v1 < 200) nums.push(v1);
+        if (v2 >= 3 && v2 < 200) nums.push(v2);
       }
     }
 
-    // Fallback: scan whole cleanText for CTC/Package label
-    if (!ctc) {
-      const fallbackMatches = [...cleanText.matchAll(
-        /(?:CTC|Package|Salary|Compensation)\s*[:\-–—\t]?\s*(?:INR|₹|Rs\.?)?\s*(\d+(?:\.\d+)?)\s*(?:LPA|L\s*PA|Lakhs?|Lac)\b/gi
-      )];
-      if (fallbackMatches.length > 0) {
-        const values = fallbackMatches
-          .map(m => parseFloat(m[1]))
-          .filter(v => v > 0 && v < 200);
-        if (values.length > 0) ctc = `${Math.max(...values)} LPA`;
+    // 4. Match individual LPA numbers like "20 LPA", "20 L", "14.5 LPA", "10 Lakhs"
+    if (nums.length === 0) {
+      const baseMatches = [...cleanCtc.matchAll(/(?:INR|₹|Rs\.?)?\s*(\d+(?:\.\d+)?)\s*(?:LPA|L\s*PA|Lakhs?|Lacs?|Lac|\bL\b|Per\s+Annum|\/\s*annum)\b/gi)];
+      for (const m of baseMatches) {
+        const v = parseFloat(m[1]);
+        if (v >= 3 && v < 200) nums.push(v);
+      }
+    }
+
+    // 5. Match raw rupee amounts like "12,00,000" or "7,61,250"
+    if (nums.length === 0) {
+      const rupeeMatches = [...cleanCtc.matchAll(/(?:CTC|Package|Salary|Compensation|PPO|Research|Development|Growth)\s*[:\-–—\t]?\s*(?:INR|₹|Rs\.?)?\s*([\d,]+)(?:\s*(?:INR|₹|\/\-))?/gi)];
+      for (const m of rupeeMatches) {
+        const val = parseInt(m[1].replace(/,/g, ''), 10);
+        if (val >= 300000 && val <= 20000000 && ![2024, 2025, 2026, 2027, 2028, 2029].includes(val)) {
+          const lpa = Math.round((val / 100000) * 100) / 100;
+          nums.push(lpa);
+        }
+      }
+    }
+
+    if (nums.length > 0) {
+      const min = Math.min(...nums);
+      const max = Math.max(...nums);
+      if (min === max) {
+        ctc = `${min.toString().replace(/\.0$/, '')} LPA`;
+      } else {
+        ctc = `${min.toString().replace(/\.0$/, '')} - ${max.toString().replace(/\.0$/, '')} LPA`;
       }
     }
   }
 
-  // 2. Stipend Extraction
-  const stipendBlockMatch = cleanText.match(/\b(?:Stipend|Stipened)\b\s*[:\-–—\t]?\s*([\s\S]{1,300}?)(?:\b(?:CTC|Last date|Website|Location|Eligible|Eligibility|Selection|Process|Registration)\b|$)/i);
+  // 2. Stipend Extraction — handles single amounts, ranges (e.g. "₹75,000 - ₹1,00,000/month"), and multi-role tiers
+  const stipendBlockMatch = cleanText.match(/\b(?:Stipend|Stipened|Internship\s+Stipend)\b\s*[:\-–—\t]?\s*([\s\S]{1,400}?)(?:\b(?:CTC|Last date|Website|Location|Eligible|Eligibility|Selection|Process|Registration)\b|$)/i);
   if (stipendBlockMatch && unannouncedPattern.test(stipendBlockMatch[1])) {
     stipend = null;
   } else if (stipendBlockMatch) {
     const stipendText = stipendBlockMatch[1];
-    // Also match bare numbers like "40000" without currency prefix
-    const stipendMatches = [...stipendText.matchAll(/(?:INR|₹|Rs\.?)?\s*([\d,]+)(?:\s*(?:\/\s*month|\/\s*mo|pm|p\.?m\.?|k|thousand))?/gi)];
+    const stipendMatches = [...stipendText.matchAll(/(?:INR|₹|Rs\.?)?\s*([\d,]+(?:\.\d+)?)\s*(?:k|thousand)?(?:\s*(?:\/\s*month|\/\s*mo|pm|p\.?m\.?|per\s+month))?/gi)];
     const nums: number[] = [];
     for (const m of stipendMatches) {
-      const rawNum = m[1].replace(/,/g, '');
-      const val = parseInt(rawNum, 10);
-      // Accept values 5000-500000, excluding years
+      let rawNum = m[1].replace(/,/g, '');
+      let val = parseFloat(rawNum);
+      if (/k\b/i.test(m[0]) && val < 500) {
+        val = val * 1000;
+      }
       if (val >= 5000 && val < 500000 && ![2024, 2025, 2026, 2027, 2028, 2029].includes(val)) {
         nums.push(val);
       }
@@ -441,18 +541,29 @@ export function extractJobDetails(text: string): ExtractedJobDetails {
     role = category;
   }
 
-  // 4. Job Location Extraction
-  const locMatch = cleanText.match(
-    /(?:Job\s+)?Location\s*[:\-–—\t]?\s*([A-Za-z0-9\s\/\-]+?)(?:\s+(?:Eligibility|Designation|Role|Process|CTC|Stipend|Note|Kind|Website|Selection)|$|\.|\r?\n)/i
-  );
+  // 4. Job Location Extraction (extracts clean cities, states, and countries without internship/drive noise)
+  const locMatch = cleanText.match(/(?:Job\s+)?Location\s*[:\-–—\t]?\s*([^\n\r*<>{}_]{2,80})/i);
   if (locMatch) {
-    const rawLoc = locMatch[1].replace(/^[*,\.\s>\-]+/, '').replace(/[*,\.\s>\-]+$/, '').trim().slice(0, 40);
+    let rawLoc = locMatch[1]
+      .replace(/^[:\-–—\s*\(s\)]+/, '')
+      .replace(/[:\-–—\s*]+$/, '')
+      .replace(/\s*(?:Note|Eligibility|Registration|CTC|Stipend|Internship|Placement|Offer|Process|Website|Warm|Kind|Selection|Designation|Role|Job|JD|Position|Skills|Service|All\s+the|Joining|Work\s+Mode|Economy|On\s+Wed|For\s+more|PPO|About|Mandatory|depending\s+on).*$/i, '')
+      .replace(/\b(?:internship|placement|drive|hiring|offer|job|role|any\s+honeywell\s+site)\b/gi, '')
+      .replace(/^\s*(?:\(Core\):?|Core\):?)\s*/i, '')
+      .replace(/[\.\,\:\-\(\)\–—]+$/, '')
+      .replace(/^[\.\,\:\-\(\)\–—]+/, '')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .slice(0, 50);
+
     if (
       rawLoc &&
       rawLoc.length >= 2 &&
-      !/nonsense|come at|assistance|applicable|candidate|round\s+\d+|results|lab|service agreement|forwarded message|scheduled on|online test|@|own location|pearl research|anna auditorium|will be|tba|tbd|^[>,\.\*\s]+$/i.test(rawLoc)
+      !/nonsense|come at|assistance|applicable|candidate|round\s+\d+|results|lab|service agreement|forwarded message|scheduled on|online test|@|own location|pearl research|anna auditorium|students with|clash|will be|tba|tbd|^[>,\.\*\s]+|those in|for you is|services interested|economy class|round\s+trip|will be subject|where we work|entities in|\bpre$|placement\s+office/i.test(rawLoc)
     ) {
-      location = rawLoc;
+      if (/remote/i.test(rawLoc)) location = 'Remote';
+      else if (/pan\s+india/i.test(rawLoc)) location = 'Pan India';
+      else location = rawLoc;
     }
   }
 

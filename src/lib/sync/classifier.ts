@@ -342,6 +342,7 @@ export const COMPANY_ALIASES: Record<string, string> = {
   'zs': 'ZS Associates',
   'zs associates': 'ZS Associates',
   'london stock exchange': 'London Stock Exchange Group (LSEG)',
+  'honeywell': 'Honeywell Technology Solutions Lab',
   'honeywell aerospace': 'Honeywell Aerospace',
   'honeywell technology solutions': 'Honeywell Technology Solutions Lab',
   'honeywell technology solutions lab': 'Honeywell Technology Solutions Lab',
@@ -377,6 +378,18 @@ export const COMPANY_ALIASES: Record<string, string> = {
   'sandisk': 'SanDisk',
   'american express': 'American Express',
   'amex': 'American Express',
+  'kinaxis': 'Kinaxis',
+  'superjoin': 'Superjoin Finance',
+  'superjoin finance': 'Superjoin Finance',
+  'ethos': 'Ethos Technologies',
+  'ethos technologies': 'Ethos Technologies',
+  'ethos life': 'Ethos Technologies',
+  'futures first': 'Futures First',
+  'futuresfirst': 'Futures First',
+  'jpmorgan': 'JPMorgan Chase',
+  'jpmorganchase': 'JPMorgan Chase',
+  'jpmorgan chase': 'JPMorgan Chase',
+  'jpmc': 'JPMorgan Chase',
   'chubb': 'Chubb',
   'colgate': 'Colgate-Palmolive',
   'colgate-palmolive': 'Colgate-Palmolive',
@@ -392,12 +405,25 @@ export const COMPANY_ALIASES: Record<string, string> = {
   'spense': 'Spense',
   'unthinkable': 'Unthinkable Solutions',
   'unthinkable solutions': 'Unthinkable Solutions',
+  'unthikable': 'Unthinkable Solutions',
   'veeva': 'Veeva Systems',
   'veeva systems': 'Veeva Systems',
+  'nutanix': 'Nutanix',
+  'groww': 'Groww',
+  'sabre': 'Sabre',
+  'winwire': 'Winwire',
+  'winwire technologies': 'Winwire',
+  'workindia': 'WorkIndia',
+  'work india': 'WorkIndia',
+  'bottomline': 'Bottomline',
+  'bottomline technologies': 'Bottomline',
+  'squadstack': 'Squadstack',
+  'pixelcompute': 'Pixelcompute',
+  'couchbase': 'Couchbase',
+  'zanskar': 'Zanskar',
   'whirlpool': 'Whirlpool',
   'zensar': 'Zensar',
   'zensar technologies': 'Zensar',
-  'honeywell': 'Honeywell',
 };
 
 /**
@@ -461,27 +487,34 @@ const SUBJECT_COMPANY_PATTERNS: RegExp[] = [
  */
 const SUBJECT_PREFIXES = [
   /^(?:fwd|re|fw)\s*:\s*/i,
-  /^urgent\s*:\s*/i,
-  /^kind\s+attention!!?\s*/i,
+  /^(?:extended\s+deadline|extension\s+of\s+deadline|deadline\s+extended)\s*[-:]\s*/i,
+  /^(?:updated|update|revised|revision)\s*[-:]\s*/i,
+  /^(?:urgent|immediately|immediate|important|critical)\s*[-:]\s*/i,
+  /^(?:kind\s+attention!!?|attention!!?)\s*[-:]?\s*/i,
   /^confirmed\s*:\s*(?:your\s+registration\s+for\s+)?/i,
   /^confirmation\s*:\s*/i,
   /^congratulations!{1,3}\s*(?:you'?re\s+)?(?:eligible\s+for\s+)?/i,
-  /^important\s*:\s*date\s+change\s+for\s+/i,
-  /^updated\s+optional\s+form\s+available\s*[-–—]\s*/i,
+  /^(?:important|urgent|update|reminder)?\s*[-:]?\s*date\s+change\s+(?:for|:)\s*/i,
+  /^(?:date\s+change|rescheduled|schedule\s+change|time\s+change|venue\s+change)\s*(?:for|:)\s*/i,
+  /^(?:placement\s+drive\s+date\s+update|drive\s+date\s+update)\s*[-:]\s*/i,
+  /^updated\s+optional\s+form\s+available\s*[-–—:]\s*/i,
   /^venue\s+update\s*:\s*/i,
   /^registration\s*:\s*/i,
   /^reminder\s*:\s*/i,
   /^report\s+immediately\s*:\s*/i,
-  /^shortlist\s+(?:for|of)?\s*/i,
+  /^shortlist\s+(?:for|of)?\s*[-:]\s*/i,
+  /^(?:corrigendum|addendum|rescheduled)\s*[-:]\s*/i,
+  /^(?:registration\s+extended|last\s+date\s+extended)\s*[-:]\s*/i,
 ];
 
 /**
  * Common suffixes to strip from company names.
  */
 const SUBJECT_SUFFIXES = [
-  /\s+(?:super\s+dream|dream|regular)\s+(?:internship|placement|drive).*$/i,
-  /\s+placement\s+drive.*$/i,
-  /\s+campus\s+drive.*$/i,
+  /\s+(?:super\s+dream|dream|regular)\s+(?:internship|placement|drive|offer).*$/i,
+  /\s+(?:super\s+dream|dream|regular)$/i,
+  /\s+(?:placement\s+drive|campus\s+drive|internship\s+drive|drive).*$/i,
+  /\s+(?:internship|intern|offer|placement)$/i,
   /\s+2027\s+batch.*$/i,
   /\s+2026\s+batch.*$/i,
   /\s+pre[\s-]*placement.*$/i,
@@ -502,6 +535,7 @@ const NON_COMPANY_WORDS = [
   'complete today', 'complete', 'practice test', 'practice assessment',
   'mock test', 'top coders', 'nerd season', 'codeathon', 'course',
   'learning contents', 'reminder', 'q2', 'q2 software', '2027 batch', '2026 batch', 'batch',
+  'date change', 'date change for sabre', 'date change for squadstack', 'schedule change', 'venue change',
   // Role titles / profiles that are never company names
   'ps associate software engineer', 'associate software engineer', 'ps associate engineer',
   'associate engineer', 'software engineer', 'software development engineer',
@@ -539,6 +573,50 @@ export function extractCompanyName(
     return null;
   }
 
+  // 1.5. Direct High-Precision Extraction from standard College Placement Circular body:
+  // e.g. "Super Dream Internship - 2027 Batch Name of the Company Kinaxis Category Super Dream Internship"
+  // e.g. "Placement Drive Date Update ... Drive Name: Sabre Drive Number: pat-PL-2026-1108"
+  if (bodySnippet) {
+    const driveNameMatch = bodySnippet.match(
+      /(?:drive\s+name|name\s+of\s+the\s+drive)\s*[:\-*]*\s*([A-Za-z0-9&\s\-\.()]+?)(?:\s+(?:drive\s+number|new\s+drive\s+date|category|date\s+of\s+visit|eligibility|eligible|ctc|role|stipend|\n|\r|\*)|$)/i
+    );
+    if (driveNameMatch && driveNameMatch[1]) {
+      const extractedDrive = cleanCompanyName(driveNameMatch[1]);
+      if (
+        extractedDrive &&
+        extractedDrive.length >= 2 &&
+        extractedDrive.length < 50 &&
+        !NON_COMPANY_WORDS.includes(extractedDrive.toLowerCase())
+      ) {
+        const norm = normalizeCompanyName(extractedDrive);
+        if (!['super', 'dream', 'internship', 'placement', 'drive', 'finance'].includes(norm.toLowerCase())) {
+          return norm;
+        }
+      }
+    }
+
+    const bodyCompMatch = bodySnippet.match(
+      /(?:name\s+of\s+the\s+company|company\s+name)\s*[:\-*]*\s*([A-Za-z0-9&\s\-\.()]+?)(?:\s+(?:category|date\s+of\s+visit|eligibility|eligible|ctc|role|stipend|\n|\r|\*)|$)/i
+    );
+    if (bodyCompMatch && bodyCompMatch[1]) {
+      const extractedFromCustomBody = cleanCompanyName(bodyCompMatch[1]);
+      if (
+        extractedFromCustomBody &&
+        extractedFromCustomBody.length >= 2 &&
+        extractedFromCustomBody.length < 50 &&
+        !NON_COMPANY_WORDS.includes(extractedFromCustomBody.toLowerCase())
+      ) {
+        const norm = normalizeCompanyName(extractedFromCustomBody);
+        const lowerNorm = norm.toLowerCase();
+        if (
+          !['super', 'dream', 'internship', 'placement', 'drive', 'finance'].includes(lowerNorm)
+        ) {
+          return norm;
+        }
+      }
+    }
+  }
+
   // Clean the subject to remove prefixes like "Confirmed: Your Registration for"
   const cleanedSubject = cleanSubjectNoise(subject);
   const lowerCleaned = cleanedSubject.toLowerCase();
@@ -571,18 +649,11 @@ export function extractCompanyName(
   }
 
   // Disambiguate Honeywell Aerospace vs Honeywell Technology Solutions Lab
-  if (lowerCleaned.includes('honeywell')) {
+  if (lowerCleaned.includes('honeywell') || lowerBody.includes('honeywell')) {
     if (lowerCleaned.includes('aerospace') || lowerBody.includes('aerospace') || lowerBody.includes('1190')) {
       return 'Honeywell Aerospace';
     }
-    if (
-      lowerCleaned.includes('technology solutions') ||
-      lowerCleaned.includes('tsl') ||
-      lowerBody.includes('technology solutions') ||
-      lowerBody.includes('1135')
-    ) {
-      return 'Honeywell Technology Solutions Lab';
-    }
+    return 'Honeywell Technology Solutions Lab';
   }
 
   // Disambiguate Apple SDET vs Apple SRE
@@ -666,6 +737,13 @@ function cleanSubjectNoise(subject: string): string {
         changed = true;
       }
     }
+    // Also strip standalone leading punctuation and "urgent -" noise
+    const leadingNoise = /^[-–—:\s]*(?:urgent|important|reminder|updated|extended\s+deadline)?[-–—:\s]*/i;
+    const cleaned = str.replace(leadingNoise, '').trim();
+    if (cleaned.length > 0 && cleaned !== str) {
+      str = cleaned;
+      changed = true;
+    }
   }
   return str;
 }
@@ -675,6 +753,9 @@ function cleanSubjectNoise(subject: string): string {
  */
 export function cleanCompanyName(name: string): string {
   let str = cleanSubjectNoise(name);
+
+  // Strip leading date change / update noise if any slipped through
+  str = str.replace(/^(?:date\s+change\s+(?:for|:)?|rescheduled\s+(?:for|:)?)/i, '').trim();
 
   // Strip trailing suffixes
   for (const s of SUBJECT_SUFFIXES) {

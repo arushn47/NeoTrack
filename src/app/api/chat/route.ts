@@ -3,6 +3,7 @@ import { getSession } from '@/lib/auth';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { parseDateTime, extractVenue } from '@/lib/sync/events';
 import { formatDateTime } from '@/lib/utils';
+import { pushEventToGoogleCalendar } from '@/lib/calendar/google-sync';
 
 /**
  * POST /api/chat
@@ -42,7 +43,7 @@ export async function POST(request: Request) {
 
     supabase
       .from('events')
-      .select('id, company_id, event_type, title, start_time, venue, mode')
+      .select('id, company_id, event_type, title, start_time, end_time, venue, mode')
       .eq('user_id', session.userId)
       .order('start_time', { ascending: true }),
   ]);
@@ -89,10 +90,167 @@ export async function POST(request: Request) {
   const parsedDate = parseDateTime(message);
 
   // ═══════════════════════════════════════════════════════════════════════════
-  // 1. COMMAND: Add / Schedule Placement Event on Calendar
+  // 1. COMMAND: Update Event Location / Venue / Mode
   // ═══════════════════════════════════════════════════════════════════════════
-  // Triggered when target company is mentioned AND a date/time is extracted,
-  // OR when explicit scheduling intent is detected with a date
+  // Triggered when user asks to update venue or mode (e.g. "change the location of the infosys test to physically at the lab")
+  const isVenueUpdateQuery =
+    /location|venue|place|mode|offline|online|physical|in[\s-]person|at\s+the\s+lab|in\s+lab/i.test(lowerMsg) &&
+    (/change|update|set|move|make|switch/i.test(lowerMsg) || /to\s+(?:physically|offline|online|lab|prp|sjt|campus|auditorium)/i.test(lowerMsg));
+
+  if (targetComp && isVenueUpdateQuery) {
+    let targetVenue = extractVenue(message);
+    if (!targetVenue || targetVenue === 'Campus / Offline') {
+      if (/physically\s+at\s+the\s+lab|in\s+the\s+lab|at\s+lab|physical\s+lab|in\s+labs|at\s+the\s+lab/i.test(lowerMsg)) {
+        targetVenue = 'Respective Labs (Offline)';
+      } else if (/offline|physical|in[\s-]person/i.test(lowerMsg)) {
+        targetVenue = 'Campus / Offline';
+      } else if (/online|virtual|own\s+location/i.test(lowerMsg)) {
+        targetVenue = 'Own Location / Online';
+      }
+    }
+
+    if (targetVenue) {
+      const isOffline =
+        /offline|lab|campus|prp|sjt|hall|room|auditorium|physical/i.test(targetVenue) ||
+        /offline|physical|in[\s-]person/i.test(lowerMsg);
+      const mode = isOffline ? 'offline' : 'online';
+
+      // Find existing events for this company
+      const compEvents = (events || []).filter((e) => e.company_id === targetComp.id);
+
+      if (compEvents.length > 0) {
+        const primaryEvent = compEvents[0];
+        await supabase
+          .from('events')
+          .update({
+            venue: targetVenue,
+            mode,
+            manual_override: true,
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', primaryEvent.id);
+
+        // Deduplicate any extra duplicate events for this company
+        if (compEvents.length > 1) {
+          const duplicateIds = compEvents.slice(1).map((e) => e.id);
+          await supabase.from('events').delete().in('id', duplicateIds);
+        }
+
+        // Push update to Google Calendar in background
+        if (primaryEvent.start_time) {
+          pushEventToGoogleCalendar({
+            userId: session.userId,
+            title: primaryEvent.title || `${targetComp.name} - Online Assessment`,
+            startTime: primaryEvent.start_time,
+            endTime: primaryEvent.end_time,
+            venue: targetVenue,
+            mode,
+          }).catch((err) => console.error('Google Calendar auto-sync:', err));
+        }
+
+        return NextResponse.json({
+          reply: `📍 Updated **${targetComp.name}** test location to **${targetVenue}** (${mode.toUpperCase()}) on your Placement Calendar & Google Calendar!`,
+          action: 'event_updated',
+          companyId: targetComp.id,
+        });
+      } else {
+        const eventDate = parsedDate || new Date(Date.now() + 24 * 60 * 60 * 1000);
+        const { data: insertedEvt } = await supabase.from('events').insert({
+          user_id: session.userId,
+          company_id: targetComp.id,
+          event_type: 'online_test',
+          title: `${targetComp.name} - Online Assessment`,
+          start_time: eventDate.toISOString(),
+          end_time: new Date(eventDate.getTime() + 3600000).toISOString(),
+          venue: targetVenue,
+          mode,
+          confidence: 'high',
+          manual_override: true,
+        }).select().single();
+
+        if (insertedEvt) {
+          pushEventToGoogleCalendar({
+            userId: session.userId,
+            title: `${targetComp.name} - Online Assessment`,
+            startTime: eventDate.toISOString(),
+            endTime: new Date(eventDate.getTime() + 3600000).toISOString(),
+            venue: targetVenue,
+            mode,
+          }).catch((err) => console.error('Google Calendar auto-sync:', err));
+        }
+
+        return NextResponse.json({
+          reply: `📍 Set **${targetComp.name}** test location to **${targetVenue}** (${mode.toUpperCase()}) on your Placement Calendar & Google Calendar!`,
+          action: 'event_created',
+          companyId: targetComp.id,
+        });
+      }
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // 2. COMMAND: Update CTC / Stipend / Role / Job Location
+  // ═══════════════════════════════════════════════════════════════════════════
+  const isMetadataUpdate =
+    /set|update|change|add/i.test(lowerMsg) &&
+    /ctc|salary|stipend|package|role|job\s+location/i.test(lowerMsg);
+
+  if (targetComp && isMetadataUpdate) {
+    const appUpdates: Record<string, unknown> = {
+      manual_override: true,
+      last_updated: new Date().toISOString(),
+      status_source: 'ai_assistant_chat',
+    };
+
+    let replyMsg = '';
+
+    const ctcMatch = message.match(/(?:ctc|salary|package)\s*(?:to|is|=)?\s*(?:rs\.?|inr|₹)?\s*(\d+(?:\.\d+)?)\s*(?:lpa|lakhs?|lac)?/i);
+    if (ctcMatch) {
+      const ctcVal = `${ctcMatch[1]} LPA`;
+      appUpdates.ctc = ctcVal;
+      replyMsg += `• **CTC**: ${ctcVal}\n`;
+    }
+
+    const stipendMatch = message.match(/(?:stipend)\s*(?:to|is|=)?\s*(?:rs\.?|inr|₹)?\s*([\d,]+)/i);
+    if (stipendMatch) {
+      const num = parseInt(stipendMatch[1].replace(/,/g, ''), 10);
+      if (num > 0) {
+        const stipendVal = `₹${num.toLocaleString('en-IN')}/month`;
+        appUpdates.stipend = stipendVal;
+        replyMsg += `• **Stipend**: ${stipendVal}\n`;
+      }
+    }
+
+    const roleMatch = message.match(/(?:role|designation|profile|position)\s*(?:to|is|=)\s*([A-Za-z0-9\s\/\-\+]+)/i);
+    if (roleMatch && !/ctc|salary|stipend|location/i.test(roleMatch[1])) {
+      const roleVal = roleMatch[1].trim();
+      appUpdates.role = roleVal;
+      replyMsg += `• **Role**: ${roleVal}\n`;
+    }
+
+    if (Object.keys(appUpdates).length > 3) {
+      await supabase
+        .from('applications')
+        .upsert(
+          {
+            user_id: session.userId,
+            company_id: targetComp.id,
+            ...appUpdates,
+          },
+          { onConflict: 'user_id,company_id' }
+        );
+
+      return NextResponse.json({
+        reply: `✅ Updated **${targetComp.name}** details:\n${replyMsg}`,
+        action: 'metadata_updated',
+        companyId: targetComp.id,
+      });
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // 3. COMMAND: Add / Schedule Placement Event on Calendar (With Date)
+  // ═══════════════════════════════════════════════════════════════════════════
   if (
     targetComp &&
     parsedDate &&
@@ -113,27 +271,63 @@ export async function POST(request: Request) {
       appStatus = 'interview_scheduled';
     }
 
-    const venue = extractVenue(message) || 'Own Location / Online';
-    const isOffline = /offline|lab|campus|prp|sjt|hall|room|auditorium/i.test(venue) || /offline|physical|in[\s-]person/i.test(lowerMsg);
+    const compEvents = (events || []).filter((e) => e.company_id === targetComp.id);
+    const existingEvt = compEvents.find((e) => e.event_type === eventType) || compEvents[0];
+
+    const extractedVenue = extractVenue(message);
+    const venue = extractedVenue || existingEvt?.venue || 'Own Location / Online';
+    const isOffline =
+      /offline|lab|campus|prp|sjt|hall|room|auditorium|physical/i.test(venue) ||
+      /offline|physical|in[\s-]person/i.test(lowerMsg);
     const mode = isOffline ? 'offline' : 'online';
 
-    // Insert the new event into the events table
-    const { data: insertedEvent } = await supabase
-      .from('events')
-      .insert({
-        user_id: session.userId,
-        company_id: targetComp.id,
-        event_type: eventType,
-        title: `${targetComp.name} - ${eventLabel}`,
-        start_time: parsedDate.toISOString(),
-        end_time: new Date(parsedDate.getTime() + 3600000).toISOString(),
-        venue,
-        mode,
-        confidence: 'high',
-        manual_override: true,
-      })
-      .select()
-      .single();
+    let eventRecord;
+    let isReschedule = false;
+
+    if (existingEvt) {
+      isReschedule = true;
+      const { data: updated } = await supabase
+        .from('events')
+        .update({
+          title: `${targetComp.name} - ${eventLabel}`,
+          start_time: parsedDate.toISOString(),
+          end_time: new Date(parsedDate.getTime() + 3600000).toISOString(),
+          venue,
+          mode,
+          manual_override: true,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', existingEvt.id)
+        .select()
+        .single();
+
+      eventRecord = updated;
+
+      // Remove duplicate events for this company if any exist
+      if (compEvents.length > 1) {
+        const duplicateIds = compEvents.filter((e) => e.id !== existingEvt.id).map((e) => e.id);
+        await supabase.from('events').delete().in('id', duplicateIds);
+      }
+    } else {
+      const { data: insertedEvent } = await supabase
+        .from('events')
+        .insert({
+          user_id: session.userId,
+          company_id: targetComp.id,
+          event_type: eventType,
+          title: `${targetComp.name} - ${eventLabel}`,
+          start_time: parsedDate.toISOString(),
+          end_time: new Date(parsedDate.getTime() + 3600000).toISOString(),
+          venue,
+          mode,
+          confidence: 'high',
+          manual_override: true,
+        })
+        .select()
+        .single();
+
+      eventRecord = insertedEvent;
+    }
 
     // Update application status to reflect the scheduled event
     await supabase.from('applications').upsert(
@@ -149,23 +343,70 @@ export async function POST(request: Request) {
       { onConflict: 'user_id,company_id' }
     );
 
+    // Push to Google Calendar in background
+    pushEventToGoogleCalendar({
+      userId: session.userId,
+      title: `${targetComp.name} - ${eventLabel}`,
+      startTime: parsedDate.toISOString(),
+      endTime: new Date(parsedDate.getTime() + 3600000).toISOString(),
+      venue,
+      mode,
+    }).catch((err) => console.error('Google Calendar auto-sync:', err));
+
     const formatted = formatDateTime(parsedDate.toISOString());
+    const actionWord = isReschedule ? 'Rescheduled' : 'Scheduled';
 
     return NextResponse.json({
-      reply: `📅 Added **${targetComp.name} ${eventLabel}** on **${formatted}** (${venue}) directly to your Placement Calendar and Dashboard!`,
-      action: 'event_added',
-      event: insertedEvent,
+      reply: `📅 ${actionWord} **${targetComp.name} ${eventLabel}** to **${formatted}** (${venue}) on your Placement Calendar & Google Calendar!`,
+      action: isReschedule ? 'event_updated' : 'event_added',
+      event: eventRecord,
       companyId: targetComp.id,
       status: appStatus,
     });
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
-  // 2. COMMAND: Update Status (Without Date)
+  // 4. COMMAND: Sync All Scheduled Events to Google Calendar
+  // ═══════════════════════════════════════════════════════════════════════════
+  if (/sync.*google\s*calendar|push.*google\s*calendar|add\s+all.*to\s+google\s*calendar|sync\s+calendar/i.test(lowerMsg)) {
+    const upcomingEvents = (events || []).filter((e) => e.start_time && new Date(e.start_time) >= new Date());
+    const companyMap = new Map(companyList.map((c) => [c.id, c.name]));
+    let count = 0;
+
+    for (const evt of upcomingEvents) {
+      const cName = companyMap.get(evt.company_id) || 'Placement Event';
+      const gid = await pushEventToGoogleCalendar({
+        userId: session.userId,
+        title: evt.title || `${cName} - Online Assessment`,
+        startTime: evt.start_time!,
+        endTime: evt.end_time,
+        venue: evt.venue,
+        mode: evt.mode,
+      });
+      if (gid) count++;
+    }
+
+    if (count > 0) {
+      return NextResponse.json({
+        reply: `🗓️ Successfully pushed **${count} upcoming events** directly to your Google Calendar!`,
+        action: 'gcal_synced',
+      });
+    } else {
+      return NextResponse.json({
+        reply: `📅 Checked your placement schedule — make sure the **Google Calendar API** is enabled on Google Cloud and your account is connected to sync events automatically.`,
+        action: 'gcal_needed',
+      });
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // 5. COMMAND: Update Status (Without Date)
   // ═══════════════════════════════════════════════════════════════════════════
   if (
     targetComp &&
     !parsedDate &&
+    !isVenueUpdateQuery &&
+    !isMetadataUpdate &&
     (/mark|set|change|update|got\s+selected|placed|shortlisted|declined|opted\s+out|rejected|withdrew|applied/i.test(lowerMsg))
   ) {
     let targetStatus: string | null = null;

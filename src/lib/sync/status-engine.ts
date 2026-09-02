@@ -165,7 +165,7 @@ export async function processEmailForEventsAndStatus(
   // Check existing application status from DB
   const { data: existingApp } = await supabase
     .from('applications')
-    .select('status, manual_override')
+    .select('status, manual_override, applied_at, location')
     .eq('user_id', userId)
     .eq('company_id', companyId)
     .single();
@@ -187,15 +187,15 @@ export async function processEmailForEventsAndStatus(
   const extractedEvents = extractEvents(email);
 
   const isShortlistEmail =
-    /shortlist|selection\s+list|selected\s+candidates|students\s+list|shortlisted\s+students|next\s+round\s+of\s+selection|selection\s+process\s+is\s+scheduled/i.test(
+    /shortlist|selection\s+list|selected\s+candidates|shortlisted\s+students|shortlist\s+for|candidates\s+shortlisted|online\s+test\s+is\s+scheduled|assessment\s+is\s+scheduled|coding\s+test\s+is\s+scheduled/i.test(
       subjLower
     ) ||
-    /shortlist|shortlisted candidates|initial shortlist|selection list|students list|shortlisted students|attached list of students|find the below shortlist|below is the shortlist/i.test(
+    /find\s+the\s+below\s+shortlist|below\s+is\s+the\s+shortlist|shortlisted\s+candidates|shortlisted\s+students|attached\s+list\s+of\s+shortlisted|shortlist\s+for\s+next\s+round/i.test(
       fullText
     ) ||
     (email.hasAttachments &&
       email.attachments.some((a) =>
-        /shortlist|selection|students|eligible/i.test(a.filename)
+        /shortlist|selection[_\s-]*list|test[_\s-]*shortlist|selected[_\s-]*student/i.test(a.filename)
       ));
 
   // Check if candidate is withdrawn or opted out
@@ -303,19 +303,32 @@ export async function processEmailForEventsAndStatus(
           .select('id')
           .single();
 
-        // Trigger Event Scheduled Notification (Web Push + In-App)
+        // Trigger Event Scheduled Notification (Web Push + In-App) & Google Calendar Auto-Sync
         if (insertedEvt) {
           const { notifyEventScheduled } = await import('@/lib/notifications/service');
           const { data: comp } = await supabase.from('companies').select('name').eq('id', companyId).single();
+          const compName = comp?.name || 'Drive';
           await notifyEventScheduled({
             userId,
             companyId,
-            companyName: comp?.name || 'Drive',
+            companyName: compName,
             eventType: event.eventType,
             startTime: event.startTime,
             venue: event.venue,
             eventId: insertedEvt.id,
           });
+
+          if (startTimeIso) {
+            const { pushEventToGoogleCalendar } = await import('@/lib/calendar/google-sync');
+            pushEventToGoogleCalendar({
+              userId,
+              title: `${compName} - ${event.title}`,
+              startTime: startTimeIso,
+              endTime: event.endTime ? event.endTime.toISOString() : null,
+              venue: event.venue,
+              mode: event.mode,
+            }).catch((err) => console.error('Google Calendar auto-sync error:', err));
+          }
         }
       }
     }
@@ -325,6 +338,18 @@ export async function processEmailForEventsAndStatus(
   const jobDetails = extractJobDetails(fullText);
 
   // 5. Compute updated application status
+  const emailReceivedTime = email.receivedAt ? new Date(email.receivedAt).getTime() : Date.now();
+  const appliedTime = existingApp?.applied_at ? new Date(existingApp.applied_at).getTime() : null;
+  // If email was received before the user registered (with a 2-minute clock skew grace), it's from a previous round/cycle!
+  const isEmailAfterApplication = !appliedTime || emailReceivedTime >= (appliedTime - 2 * 60 * 1000);
+
+  const isConfirmation =
+    emailClass === 'registration_confirmation' ||
+    /confirmed:\s*your\s+registration/i.test(subjLower) ||
+    /registration\s+(confirmed|successful|received)/i.test(fullText) ||
+    /successfully\s+registered|thank\s+you\s+for\s+(registering|applying)/i.test(fullText) ||
+    /confirms?\s+(that\s+)?(you(r|'re)|your)\s+(successful\s+)?(registration|application)/i.test(fullText);
+
   let newStatus: string | null = null;
 
   if (existingApp?.manual_override) {
@@ -334,8 +359,12 @@ export async function processEmailForEventsAndStatus(
     // A. Withdrawal / Opt-Out (always highest priority)
     newStatus = 'withdrawn';
   } else if (existingApp?.status === 'withdrawn' || existingApp?.status === 'declined') {
-    // Already withdrawn — nothing can override it
-    newStatus = existingApp.status;
+    // Already withdrawn — nothing can override it unless a new registration arrives later
+    if (isConfirmation && isEmailAfterApplication) {
+      newStatus = 'applied';
+    } else {
+      newStatus = existingApp.status;
+    }
   } else if (isNeoMatched) {
     // B. Candidate is confirmed in an actual shortlist / test / interview Excel or body match
     // Check for rejection language BEFORE checking for "selected" — order matters
@@ -358,29 +387,22 @@ export async function processEmailForEventsAndStatus(
     }
   } else if (isInAppliedList) {
     // C. Found in an applied/opt-in list — confirms application but does NOT mean shortlisted
-    // Only upgrade from not_applied to applied; never downgrade from higher states
     const current = existingApp?.status || 'not_applied';
-    if (current === 'not_applied') {
+    if (current === 'not_applied' || current === 'not_shortlisted') {
       newStatus = 'applied';
     }
-  } else if (
+  } else if (isConfirmation) {
     // D. NeoPAT registration confirmation emails:
     // "Confirmed: Your Registration for EY Placement Drive"
-    // (Note: "Congratulations! You're Eligible..." is just an invitation to apply, not an application confirmation!)
-    emailClass === 'registration_confirmation' ||
-    /confirmed:\s*your\s+registration/i.test(subjLower) ||
-    /registration\s+(confirmed|successful|received)/i.test(fullText) ||
-    /successfully\s+registered|thank\s+you\s+for\s+(registering|applying)/i.test(fullText) ||
-    /confirms?\s+(that\s+)?(you(r|'re)|your)\s+(successful\s+)?(registration|application)/i.test(fullText)
-  ) {
-    // Only set applied if user isn't already at a higher status
+    // When a new registration confirmation arrives, it resets status back to applied
     const current = existingApp?.status || 'not_applied';
-    if (current === 'not_applied' || current === 'unknown') {
+    if (current === 'not_applied' || current === 'unknown' || current === 'not_shortlisted' || isEmailAfterApplication) {
       newStatus = 'applied';
     }
   } else if (
     // E. A shortlist was officially released but candidate was NOT in it
-    isShortlistEmail
+    isShortlistEmail &&
+    isEmailAfterApplication
   ) {
     // RULE: Only downgrade if candidate actually APPLIED or was in the process!
     const currentStatus = existingApp?.status || 'not_applied';
@@ -395,17 +417,15 @@ export async function processEmailForEventsAndStatus(
 
     if (['test_scheduled', 'interview_scheduled', 'shortlisted'].includes(currentStatus)) {
       if (isPostTestRound) {
-        // User cleared initial screening but failed a subsequent round (e.g. Test -> Interview)
+        // User was shortlisted for test/interview and was eliminated in a subsequent round
         newStatus = 'rejected';
       }
-      // If it's just a test schedule announcement, test results are still pending -> do not reject!
     } else if (['applied', 'ppt_scheduled'].includes(currentStatus)) {
-      // User never cleared the initial screening for test
+      // User was in screening and was not shortlisted in the released shortlist
       newStatus = 'not_shortlisted';
     }
   } else if (
-    // F. PPT event found in email — upgrade status even without Neo match
-    // (PPT announcements are sent to ALL registered/eligible candidates)
+    // F. PPT event found in email — upgrade status for registered candidates
     extractedEvents.length > 0
   ) {
     const current = existingApp?.status || 'not_applied';
@@ -455,10 +475,23 @@ export async function processEmailForEventsAndStatus(
     last_updated: new Date().toISOString(),
   };
 
+  const { extractTravelRequirement } = await import('@/lib/sync/events');
+  const travelReq = extractTravelRequirement(fullText);
+  let resolvedLocation = jobDetails.location || existingApp?.location || null;
+  if (travelReq === 'vellore') {
+    resolvedLocation = '✈️ VIT Vellore';
+  } else if (travelReq === 'chennai') {
+    resolvedLocation = '✈️ VIT Chennai';
+  } else if (travelReq === 'bhopal_lab') {
+    resolvedLocation = '🏫 Bhopal Labs';
+  } else if (travelReq === 'online' && (!resolvedLocation || /remote|pan\s+india/i.test(resolvedLocation))) {
+    resolvedLocation = '💻 Online';
+  }
+
   if (jobDetails.role) appUpdate.role = jobDetails.role;
   if (jobDetails.ctc) appUpdate.ctc = jobDetails.ctc;
   if (jobDetails.stipend) appUpdate.stipend = jobDetails.stipend;
-  if (jobDetails.location) appUpdate.location = jobDetails.location;
+  if (resolvedLocation) appUpdate.location = resolvedLocation;
 
   if (newStatus) {
     appUpdate.status = newStatus;

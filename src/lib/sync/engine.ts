@@ -194,9 +194,13 @@ export async function runSync(
       const newMsgIds = messageIds.filter((id) => !existingSet.has(id));
       const skippedCount = messageIds.length - newMsgIds.length;
 
+      // Ensure messages are processed in chronological order (oldest to newest)
+      // Gmail messages.list returns newest first, so reversing gives chronological order.
+      const chronoSortedMsgIds = [...newMsgIds].reverse();
+
       progress.skippedDuplicates += skippedCount;
       result.skippedDuplicates += skippedCount;
-      progress.totalMessages = newMsgIds.length;
+      progress.totalMessages = chronoSortedMsgIds.length;
       progress.processedMessages = 0;
       onProgress?.(progress);
 
@@ -217,8 +221,8 @@ export async function runSync(
       // Known non-placement senders to always skip (Google, Microsoft notifications, social media, etc.)
       const BLOCKED_SENDERS = /noreply-accounts@google|no-reply@accounts\.google|noreply@github|notifications@github|@linkedin\.com|@facebookmail|@discord|@slack|noreply@medium|noreply@.*\.zoom\.us|security-noreply|account-security|password.*reset|verify.*email|do-not-reply@|mailer-daemon/i;
 
-      for (let i = 0; i < newMsgIds.length; i += BATCH_SIZE) {
-        const batch = newMsgIds.slice(i, i + BATCH_SIZE);
+      for (let i = 0; i < chronoSortedMsgIds.length; i += BATCH_SIZE) {
+        const batch = chronoSortedMsgIds.slice(i, i + BATCH_SIZE);
 
         for (const msgId of batch) {
             try {
@@ -344,7 +348,7 @@ export async function runSync(
                     text.includes('ineligible')
                   ) {
                     targetStatus = 'not_applied';
-                  } else if (!currentApp && isConfirmation) {
+                  } else if (isConfirmation) {
                     targetStatus = 'applied';
                   }
 
@@ -375,9 +379,7 @@ export async function runSync(
                   subject: parsedEmail.subject,
                   sender: parsedEmail.sender,
                   received_at: parsedEmail.receivedAt.toISOString(),
-                  body_snippet: parsedEmail.bodySnippet
-                    ? parsedEmail.bodySnippet.slice(0, 500)
-                    : '',
+                  body_snippet: (parsedEmail.bodyPlain || parsedEmail.bodySnippet || '').slice(0, 10000),
                   classification: classification.classification,
                   is_processed: true,
                   is_relevant: classification.classification !== 'irrelevant',
@@ -431,7 +433,7 @@ export async function runSync(
             }
         }
 
-        progress.processedMessages = Math.min(i + batch.length, newMsgIds.length);
+        progress.processedMessages = Math.min(i + batch.length, chronoSortedMsgIds.length);
         onProgress?.(progress);
       }
 
@@ -464,7 +466,7 @@ export async function runSync(
     try {
       const { data: unlinkedEmails } = await supabase
         .from('emails')
-        .select('id, subject, sender, body_snippet')
+        .select('id, subject, sender, body_snippet, received_at')
         .eq('user_id', userId)
         .is('company_id', null);
 
@@ -478,25 +480,17 @@ export async function runSync(
           for (const email of unlinkedEmails) {
             const compName = extractCompanyName(
               email.subject || '',
-              email.sender || ''
+              email.sender || '',
+              email.body_snippet || ''
             );
             if (compName) {
               const norm = normalizeCompanyName(compName).toLowerCase();
               const matched = allUserComps.find((c) => {
                 const cLower = c.name.toLowerCase();
-                // Guard: Never merge EY GDS and EY SAP
-                if (
-                  (cLower.includes('gds') && norm.includes('sap')) ||
-                  (cLower.includes('sap') && norm.includes('gds'))
-                ) {
-                  return false;
-                }
                 return (
                   cLower === norm ||
                   (c.aliases || []).includes(norm) ||
-                  (cLower.length >= 4 &&
-                    norm.length >= 4 &&
-                    (cLower.includes(norm) || norm.includes(cLower)))
+                  isFuzzyCompanyMatch(c.name, compName)
                 );
               });
               if (matched) {
@@ -515,6 +509,71 @@ export async function runSync(
   }
 
   return result;
+}
+
+// ============================================
+// Company Matching Helpers
+// ============================================
+
+const GENERIC_MATCH_TOKENS = new Set([
+  'pvt', 'ltd', 'limited', 'private', 'inc', 'corp', 'corporation',
+  'co', 'company', 'llc', 'llp', 'solutions', 'services', 'technologies',
+  'technology', 'tech', 'group', 'india', 'global', 'international',
+  'systems', 'consulting', 'software', 'infotech', 'infosystems',
+  'super', 'dream', 'regular', 'core', 'internship', 'placement', 'drive',
+  'finance', 'batch', '2026', '2027', '2028', 'urgent', 'extended', 'deadline',
+  'update', 'updated', 'campus', 'hiring', 'recruitment', 'talk', 'test',
+]);
+
+/**
+ * Robust fuzzy matcher for company names based on distinctive token overlap.
+ * Prevents false matches (e.g. "Kinaxis Super Dream" matching "Superjoin Finance").
+ */
+export function isFuzzyCompanyMatch(compName: string, targetName: string): boolean {
+  const cLower = compName.toLowerCase().trim();
+  const tLower = targetName.toLowerCase().trim();
+
+  // Guard: Never merge EY GDS and EY SAP
+  if (
+    (cLower.includes('gds') && tLower.includes('sap')) ||
+    (cLower.includes('sap') && tLower.includes('gds'))
+  ) {
+    return false;
+  }
+
+  // Guard: Never merge Apple SDET and Apple SRE
+  if (
+    (cLower.includes('sdet') && tLower.includes('sre')) ||
+    (cLower.includes('sre') && tLower.includes('sdet'))
+  ) {
+    return false;
+  }
+
+  if (cLower === tLower) return true;
+
+  const cTokens = cLower
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .split(/\s+/)
+    .filter((w) => w.length >= 3 && !GENERIC_MATCH_TOKENS.has(w));
+
+  const tTokens = tLower
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .split(/\s+/)
+    .filter((w) => w.length >= 3 && !GENERIC_MATCH_TOKENS.has(w));
+
+  if (cTokens.length === 0 || tTokens.length === 0) {
+    return false;
+  }
+
+  // Match if all distinctive tokens of target exist in comp, or vice versa
+  const allTargetInComp = tTokens.every((t) =>
+    cTokens.some((c) => c === t || (c.length >= 5 && t.length >= 5 && (c.startsWith(t) || t.startsWith(c))))
+  );
+  const allCompInTarget = cTokens.every((c) =>
+    tTokens.some((t) => c === t || (c.length >= 5 && t.length >= 5 && (c.startsWith(t) || t.startsWith(c))))
+  );
+
+  return allTargetInComp || allCompInTarget;
 }
 
 // ============================================
@@ -559,7 +618,7 @@ async function upsertCompany(
     return aliasMatch.id;
   }
 
-  // 3. Dynamic Substring Match against existing user companies
+  // 3. Dynamic Token Match against existing user companies
   // (e.g. "PlaySimple" in email matches existing "PlaySimple Games" registered from NeoPAT)
   const { data: userCompanies } = await supabase
     .from('companies')
@@ -567,24 +626,9 @@ async function upsertCompany(
     .eq('user_id', userId);
 
   if (userCompanies && userCompanies.length > 0) {
-    const targetLower = normalized.toLowerCase();
     for (const comp of userCompanies) {
-      const compLower = comp.name.toLowerCase();
-
-      // Guard: Never merge EY GDS and EY SAP
-      if (
-        (compLower.includes('gds') && targetLower.includes('sap')) ||
-        (compLower.includes('sap') && targetLower.includes('gds'))
-      ) {
-        continue;
-      }
-
-      // Match if one contains the other (e.g. "MUFG" inside "MUFG Financial", or "PlaySimple" in "PlaySimple Games")
-      // Guard: both strings must be at least 4 chars to prevent false merges (e.g. "AT" matching "ATRENTA")
-      if (compLower.length >= 4 && targetLower.length >= 4) {
-        if (compLower.includes(targetLower) || targetLower.includes(compLower)) {
-          return comp.id;
-        }
+      if (isFuzzyCompanyMatch(comp.name, normalized)) {
+        return comp.id;
       }
     }
   }

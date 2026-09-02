@@ -26,7 +26,7 @@ export default async function CompaniesPage() {
 
     supabase
       .from('applications')
-      .select('id, company_id, status, role, ctc, stipend, location, manual_override, applied_at, last_updated')
+      .select('id, company_id, status, role, ctc, stipend, location, notes, manual_override, applied_at, last_updated')
       .eq('user_id', session.userId),
 
     supabase
@@ -103,6 +103,7 @@ export default async function CompaniesPage() {
             ctc: app.ctc,
             stipend: app.stipend,
             location: app.location,
+            notes: app.notes,
             manual_override: app.manual_override,
             applied_at: app.applied_at,
             last_updated: app.last_updated,

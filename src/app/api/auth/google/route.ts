@@ -24,6 +24,7 @@ export async function GET(request: Request) {
     'https://www.googleapis.com/auth/userinfo.email',
     'https://www.googleapis.com/auth/userinfo.profile',
     'https://www.googleapis.com/auth/gmail.readonly',
+    'https://www.googleapis.com/auth/calendar.events',
   ];
 
   const authUrl = oauth2Client.generateAuthUrl({

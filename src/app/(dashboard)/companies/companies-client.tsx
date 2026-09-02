@@ -38,6 +38,7 @@ export interface CompanyWithDetails {
     ctc: string | null;
     stipend: string | null;
     location: string | null;
+    notes?: string | null;
     manual_override: boolean;
     applied_at: string | null;
     last_updated: string;
@@ -139,14 +140,29 @@ function cleanCtcDisplay(rawCtc: string | null | undefined): string | null {
 function cleanLocationDisplay(rawLoc: string | null | undefined): string | null {
   if (!rawLoc) return null;
   let l = rawLoc.replace(/<[^>]+>/g, ' ').replace(/^[*,\.\s>\-]+/, '').replace(/[*,\.\s>\-]+$/, '').trim();
-  l = l.replace(/\s+job$/i, '').replace(/\s+position:.*$/i, '').trim();
+
+  // Strip anything following common sentence triggers
+  l = l.replace(/\s*(?:All\s+the|All\s+interested|Placement\s+Office|On\s+(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)|Students\s+with|Registered\s+students|Registration|Note|Eligibility|Skills|Service|Work\s+Mode|Joining|Economy|Round\s+Trip|Depending\s+on|Below\s+attachment|Job\s+Description|JD).*$/i, '');
+
+  // Strip non-location junk prefixes/words
+  l = l.replace(/\b(?:internship|placement|drive|hiring|offer|job|role|any\s+honeywell\s+site)\b/gi, '');
+  l = l.replace(/^\s*(?:\(Core\):?|Core\):?)\s*/i, '');
+  l = l.replace(/[\.\,\:\-\(\)\–—]+$/, '').replace(/^[\.\,\:\-\(\)\–—]+/, '').replace(/\s+/g, ' ').trim();
+
+  // Clean comma spacing: "Bangalore,Hyderabad,Madurai" -> "Bangalore, Hyderabad, Madurai"
+  l = l.replace(/,([^\s])/g, ', $1');
+
   if (
     !l ||
     l.length < 2 ||
-    /please find|mail with|nonsense|come at|assistance|applicable|candidate|round\s+\d+|results|lab|service agreement|forwarded message|scheduled on|online test|@|own location|pearl research|anna auditorium|find the below|candidates list|^[>,\.\*\s]+$/i.test(l)
+    /please find|mail with|nonsense|come at|assistance|applicable|candidate|round\s+\d+|results|service agreement|forwarded message|candidates list|as per business|interested students|shortlisted stu|economy class|round\s+trip|placement office|online|^[>,\.\*\s]+$/i.test(l) ||
+    /^(?:vit\s+)?(?:vellore|chennai|bhopal(?:\s+labs)?)$/i.test(l.trim())
   ) {
     return null;
   }
+
+  if (/pan\s+india/i.test(l)) return 'Pan India';
+  if (/remote/i.test(l)) return 'Remote';
   return l;
 }
 
@@ -471,23 +487,55 @@ export default function CompaniesClient({ companies }: CompaniesClientProps) {
                     <StatusBadge status={status} events={c.events} />
                   </div>
 
-                  {/* CTC & Location Badges */}
-                  {(ctc || location) && (
-                    <div className="flex flex-wrap items-center gap-2 mb-3">
-                      {ctc && (
-                        <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/25">
-                          <IndianRupee className="w-3 h-3" />
-                          {ctc}
-                        </span>
-                      )}
-                      {location && (
-                        <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs text-zinc-300 bg-zinc-900 border border-zinc-800">
-                          <MapPin className="w-3 h-3 text-zinc-500" />
-                          {location}
-                        </span>
-                      )}
-                    </div>
-                  )}
+                  {/* CTC, Drive Mode & Work Location Badges */}
+                  {(() => {
+                    const travelReq = c.application?.notes;
+                    const travelBadge =
+                      travelReq === 'vellore'
+                        ? '✈️ VIT Vellore'
+                        : travelReq === 'chennai'
+                        ? '✈️ VIT Chennai'
+                        : travelReq === 'bhopal_lab'
+                        ? '🏫 Bhopal Labs'
+                        : travelReq === 'online'
+                        ? '💻 Online'
+                        : null;
+
+                    const cleanLoc = cleanLocationDisplay(location);
+
+                    return (ctc || travelBadge || cleanLoc) && (
+                      <div className="flex flex-wrap items-center gap-2 mb-3">
+                        {ctc && (
+                          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/25">
+                            <IndianRupee className="w-3 h-3" />
+                            {ctc}
+                          </span>
+                        )}
+                        {travelBadge && (
+                          <span
+                            className={cn(
+                              'inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-semibold border transition-all',
+                              travelBadge.includes('Vellore')
+                                ? 'bg-amber-500/15 text-amber-300 border-amber-500/30 font-bold shadow-sm shadow-amber-500/5'
+                                : travelBadge.includes('Chennai')
+                                ? 'bg-orange-500/15 text-orange-300 border-orange-500/30 font-bold shadow-sm shadow-orange-500/5'
+                                : travelBadge.includes('Bhopal')
+                                ? 'bg-indigo-500/15 text-indigo-300 border-indigo-500/30'
+                                : 'bg-emerald-500/10 text-emerald-300 border-emerald-500/25'
+                            )}
+                          >
+                            {travelBadge}
+                          </span>
+                        )}
+                        {cleanLoc && !cleanLoc.includes('Vellore') && !cleanLoc.includes('Chennai') && !cleanLoc.includes('Bhopal') && (
+                          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-medium text-zinc-300 bg-zinc-900 border border-zinc-800">
+                            <MapPin className="w-3 h-3 text-zinc-500" />
+                            {cleanLoc}
+                          </span>
+                        )}
+                      </div>
+                    );
+                  })()}
 
                   {/* Stage Progress Bar */}
                   <StageProgressBar
