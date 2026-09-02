@@ -1,7 +1,7 @@
 import type { MetadataRoute } from 'next';
 
 export default function sitemap(): MetadataRoute.Sitemap {
-  const baseUrl = process.env.NEXT_PUBLIC_APP_URL || 'https://neotrack.vercel.app';
+  const baseUrl = process.env.NEXT_PUBLIC_APP_URL || 'https://neopat-tracker.vercel.app';
   const currentDate = new Date();
 
   return [
