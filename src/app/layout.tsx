@@ -18,7 +18,10 @@ export const viewport: Viewport = {
   themeColor: "#6366f1",
 };
 
-const siteUrl = process.env.NEXT_PUBLIC_APP_URL || "https://neopat-tracker.vercel.app";
+const siteUrl =
+  process.env.NEXT_PUBLIC_APP_URL && !process.env.NEXT_PUBLIC_APP_URL.includes('localhost')
+    ? process.env.NEXT_PUBLIC_APP_URL
+    : 'https://neopat-tracker.vercel.app';
 
 export const metadata: Metadata = {
   metadataBase: new URL(siteUrl),
