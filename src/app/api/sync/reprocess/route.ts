@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { getSession } from '@/lib/auth';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { classifyEmail, extractCompanyName, normalizeCompanyName } from '@/lib/sync/classifier';
-import { extractEvents, extractJobDetails, extractTravelRequirement } from '@/lib/sync/events';
+import { extractDriveNumber, extractEvents, extractJobDetails, extractTravelRequirement } from '@/lib/sync/events';
 import { isFuzzyCompanyMatch } from '@/lib/sync/engine';
 
 export const dynamic = 'force-dynamic';
@@ -74,6 +74,7 @@ export async function performReprocess(userId: string) {
       .from('emails')
       .select('id, subject, sender, body_snippet, classification, company_id, received_at')
       .eq('user_id', userId)
+      .order('received_at', { ascending: true })
       .range(page * pageSize, (page + 1) * pageSize - 1);
 
     if (chunkErr || !chunk || chunk.length === 0) break;
@@ -90,11 +91,14 @@ export async function performReprocess(userId: string) {
   const isNeoPatSender = (sender: string) => /noreply\.cdcinfo@vitstudent\.ac\.in/i.test(sender);
 
   const neoPatEmails = emails.filter((e) => isNeoPatSender(e.sender || ''));
+  // Process NeoPAT circulars chronologically so registration & eligibility emails establish drive identity
+  neoPatEmails.sort((a, b) => new Date(a.received_at || 0).getTime() - new Date(b.received_at || 0).getTime());
   const collegeEmails = emails.filter((e) => !isNeoPatSender(e.sender || ''));
 
   // 3. Phase 1: Establish Official NeoPAT Companies ONLY
   // ONLY emails from noreply.cdcinfo@vitstudent.ac.in define the company drives in NeoTrack!
   const validCompanyMap = new Map<string, { id: string; canonicalName: string; activeDriveDate: Date }>(); // name -> { id, canonicalName, activeDriveDate }
+  const driveNumberToCompanyMap = new Map<string, { id: string; canonicalName: string; activeDriveDate: Date }>(); // drive_number (pat-PL-*) -> comp
   const validCompanyIdSet = new Set<string>();
   const emailUpdates: Array<{ id: string; company_id: string | null; classification: string; is_relevant: boolean }> = [];
 
@@ -103,6 +107,8 @@ export async function performReprocess(userId: string) {
     const sender = email.sender || '';
     const bodySnippet = email.body_snippet || '';
     const emailDate = email.received_at ? new Date(email.received_at) : new Date();
+    const fullEmailText = `${subject}\n${bodySnippet}`;
+    const driveNumber = extractDriveNumber(fullEmailText);
 
     const classification = classifyEmail({
       gmailMessageId: email.id,
@@ -124,7 +130,48 @@ export async function performReprocess(userId: string) {
 
     if (companyName && isPlacement) {
       const normalized = normalizeCompanyName(companyName);
-      let comp = validCompanyMap.get(normalized.toLowerCase());
+      let comp: { id: string; canonicalName: string; activeDriveDate: Date } | undefined;
+
+      // 1. Primary Identity Anchor: Check if drive_number matches an already established company
+      if (driveNumber && driveNumberToCompanyMap.has(driveNumber)) {
+        comp = driveNumberToCompanyMap.get(driveNumber);
+      }
+
+      // 2. Name-based lookup if no drive_number match
+      if (!comp) {
+        if (driveNumber) {
+          // If this email has a driveNumber, NEVER reuse a company already bound to a DIFFERENT driveNumber
+          const existing = validCompanyMap.get(normalized.toLowerCase());
+          if (existing) {
+            let boundToAnother = false;
+            for (const [dNum, cObj] of driveNumberToCompanyMap.entries()) {
+              if (cObj.id === existing.id && dNum !== driveNumber) {
+                boundToAnother = true;
+                break;
+              }
+            }
+            if (!boundToAnother) {
+              comp = existing;
+            }
+          }
+        } else {
+          comp = validCompanyMap.get(normalized.toLowerCase());
+        }
+      }
+
+      if (!comp && !driveNumber) {
+        // Also check if any existing NeoPAT drive in validCompanyMap fuzzy matches! (Only for emails without a drive number)
+        for (const [validKey, cObj] of validCompanyMap.entries()) {
+          // Avoid overly broad single-word matches in Phase 1 (e.g. generic "Honeywell" shouldn't steal a specific division)
+          if (normalized.split(/\s+/).length === 1 && cObj.canonicalName.split(/\s+/).length > 2) {
+            continue;
+          }
+          if (isFuzzyCompanyMatch(validKey, normalized) || isFuzzyCompanyMatch(cObj.canonicalName, normalized)) {
+            comp = cObj;
+            break;
+          }
+        }
+      }
 
       if (!comp) {
         // Look up existing company by name or alias
@@ -135,16 +182,28 @@ export async function performReprocess(userId: string) {
           .eq('name', normalized)
           .single();
 
-        if (existingComp) {
+        let boundToAnother = false;
+        if (existingComp && driveNumber) {
+          for (const [dNum, cObj] of driveNumberToCompanyMap.entries()) {
+            if (cObj.id === existingComp.id && dNum !== driveNumber) {
+              boundToAnother = true;
+              break;
+            }
+          }
+        }
+
+        if (existingComp && !boundToAnother) {
           comp = { id: existingComp.id, canonicalName: normalized, activeDriveDate: emailDate };
         } else {
-          // Check aliases
-          const { data: aliasMatch } = await supabase
-            .from('companies')
-            .select('id, name')
-            .eq('user_id', userId)
-            .contains('aliases', [normalized.toLowerCase()])
-            .single();
+          // Check aliases if not bound to another drive
+          const { data: aliasMatch } = !driveNumber
+            ? await supabase
+                .from('companies')
+                .select('id, name')
+                .eq('user_id', userId)
+                .contains('aliases', [normalized.toLowerCase()])
+                .single()
+            : { data: null };
 
           if (aliasMatch) {
             comp = { id: aliasMatch.id, canonicalName: normalized, activeDriveDate: emailDate };
@@ -153,19 +212,43 @@ export async function performReprocess(userId: string) {
               .update({ name: normalized })
               .eq('id', aliasMatch.id);
           } else {
-            // Create new legitimate NeoPAT company
-            const { data: newComp } = await supabase
+            // Check existing user companies with fuzzy match before creating a duplicate
+            const { data: userComps } = await supabase
               .from('companies')
-              .insert({
-                user_id: userId,
-                name: normalized,
-                aliases: [normalized.toLowerCase(), companyName.toLowerCase()],
-              })
-              .select('id')
-              .single();
+              .select('id, name')
+              .eq('user_id', userId);
 
-            if (newComp) {
-              comp = { id: newComp.id, canonicalName: normalized, activeDriveDate: emailDate };
+            let dbFuzzyMatch: { id: string; name: string } | null = null;
+            if (userComps && userComps.length > 0) {
+              for (const uc of userComps) {
+                if (isFuzzyCompanyMatch(uc.name, normalized)) {
+                  dbFuzzyMatch = uc;
+                  break;
+                }
+              }
+            }
+
+            if (dbFuzzyMatch) {
+              const chosenCanonical = normalized.length > dbFuzzyMatch.name.length ? normalized : dbFuzzyMatch.name;
+              comp = { id: dbFuzzyMatch.id, canonicalName: chosenCanonical, activeDriveDate: emailDate };
+              if (chosenCanonical !== dbFuzzyMatch.name) {
+                await supabase.from('companies').update({ name: chosenCanonical }).eq('id', dbFuzzyMatch.id);
+              }
+            } else {
+              // Create new legitimate NeoPAT company
+              const { data: newComp } = await supabase
+                .from('companies')
+                .insert({
+                  user_id: userId,
+                  name: normalized,
+                  aliases: [normalized.toLowerCase(), companyName.toLowerCase()],
+                })
+                .select('id')
+                .single();
+
+              if (newComp) {
+                comp = { id: newComp.id, canonicalName: normalized, activeDriveDate: emailDate };
+              }
             }
           }
         }
@@ -177,7 +260,16 @@ export async function performReprocess(userId: string) {
       }
 
       if (comp) {
-        validCompanyMap.set(normalized.toLowerCase(), comp);
+        validCompanyMap.set(comp.canonicalName.toLowerCase(), comp);
+        if (
+          !validCompanyMap.has(normalized.toLowerCase()) ||
+          validCompanyMap.get(normalized.toLowerCase())?.id === comp.id
+        ) {
+          validCompanyMap.set(normalized.toLowerCase(), comp);
+        }
+        if (driveNumber) {
+          driveNumberToCompanyMap.set(driveNumber, comp);
+        }
         validCompanyIdSet.add(comp.id);
 
         emailUpdates.push({
@@ -241,17 +333,22 @@ export async function performReprocess(userId: string) {
       labels: [],
     });
 
+    const fullEmailText = `${subject}\n${bodySnippet}`;
+    const driveNumber = extractDriveNumber(fullEmailText);
     const companyName = classification.companyName;
     let matchedCompanyId: string | null = null;
 
-    if (companyName) {
+    // 1. Primary Identity Anchor: Drive Number match
+    if (driveNumber && driveNumberToCompanyMap.has(driveNumber)) {
+      matchedCompanyId = driveNumberToCompanyMap.get(driveNumber)!.id;
+    } else if (companyName) {
       const normalized = normalizeCompanyName(companyName).toLowerCase();
 
-      // 1. Exact match first
+      // 2. Exact match first
       if (validCompanyMap.has(normalized)) {
         matchedCompanyId = validCompanyMap.get(normalized)!.id;
       } else {
-        // 2. Token-based fuzzy match against legitimate NeoPAT companies
+        // 3. Token-based fuzzy match against legitimate NeoPAT companies
         for (const comp of Array.from(validCompanyMap.values())) {
           if (isFuzzyCompanyMatch(comp.canonicalName, companyName)) {
             matchedCompanyId = comp.id;
@@ -365,6 +462,7 @@ export async function performReprocess(userId: string) {
 
     const extractedJob = {
       role: mainJobDetails.role || fallbackJobDetails.role,
+      category: mainJobDetails.category || fallbackJobDetails.category,
       ctc: mainJobDetails.ctc || fallbackJobDetails.ctc,
       stipend: mainJobDetails.stipend || fallbackJobDetails.stipend,
       location: mainJobDetails.location || fallbackJobDetails.location,
@@ -515,10 +613,13 @@ export async function performReprocess(userId: string) {
 
     const finalStatus = existingApp?.manual_override ? existingApp.status : computedStatus;
 
-    // Sanitize role
-    let finalRole = extractedJob.role || existingApp?.role || null;
-    if (finalRole && /\byou\s*(?:are|have|re)\b|dear\s|greetings|eligible|registr/i.test(finalRole)) {
-      finalRole = extractedJob.role && !/\byou\s*(?:are|have|re)\b/i.test(extractedJob.role) ? extractedJob.role : null;
+    // Sanitize role: It must not be category name, prose, or invitation phrases
+    let finalRole = existingApp?.manual_override ? existingApp.role : (extractedJob.role || extractJobDetails(combinedEmailText).role);
+    if (finalRole && (
+      /\byou\s*(?:are|have|re)\b|dear\s|greetings|eligible|registr|for the candidate|reserve a position|expect them/i.test(finalRole) ||
+      /^(?:super\s+dream|dream|regular)(?:\s+(?:internship|offer|placement|drive))?$/i.test(finalRole.trim())
+    )) {
+      finalRole = null;
     }
 
     // Extract Drive Mode strictly from the main registration/announcement circular email
@@ -529,9 +630,33 @@ export async function performReprocess(userId: string) {
     if (workLocation && /please find|attached shortlisted|services interested|as per business|nonsense|come at|economy class|round trip|placement office|\bpre$/i.test(workLocation)) {
       workLocation = null;
     }
+    // Filter out campus/drive venue names — these are interview locations, not job work locations
+    if (workLocation && /^(?:vit\s+)?(?:vellore|chennai|bhopal)(?:\s+campus)?$/i.test(workLocation.trim())) {
+      workLocation = null;
+    }
     if (workLocation) {
       if (/remote/i.test(workLocation)) workLocation = 'Remote';
       else if (/pan\s+india/i.test(workLocation)) workLocation = 'Pan India';
+    }
+
+    // VIT Placement Policy:
+    // Touching or above 10 LPA (or max of CTC range >= 10) -> Super Dream
+    // Below 10 LPA -> Dream (>= 4.5) or Regular (< 4.5)
+    let finalCategory = extractedJob.category || null;
+    const finalCtc = existingApp?.manual_override ? existingApp.ctc : (extractedJob.ctc || null);
+    if (finalCtc) {
+      const matches = [...finalCtc.matchAll(/(\d+(?:\.\d+)?)/g)].map((m) => parseFloat(m[1]));
+      if (matches.length > 0) {
+        const maxCtc = Math.max(...matches);
+        const isIntern = Boolean(extractedJob.stipend || existingApp?.stipend) || /internship|intern\b/i.test(mainEmailText);
+        if (maxCtc >= 10) {
+          finalCategory = isIntern ? 'Super Dream Internship' : 'Super Dream Offer';
+        } else if (maxCtc >= 4.5) {
+          finalCategory = isIntern ? 'Dream Internship' : 'Dream Offer';
+        } else {
+          finalCategory = 'Regular Offer';
+        }
+      }
     }
 
     await supabase.from('applications').upsert(
@@ -542,8 +667,9 @@ export async function performReprocess(userId: string) {
         status_source: existingApp?.manual_override ? 'manual_override' : 'sync_reprocess',
         status_confidence: 'high',
         role: finalRole,
-        ctc: extractedJob.ctc || existingApp?.ctc || null,
-        stipend: extractedJob.stipend || existingApp?.stipend || null,
+        category: finalCategory,
+        ctc: finalCtc,
+        stipend: existingApp?.manual_override ? existingApp.stipend : (extractedJob.stipend || null),
         location: workLocation || 'Pan India / Remote',
         notes: travelReq || null,
         last_updated: new Date().toISOString(),
@@ -551,8 +677,20 @@ export async function performReprocess(userId: string) {
       { onConflict: 'user_id,company_id' }
     );
 
-    // Manage events: wipe existing events for this company
-    await supabase.from('events').delete().eq('user_id', userId).eq('company_id', comp.id);
+    // Manage events: fetch manual events and only wipe automated events for this company
+    const { data: manualEvents } = await supabase
+      .from('events')
+      .select('*')
+      .eq('user_id', userId)
+      .eq('company_id', comp.id)
+      .eq('manual_override', true);
+
+    await supabase
+      .from('events')
+      .delete()
+      .eq('user_id', userId)
+      .eq('company_id', comp.id)
+      .eq('manual_override', false);
 
     const isOptedOutOrEliminated = ['declined', 'withdrawn', 'not_shortlisted', 'not_applied', 'rejected'].includes(finalStatus);
 
@@ -584,12 +722,46 @@ export async function performReprocess(userId: string) {
 
         for (const evt of evts) {
           if (!evt.startTime) continue;
-          // Store/update with the latest email's extracted event
-          latestEventsByType.set(evt.eventType, evt);
+          // Unify coding_test and online_test under the same key so duplicate wordings collapse into a single assessment round
+          const normalizedKey =
+            evt.eventType === 'coding_test' || evt.eventType === 'online_test'
+              ? 'online_test'
+              : evt.eventType;
+          const existing = latestEventsByType.get(normalizedKey);
+
+          // If we already recorded an event with an explicit time (e.g. "3:30 pm"),
+          // and this newer email only has a generic date without time (default 9am),
+          // preserve the exact time while upgrading venue/mode if provided!
+          if (existing && existing.hasExplicitTime && !evt.hasExplicitTime) {
+            latestEventsByType.set(normalizedKey, {
+              ...existing,
+              venue: evt.venue && evt.venue !== 'Campus / Offline' ? evt.venue : existing.venue,
+              mode: evt.mode !== 'unknown' ? evt.mode : existing.mode,
+            });
+          } else {
+            latestEventsByType.set(normalizedKey, evt);
+          }
         }
       }
 
+      // Check which event types already have a manual override event so automated events don't duplicate them
+      const manualEventTypes = new Set(
+        (manualEvents || []).map((m) =>
+          m.event_type === 'coding_test' ? 'online_test' : m.event_type
+        )
+      );
+
       for (const evt of Array.from(latestEventsByType.values())) {
+        const normalizedKey =
+          evt.eventType === 'coding_test' || evt.eventType === 'online_test'
+            ? 'online_test'
+            : evt.eventType;
+
+        if (manualEventTypes.has(normalizedKey)) {
+          // Preserve the manual/chatbot event for this stage
+          continue;
+        }
+
         await supabase.from('events').insert({
           user_id: userId,
           company_id: comp.id,
@@ -600,6 +772,7 @@ export async function performReprocess(userId: string) {
           venue: evt.venue,
           mode: evt.mode,
           confidence: evt.confidence,
+          manual_override: false,
         });
       }
     }

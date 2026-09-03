@@ -88,34 +88,34 @@ function EventCard({ evt, onClose }: { evt: CalendarEvent; onClose?: () => void 
     ? `https://calendar.google.com/calendar/render?action=TEMPLATE&text=${encodeURIComponent(evt.title || 'Placement Event')}&dates=${new Date(evt.startTime).toISOString().replace(/-|:|\.\d+/g, '')}/${new Date(new Date(evt.startTime).getTime() + 3600000).toISOString().replace(/-|:|\.\d+/g, '')}&location=${encodeURIComponent(evt.venue || 'VIT Campus / Online')}`
     : null;
   return (
-    <div className="flex items-start gap-3 p-3.5 bg-zinc-900/70 hover:bg-zinc-900 rounded-2xl border border-zinc-800/70 hover:border-zinc-700 transition-all group">
+    <div className="flex items-start gap-3 p-3 sm:p-3.5 bg-zinc-900/70 hover:bg-zinc-900 rounded-2xl border border-zinc-800/70 hover:border-zinc-700 transition-all group">
       <div className={cn('w-1 self-stretch rounded-full flex-shrink-0', getDotColor(evt.eventType))} />
-      <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-indigo-500/20 to-violet-500/20 border border-indigo-500/25 flex items-center justify-center text-indigo-300 font-extrabold text-base flex-shrink-0">
+      <div className="w-8 h-8 sm:w-9 sm:h-9 rounded-xl bg-gradient-to-br from-indigo-500/20 to-violet-500/20 border border-indigo-500/25 flex items-center justify-center text-indigo-300 font-extrabold text-sm sm:text-base flex-shrink-0">
         {evt.companyName.charAt(0)}
       </div>
       <div className="flex-1 min-w-0">
         <div className="flex items-start justify-between gap-2">
-          <div className="min-w-0">
+          <div className="min-w-0 flex-1">
             <p className="text-sm font-bold text-white group-hover:text-indigo-300 transition-colors leading-tight truncate">
               {evt.companyName}
             </p>
-            <span className={cn('inline-block mt-0.5 px-1.5 py-0.5 rounded-md text-[9px] font-bold uppercase tracking-wider border', getBadgeColor(evt.eventType))}>
+            <span className={cn('inline-block mt-1 px-1.5 py-0.5 rounded-md text-[9px] font-bold uppercase tracking-wider border', getBadgeColor(evt.eventType))}>
               {EVENT_TYPE_LABELS[evt.eventType as EventType] || evt.eventType.replace(/_/g, ' ')}
             </span>
           </div>
           {evt.startTime && (
-            <span className="text-[11px] font-bold text-zinc-300 font-mono flex-shrink-0 bg-zinc-800/60 px-2 py-1 rounded-lg border border-zinc-700/50">
+            <span className="text-[10px] sm:text-[11px] font-bold text-zinc-300 font-mono flex-shrink-0 bg-zinc-800/80 px-2 py-0.5 sm:py-1 rounded-lg border border-zinc-700/50">
               {formatTime(evt.startTime)}
             </span>
           )}
         </div>
         {(evt.venue || evt.mode) && (
-          <div className="flex items-center gap-1.5 mt-1.5 text-[11px] text-zinc-500">
+          <div className="flex items-center gap-1.5 mt-1.5 text-[11px] text-zinc-400">
             <MapPin className="w-3 h-3 text-emerald-400 flex-shrink-0" />
             <span className="truncate">{[evt.venue, evt.mode !== 'unknown' ? evt.mode : null].filter(Boolean).join(' · ')}</span>
           </div>
         )}
-        <div className="flex items-center gap-2 mt-2.5">
+        <div className="flex items-center justify-between gap-2 mt-2.5 pt-2 border-t border-zinc-800/50">
           <Link
             href={`/companies/${evt.companyId}`}
             onClick={onClose}
@@ -128,7 +128,7 @@ function EventCard({ evt, onClose }: { evt: CalendarEvent; onClose?: () => void 
               href={gcalUrl}
               target="_blank"
               rel="noreferrer"
-              className="ml-auto text-[11px] font-semibold text-zinc-400 hover:text-white flex items-center gap-1 transition-colors"
+              className="text-[11px] font-semibold text-zinc-400 hover:text-white flex items-center gap-1 transition-colors"
             >
               <CalendarIcon className="w-3 h-3" /> + Calendar
             </a>
@@ -267,9 +267,9 @@ export default function CalendarClient({ events }: CalendarClientProps) {
   return (
     <div className="animate-fade-in max-w-7xl mx-auto selection:bg-indigo-500/20">
       {/* Header */}
-      <div className="flex items-center justify-between mb-5">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3.5 mb-5">
         <div>
-          <h1 className="text-2xl sm:text-3xl font-extrabold text-white tracking-tight flex items-center gap-2.5">
+          <h1 className="text-xl sm:text-3xl font-extrabold text-white tracking-tight flex items-center gap-2.5">
             <span className="p-2 rounded-2xl bg-indigo-500/10 border border-indigo-500/20 text-indigo-400">
               <CalendarIcon className="w-5 h-5 sm:w-6 sm:h-6" />
             </span>
@@ -277,19 +277,39 @@ export default function CalendarClient({ events }: CalendarClientProps) {
           </h1>
           <p className="text-xs text-zinc-500 mt-1 ml-1">Tests, PPTs & interviews — all in one place</p>
         </div>
-        <div className="flex items-center gap-2.5">
+        <div className="flex items-center justify-between sm:justify-end gap-2 w-full sm:w-auto">
           <button
             onClick={handleSyncGoogleCalendar}
             disabled={syncingGcal}
-            className="flex items-center gap-2 px-3 py-1.5 rounded-2xl bg-gradient-to-r from-blue-600/20 to-indigo-600/20 hover:from-blue-600/30 hover:to-indigo-600/30 border border-blue-500/30 text-blue-300 text-xs font-bold transition-all shadow-sm active:scale-95 disabled:opacity-50"
+            className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-gradient-to-r from-blue-600/20 to-indigo-600/20 hover:from-blue-600/30 hover:to-indigo-600/30 border border-blue-500/30 text-blue-300 text-xs font-bold transition-all shadow-sm active:scale-95 disabled:opacity-50 shrink-0"
             title="Push all scheduled placement events directly to Google Calendar"
           >
-            <CalendarCheck className={cn('w-3.5 h-3.5 text-blue-400', syncingGcal && 'animate-spin')} />
-            {syncingGcal ? 'Syncing...' : 'Sync Google Calendar'}
+            <CalendarCheck className={cn('w-3.5 h-3.5 text-blue-400 shrink-0', syncingGcal && 'animate-spin')} />
+            <span>{syncingGcal ? 'Syncing...' : 'Sync Google Calender'}</span>
           </button>
-          <div className="flex items-center bg-zinc-900 border border-zinc-800 rounded-2xl p-1 gap-1">
-            <button onClick={() => setViewMode('month')} className={cn('px-3 py-1.5 rounded-xl text-xs font-bold transition-all', viewMode === 'month' ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/30' : 'text-zinc-400 hover:text-zinc-200')}>Month</button>
-            <button onClick={() => setViewMode('timeline')} className={cn('px-3 py-1.5 rounded-xl text-xs font-bold transition-all', viewMode === 'timeline' ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/30' : 'text-zinc-400 hover:text-zinc-200')}>Timeline</button>
+          <div className="flex items-center bg-zinc-900 border border-zinc-800 rounded-xl p-1 gap-1 shrink-0">
+            <button
+              onClick={() => setViewMode('month')}
+              className={cn(
+                'px-3 py-1.5 rounded-lg text-xs font-bold transition-all',
+                viewMode === 'month'
+                  ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/30'
+                  : 'text-zinc-400 hover:text-zinc-200'
+              )}
+            >
+              Month
+            </button>
+            <button
+              onClick={() => setViewMode('timeline')}
+              className={cn(
+                'px-3 py-1.5 rounded-lg text-xs font-bold transition-all',
+                viewMode === 'timeline'
+                  ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/30'
+                  : 'text-zinc-400 hover:text-zinc-200'
+              )}
+            >
+              Timeline
+            </button>
           </div>
         </div>
       </div>
@@ -308,21 +328,45 @@ export default function CalendarClient({ events }: CalendarClientProps) {
       )}
 
       {/* Nav bar */}
-      <div className="flex items-center justify-between mb-4 px-1">
-        <button onClick={handleToday} className="text-xs font-bold text-indigo-400 hover:text-indigo-300 bg-indigo-500/10 border border-indigo-500/20 px-3 py-1.5 rounded-xl transition-all hover:bg-indigo-500/15">Today</button>
-        <div className="flex items-center gap-2">
-          <button onClick={handlePrev} className="p-1.5 rounded-xl text-zinc-400 hover:text-white hover:bg-zinc-800 transition-colors" aria-label="Previous Month"><ChevronLeft className="w-4 h-4" /></button>
-          <span className="text-sm font-bold text-white min-w-[130px] text-center">
+      <div className="flex items-center justify-between mb-4 bg-[#101018]/60 border border-zinc-800/60 rounded-2xl p-2 sm:p-2.5">
+        <button
+          onClick={handleToday}
+          className="text-xs font-bold text-indigo-400 hover:text-indigo-300 bg-indigo-500/10 border border-indigo-500/20 px-3 py-1.5 rounded-xl transition-all hover:bg-indigo-500/15 shrink-0"
+        >
+          Today
+        </button>
+        <div className="flex items-center gap-1 sm:gap-2">
+          <button
+            onClick={handlePrev}
+            className="p-1.5 rounded-xl text-zinc-400 hover:text-white hover:bg-zinc-800 transition-colors"
+            aria-label="Previous Month"
+          >
+            <ChevronLeft className="w-4 h-4" />
+          </button>
+          <span className="text-xs sm:text-sm font-bold text-white min-w-[110px] sm:min-w-[130px] text-center">
             {MONTH_NAMES[month]} {year}
           </span>
-          <button onClick={handleNext} className="p-1.5 rounded-xl text-zinc-400 hover:text-white hover:bg-zinc-800 transition-colors" aria-label="Next Month"><ChevronRight className="w-4 h-4" /></button>
+          <button
+            onClick={handleNext}
+            className="p-1.5 rounded-xl text-zinc-400 hover:text-white hover:bg-zinc-800 transition-colors"
+            aria-label="Next Month"
+          >
+            <ChevronRight className="w-4 h-4" />
+          </button>
         </div>
         <div className="hidden sm:flex items-center gap-2 text-xs">
           {[['bg-blue-400','PPT'],['bg-amber-400','Test'],['bg-emerald-400','Interview']].map(([color, label]) => (
-            <span key={label} className="flex items-center gap-1 text-zinc-400"><span className={cn('w-2 h-2 rounded-full', color)} />{label}</span>
+            <span key={label} className="flex items-center gap-1 text-zinc-400">
+              <span className={cn('w-2 h-2 rounded-full', color)} />
+              {label}
+            </span>
           ))}
         </div>
-        <div className="sm:hidden w-16" />
+        <div className="sm:hidden flex items-center gap-1.5 px-2 py-1 rounded-lg bg-zinc-900 border border-zinc-800 text-[10px] text-zinc-400">
+          <span className="w-1.5 h-1.5 rounded-full bg-blue-400" />
+          <span className="w-1.5 h-1.5 rounded-full bg-amber-400" />
+          <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
+        </div>
       </div>
 
       {/* Month view */}

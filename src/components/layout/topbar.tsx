@@ -34,6 +34,7 @@ export default function Topbar({ userName, userAvatar, lastSyncAt }: TopbarProps
   const hasMountedAutoSyncRef = useRef(false);
 
   const [showUserMenu, setShowUserMenu] = useState(false);
+  const [mounted, setMounted] = useState(false);
   const userMenuRef = useRef<HTMLDivElement>(null);
   const [syncProgress, setSyncProgress] = useState<SyncProgress | null>(null);
   const [syncResult, setSyncResult] = useState<{
@@ -43,6 +44,10 @@ export default function Topbar({ userName, userAvatar, lastSyncAt }: TopbarProps
     newEmails: number;
     newCompanies: number;
   } | null>(null);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
 
   // Close profile dropdown when clicking outside or pressing Escape
   useEffect(() => {
@@ -286,13 +291,13 @@ export default function Topbar({ userName, userAvatar, lastSyncAt }: TopbarProps
                 <div
                   className={cn(
                     'w-2 h-2 rounded-full',
-                    lastSyncAt && Date.now() - new Date(lastSyncAt).getTime() < 3600000
+                    mounted && lastSyncAt && Date.now() - new Date(lastSyncAt).getTime() < 3600000
                       ? 'bg-emerald-400 shadow-sm shadow-emerald-400/50'
                       : 'bg-amber-400'
                   )}
                 />
                 <span>
-                  {lastSyncAt ? `Synced ${timeAgo(lastSyncAt)}` : 'Sync Now'}
+                  {mounted && lastSyncAt ? `Synced ${timeAgo(lastSyncAt)}` : 'Sync Now'}
                 </span>
               </>
             )}

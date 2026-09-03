@@ -52,6 +52,12 @@ const CLASSIFICATION_RULES: ClassificationRule[] = [
       (/bookmyshow/i.test(s + ' ' + b) && !/placement|vitbhopal|cdc/i.test(sender)),
     reason: 'Non-placement marketing, entertainment, or personal newsletter sender',
   },
+  {
+    classification: 'general',
+    confidence: 'high',
+    match: (s) => /new learning contents?|practice.*tests?\s+added/i.test(s),
+    reason: 'Generic LMS / NeoPAT practice course update (non-placement drive)',
+  },
 
   // --- HIGH CONFIDENCE ---
   {
@@ -258,22 +264,15 @@ export const COMPANY_ALIASES: Record<string, string> = {
   'tcs': 'TCS',
   'tata consultancy': 'TCS',
   'tata consultancy services': 'TCS',
-  'infosys': 'Infosys',
   'infosys bpm': 'Infosys',
-  'wipro': 'Wipro',
   'hcl': 'HCL Technologies',
   'hcl tech': 'HCL Technologies',
-  'cognizant': 'Cognizant',
-  'accenture': 'Accenture',
-  'capgemini': 'Capgemini',
-  'deloitte': 'Deloitte',
   'kpmg': 'KPMG',
   'ey sap': 'EY SAP',
   'ey-sap': 'EY SAP',
   'ey gds': 'EY GDS',
   'ey global delivery services': 'EY GDS',
   'ey-gds': 'EY GDS',
-  'ey': 'EY GDS',
   'ernst & young': 'EY GDS',
   'ey (ernst & young)': 'EY GDS',
   'pwc': 'PwC',
@@ -282,39 +281,21 @@ export const COMPANY_ALIASES: Record<string, string> = {
   'apple-sdet': 'Apple SDET',
   'apple sre': 'Apple SRE',
   'apple-sre': 'Apple SRE',
-  'apple': 'Apple SDET',
-  'google': 'Google',
-  'microsoft': 'Microsoft',
-  'amazon': 'Amazon',
-  'flipkart': 'Flipkart',
-  'walmart': 'Walmart',
-  'paytm': 'Paytm',
-  'zomato': 'Zomato',
-  'swiggy': 'Swiggy',
-  'razorpay': 'Razorpay',
+  'eternal': 'Zomato',
+  'eternal (zomato)': 'Zomato',
+  'eternal zomato': 'Zomato',
+  'valuelabs llp': 'Value Labs',
+  'value labs llp': 'Value Labs',
+  'zluri sdet': 'Zluri SDET',
   'cred': 'CRED',
-  'meesho': 'Meesho',
   'phonepe': 'PhonePe',
-  'juspay': 'Juspay',
-  'oracle': 'Oracle',
   'ibm': 'IBM',
-  'samsung': 'Samsung',
-  'adobe': 'Adobe',
-  'salesforce': 'Salesforce',
-  'uber': 'Uber',
-  'ola': 'Ola',
   'byju': 'BYJU\'S',
   'byjus': 'BYJU\'S',
   'l&t': 'L&T',
   'larsen': 'L&T',
   'larsen & toubro': 'L&T',
-  'mu sigma': 'Mu Sigma',
-  'delhivery': 'Delhivery',
-  'vedanta': 'Vedanta',
-  'reliance': 'Reliance',
-  'jio': 'Jio',
   'reliance jio': 'Jio',
-  'tech mahindra': 'Tech Mahindra',
   'mindtree': 'LTIMindtree',
   'ltimindtree': 'LTIMindtree',
   'lti': 'LTIMindtree',
@@ -322,8 +303,6 @@ export const COMPANY_ALIASES: Record<string, string> = {
   'mitsubishi ufj': 'MUFG',
   'mitsubishi ufj financial group': 'MUFG',
   'mitsubishi': 'MUFG',
-  'epsilon': 'Epsilon',
-  'zluri': 'Zluri',
   'nielsen': 'NielsenIQ',
   'nielseniq': 'NielsenIQ',
   'fischerjordan': 'FischerJordan',
@@ -338,92 +317,59 @@ export const COMPANY_ALIASES: Record<string, string> = {
   'blackrock': 'BlackRock',
   'pallav': 'Pallav Technologies',
   'pallav tech': 'Pallav Technologies',
-  'pallav technologies': 'Pallav Technologies',
   'zs': 'ZS Associates',
   'zs associates': 'ZS Associates',
   'london stock exchange': 'London Stock Exchange Group (LSEG)',
-  'honeywell': 'Honeywell Technology Solutions Lab',
   'honeywell aerospace': 'Honeywell Aerospace',
   'honeywell technology solutions': 'Honeywell Technology Solutions Lab',
   'honeywell technology solutions lab': 'Honeywell Technology Solutions Lab',
   'valuelabs': 'Value Labs',
-  'value labs': 'Value Labs',
-  'cummins': 'Cummins',
   'cummins india': 'Cummins',
-  'tekion': 'Tekion',
   'tekion india': 'Tekion',
   'pocket fm': 'Pocket FM',
   'pocketfm': 'Pocket FM',
-  'prodapt': 'Prodapt',
-  'intel': 'Intel',
   'intel india': 'Intel',
-  'toshiba': 'Toshiba',
   'lseg': 'London Stock Exchange Group (LSEG)',
   'ion': 'ION Group',
   'ion group': 'ION Group',
   'eulermotors': 'Euler Motors',
-  'wakefit': 'Wakefit',
   'procdna': 'ProcDNA',
   'blubridge': 'BluBridge Technologies',
   'infosy': 'Infosys',
   'infosy 2027 batch': 'Infosys',
   'tredence': 'Tredence Analytics',
   'tredence super dream': 'Tredence Analytics',
-  'tredence analytics': 'Tredence Analytics',
   'unilever industries': 'Unilever',
-  'unilever': 'Unilever',
   'societe generale global solution centre': 'Societe Generale',
-  'societe generale': 'Societe Generale',
   'sandisk device design centre': 'SanDisk',
   'sandisk': 'SanDisk',
-  'american express': 'American Express',
   'amex': 'American Express',
-  'kinaxis': 'Kinaxis',
   'superjoin': 'Superjoin Finance',
-  'superjoin finance': 'Superjoin Finance',
   'ethos': 'Ethos Technologies',
-  'ethos technologies': 'Ethos Technologies',
   'ethos life': 'Ethos Technologies',
-  'futures first': 'Futures First',
   'futuresfirst': 'Futures First',
   'jpmorgan': 'JPMorgan Chase',
   'jpmorganchase': 'JPMorgan Chase',
   'jpmorgan chase': 'JPMorgan Chase',
   'jpmc': 'JPMorgan Chase',
-  'chubb': 'Chubb',
   'colgate': 'Colgate-Palmolive',
   'colgate-palmolive': 'Colgate-Palmolive',
   'colgate palmolive': 'Colgate-Palmolive',
   'exxonmobil': 'ExxonMobil',
   'exxon mobil': 'ExxonMobil',
   'exxon': 'ExxonMobil',
-  'foodhub': 'Foodhub',
   'fractal': 'Fractal Analytics',
-  'fractal analytics': 'Fractal Analytics',
   'palo alto': 'Palo Alto Networks',
-  'palo alto networks': 'Palo Alto Networks',
-  'spense': 'Spense',
   'unthinkable': 'Unthinkable Solutions',
-  'unthinkable solutions': 'Unthinkable Solutions',
   'unthikable': 'Unthinkable Solutions',
   'veeva': 'Veeva Systems',
-  'veeva systems': 'Veeva Systems',
-  'nutanix': 'Nutanix',
-  'groww': 'Groww',
-  'sabre': 'Sabre',
-  'winwire': 'Winwire',
   'winwire technologies': 'Winwire',
   'workindia': 'WorkIndia',
   'work india': 'WorkIndia',
-  'bottomline': 'Bottomline',
   'bottomline technologies': 'Bottomline',
-  'squadstack': 'Squadstack',
-  'pixelcompute': 'Pixelcompute',
-  'couchbase': 'Couchbase',
-  'zanskar': 'Zanskar',
-  'whirlpool': 'Whirlpool',
-  'zensar': 'Zensar',
   'zensar technologies': 'Zensar',
+  'tresvista financial': 'Tresvista',
+  'tresvista financial services': 'Tresvista',
 };
 
 /**
@@ -577,8 +523,30 @@ export function extractCompanyName(
   // e.g. "Super Dream Internship - 2027 Batch Name of the Company Kinaxis Category Super Dream Internship"
   // e.g. "Placement Drive Date Update ... Drive Name: Sabre Drive Number: pat-PL-2026-1108"
   if (bodySnippet) {
+    // 1. Structured NeoPAT field: Check "Company: <Name>" FIRST if it exists, because "Company" is more specific than "Drive Name"
+    // e.g. Drive Name: "Honeywell" vs Company: "Honeywell Aerospace"
+    // e.g. Drive Name: "Honeywell" vs Company: "Honeywell Technology Solutions Lab"
+    const companyMatch = bodySnippet.match(
+      /(?:^|\s|\n|\r)company\s*[:\-–—]\s*([A-Za-z0-9&\s\-\.()]+?)(?:\s+(?:drive\s+name|drive\s+number|new\s+drive\s+date|category|date\s+of\s+visit|eligibility|eligible|ctc|role|stipend|\n|\r|\*))/i
+    );
+    if (companyMatch && companyMatch[1]) {
+      const extracted = cleanCompanyName(companyMatch[1]);
+      if (
+        extracted &&
+        extracted.length >= 2 &&
+        extracted.length < 50 &&
+        !NON_COMPANY_WORDS.includes(extracted.toLowerCase())
+      ) {
+        const norm = normalizeCompanyName(extracted);
+        if (!['super', 'dream', 'internship', 'placement', 'drive', 'finance'].includes(norm.toLowerCase())) {
+          return norm;
+        }
+      }
+    }
+
+    // 2. Drive Name with strict delimiter (preserves specific role tracks like "Zluri SDET", "Apple SDET")
     const driveNameMatch = bodySnippet.match(
-      /(?:drive\s+name|name\s+of\s+the\s+drive)\s*[:\-*]*\s*([A-Za-z0-9&\s\-\.()]+?)(?:\s+(?:drive\s+number|new\s+drive\s+date|category|date\s+of\s+visit|eligibility|eligible|ctc|role|stipend|\n|\r|\*)|$)/i
+      /(?:drive\s+name|name\s+of\s+the\s+drive)\s*[:\-*]*\s*([A-Za-z0-9&\s\-\.()]+?)(?:\s+(?:drive\s+number|new\s+drive\s+date|category|date\s+of\s+visit|eligibility|eligible|ctc|role|stipend|\n|\r|\*))/i
     );
     if (driveNameMatch && driveNameMatch[1]) {
       const extractedDrive = cleanCompanyName(driveNameMatch[1]);
@@ -588,6 +556,11 @@ export function extractCompanyName(
         extractedDrive.length < 50 &&
         !NON_COMPANY_WORDS.includes(extractedDrive.toLowerCase())
       ) {
+        // Disambiguate generic "Honeywell" drive name based on division keywords in body
+        if (/^honeywell$/i.test(extractedDrive)) {
+          if (/aerospace/i.test(bodySnippet)) return 'Honeywell Aerospace';
+          if (/technology\s+solutions/i.test(bodySnippet)) return 'Honeywell Technology Solutions Lab';
+        }
         const norm = normalizeCompanyName(extractedDrive);
         if (!['super', 'dream', 'internship', 'placement', 'drive', 'finance'].includes(norm.toLowerCase())) {
           return norm;
@@ -595,8 +568,9 @@ export function extractCompanyName(
       }
     }
 
+    // 3. Name of Company with strict delimiter
     const bodyCompMatch = bodySnippet.match(
-      /(?:name\s+of\s+the\s+company|company\s+name)\s*[:\-*]*\s*([A-Za-z0-9&\s\-\.()]+?)(?:\s+(?:category|date\s+of\s+visit|eligibility|eligible|ctc|role|stipend|\n|\r|\*)|$)/i
+      /(?:name\s+of\s+the\s+company|company\s+name)\s*[:\-*]*\s*([A-Za-z0-9&\s\-\.()]+?)(?:\s+(?:category|date\s+of\s+visit|eligibility|eligible|ctc|role|stipend|\n|\r|\*))/i
     );
     if (bodyCompMatch && bodyCompMatch[1]) {
       const extractedFromCustomBody = cleanCompanyName(bodyCompMatch[1]);
@@ -634,24 +608,16 @@ export function extractCompanyName(
     if (lowerCleaned.includes('gds') || lowerBody.includes('ey gds') || lowerBody.includes('global delivery')) {
       return 'EY GDS';
     }
-    // Date-based disambiguation for identical NeoPAT email subjects:
-    // Aug 14-16, 2026 was the EY SAP drive
-    // Aug 20+ 2026 was the EY GDS drive
-    if (receivedAt) {
-      const d = new Date(receivedAt);
-      if (d < new Date('2026-08-18T00:00:00Z')) {
-        return 'EY SAP';
-      } else {
-        return 'EY GDS';
-      }
-    }
     return 'EY GDS';
   }
 
   // Disambiguate Honeywell Aerospace vs Honeywell Technology Solutions Lab
   if (lowerCleaned.includes('honeywell') || lowerBody.includes('honeywell')) {
-    if (lowerCleaned.includes('aerospace') || lowerBody.includes('aerospace') || lowerBody.includes('1190')) {
+    if (lowerCleaned.includes('aerospace') || lowerBody.includes('aerospace')) {
       return 'Honeywell Aerospace';
+    }
+    if (lowerCleaned.includes('technology solutions') || lowerBody.includes('technology solutions')) {
+      return 'Honeywell Technology Solutions Lab';
     }
     return 'Honeywell Technology Solutions Lab';
   }
@@ -668,21 +634,42 @@ export function extractCompanyName(
     if (lowerCleaned.includes('sdet') || lowerBody.includes('sdet') || lowerBody.includes('lc102') || lowerBody.includes('lc 102')) {
       return 'Apple SDET';
     }
-    if (lowerCleaned.includes('sre') || lowerBody.includes('sre') || lowerBody.includes('new role') || lowerBody.includes('lc101') || lowerBody.includes('lc 101')) {
+    if (
+      lowerCleaned.includes('sre') ||
+      lowerBody.includes('sre') ||
+      lowerBody.includes('site reliability') ||
+      lowerBody.includes('reliability') ||
+      lowerCleaned.includes('new role') ||
+      lowerBody.includes('new role') ||
+      lowerBody.includes('lc101') ||
+      lowerBody.includes('lc 101')
+    ) {
       return 'Apple SRE';
     }
-    // Date-based disambiguation for identical NeoPAT registration & eligibility emails:
-    // Aug 21-23, 2026 was the Apple SDET drive
-    // Aug 24+ 2026 was the Apple SRE drive (announced on Aug 24 as "New Role")
+    // Track-based disambiguation by drive number for NeoPAT circulars
+    if (bodySnippet && /pat-PL-2026-1220|1220/i.test(bodySnippet)) {
+      return 'Apple SRE';
+    }
+    if (bodySnippet && /pat-PL-2026-1216|1216/i.test(bodySnippet)) {
+      return 'Apple SDET';
+    }
+    // For general Apple circulars without explicit role tokens, disambiguate by drive cycle:
+    // Aug 24 was the launch of the SRE drive ("New Role !")
     if (receivedAt) {
       const d = new Date(receivedAt);
-      if (d < new Date('2026-08-24T00:00:00Z')) {
-        return 'Apple SDET';
-      } else {
+      if (d >= new Date('2026-08-24T00:00:00Z')) {
         return 'Apple SRE';
       }
     }
     return 'Apple SDET';
+  }
+
+  // Disambiguate Zluri SWE vs Zluri SDET
+  if (lowerCleaned.includes('zluri') || lowerBody.includes('zluri')) {
+    if (lowerCleaned.includes('sdet') || lowerBody.includes('sdet')) {
+      return 'Zluri SDET';
+    }
+    return 'Zluri';
   }
 
   const sortedAliases = Object.keys(COMPANY_ALIASES).sort((a, b) => b.length - a.length);

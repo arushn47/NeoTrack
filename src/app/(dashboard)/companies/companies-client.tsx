@@ -31,10 +31,12 @@ export interface CompanyWithDetails {
   legal_name: string | null;
   aliases: string[] | null;
   updated_at: string;
+  latestEmailDate?: string;
   application: {
     id: string;
     status: string;
     role: string | null;
+    category?: string | null;
     ctc: string | null;
     stipend: string | null;
     location: string | null;
@@ -104,30 +106,37 @@ const SORT_STATUS_PRIORITY: Record<string, number> = {
   not_shortlisted: 1, rejected: 1, withdrawn: 0, declined: 0,
 };
 
-function cleanRoleDisplay(rawRole: string | null | undefined, rawCtc?: string | null): string {
+function cleanRoleDisplay(rawRole: string | null | undefined, category?: string | null): string {
   if (rawRole) {
     const r = rawRole.replace(/<[^>]+>/g, ' ').replace(/^[*,\.\s>\-]+/, '').replace(/[*,\.\s>\-]+$/, '').trim();
     if (
       r &&
       r.length >= 2 &&
       r !== 'Placement Drive' &&
-      !/\byou\s*(?:are|have|re)\b|\byou\b|dear\s|greetings|hi\s+|upcoming|forwarded|scheduled|not japanese|eligible|please|kindly|hereby|inform|congratulat|registr|passout|batch|drive|details below|profile 1|profile 2|applied candidates|^[>,\.\*\s]+$/i.test(r)
+      !/\byou\s*(?:are|have|re)\b|\byou\b|dear\s|greetings|hi\s+|upcoming|forwarded|scheduled|not japanese|eligible|please|kindly|hereby|inform|congratulat|registr|passout|batch|drive|for the candidate|reserve a position|expect them|details below|profile 1|profile 2|applied candidates|^[>,\.\*\s]+$/i.test(r) &&
+      !/^(?:super\s+dream|dream|regular)(?:\s+(?:internship|offer|placement|drive))?$/i.test(r.trim())
     ) {
       return r;
     }
   }
 
+  return category ? 'Campus Placement Drive' : 'Software Engineering Profile';
+}
+
+function getCategoryDisplay(category?: string | null, rawCtc?: string | null): string {
+  if (category && category !== 'Placement Drive') {
+    return category;
+  }
   if (rawCtc) {
-    const match = rawCtc.match(/(\d+(?:\.\d+)?)/);
-    if (match) {
-      const ctcVal = parseFloat(match[1]);
-      if (ctcVal >= 10) return 'Super Dream Drive';
-      if (ctcVal >= 6) return 'Dream Drive';
-      if (ctcVal < 6) return 'Regular Drive';
+    const matches = [...rawCtc.matchAll(/(\d+(?:\.\d+)?)/g)].map((m) => parseFloat(m[1]));
+    if (matches.length > 0) {
+      const maxCtc = Math.max(...matches);
+      if (maxCtc >= 10) return 'Super Dream';
+      if (maxCtc >= 4.5) return 'Dream';
+      return 'Regular';
     }
   }
-
-  return 'Placement Drive';
+  return 'Campus Placement Drive';
 }
 
 function cleanCtcDisplay(rawCtc: string | null | undefined): string | null {
@@ -149,8 +158,8 @@ function cleanLocationDisplay(rawLoc: string | null | undefined): string | null 
   l = l.replace(/^\s*(?:\(Core\):?|Core\):?)\s*/i, '');
   l = l.replace(/[\.\,\:\-\(\)\–—]+$/, '').replace(/^[\.\,\:\-\(\)\–—]+/, '').replace(/\s+/g, ' ').trim();
 
-  // Clean comma spacing: "Bangalore,Hyderabad,Madurai" -> "Bangalore, Hyderabad, Madurai"
-  l = l.replace(/,([^\s])/g, ', $1');
+  // Clean comma and 'and' spacing: "Pune , Mumbai and Bengaluru" -> "Pune, Mumbai, Bengaluru"
+  l = l.replace(/\s*,\s*/g, ', ').replace(/\s+and\s+/gi, ', ').replace(/,([^\s])/g, ', $1').replace(/\s+/g, ' ').trim();
 
   if (
     !l ||
@@ -290,8 +299,11 @@ export default function CompaniesClient({ companies }: CompaniesClientProps) {
         case 'ctc':
           return parseCTC(b.application?.ctc) - parseCTC(a.application?.ctc);
         case 'recent':
-        default:
-          return new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime();
+        default: {
+          const bTime = new Date(b.latestEmailDate || b.updated_at).getTime();
+          const aTime = new Date(a.latestEmailDate || a.updated_at).getTime();
+          return bTime - aTime;
+        }
       }
     });
   }, [companies, searchQuery, selectedFilter, sortMode]);
@@ -456,7 +468,7 @@ export default function CompaniesClient({ companies }: CompaniesClientProps) {
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 stagger-children">
           {filteredCompanies.map((c) => {
             const status = c.application?.status || 'applied';
-            const role = cleanRoleDisplay(c.application?.role, c.application?.ctc);
+            const role = cleanRoleDisplay(c.application?.role, c.application?.category);
             const ctc = cleanCtcDisplay(c.application?.ctc);
             const location = cleanLocationDisplay(c.application?.location);
             const nextEvent = c.latestEvent;
@@ -474,12 +486,12 @@ export default function CompaniesClient({ companies }: CompaniesClientProps) {
                       <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-indigo-500/10 to-violet-500/10 border border-indigo-500/20 flex items-center justify-center font-bold text-indigo-400 text-base group-hover:scale-110 transition-transform flex-shrink-0">
                         {c.name.charAt(0).toUpperCase()}
                       </div>
-                      <div className="min-w-0">
-                        <h3 className="font-bold text-white text-base group-hover:text-indigo-300 transition-colors flex items-center gap-1.5 truncate">
-                          <span className="truncate">{c.name}</span>
+                      <div className="min-w-0 flex-1">
+                        <h3 className="font-bold text-white text-base group-hover:text-indigo-300 transition-colors truncate">
+                          {c.name}
                         </h3>
-                        <p className="text-xs text-zinc-400 truncate mt-0.5">
-                          {role}
+                        <p className="text-xs text-zinc-400 truncate mt-0.5 font-medium">
+                          {getCategoryDisplay(c.application?.category, c.application?.ctc)}
                         </p>
                       </div>
                     </div>
@@ -528,9 +540,12 @@ export default function CompaniesClient({ companies }: CompaniesClientProps) {
                           </span>
                         )}
                         {cleanLoc && !cleanLoc.includes('Vellore') && !cleanLoc.includes('Chennai') && !cleanLoc.includes('Bhopal') && (
-                          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-medium text-zinc-300 bg-zinc-900 border border-zinc-800">
-                            <MapPin className="w-3 h-3 text-zinc-500" />
-                            {cleanLoc}
+                          <span
+                            title={cleanLoc}
+                            className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-medium text-zinc-300 bg-zinc-900 border border-zinc-800 max-w-[220px]"
+                          >
+                            <MapPin className="w-3 h-3 text-zinc-500 shrink-0" />
+                            <span className="truncate">{cleanLoc}</span>
                           </span>
                         )}
                       </div>

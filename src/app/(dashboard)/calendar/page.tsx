@@ -54,10 +54,10 @@ export default async function CalendarPage() {
 
   // Map application status to the highest pipeline stage the user is allowed to see events for
   const STATUS_MAX_STAGE: Record<string, number> = {
-    applied: 1,            // only PPT/intro events
-    ppt_scheduled: 1,      // only PPT
+    applied: 2,            // can see PPT and scheduled test events
+    ppt_scheduled: 2,      // can see PPT and scheduled test events
     shortlisted: 2,        // shortlisted for test
-    test_scheduled: 2,     // can see test events, not interviews
+    test_scheduled: 2,     // can see test events
     interview_scheduled: 3, // can see interview events
     selected: 5,
     offer_received: 5,

@@ -25,6 +25,7 @@ import {
 import { cn, timeAgo } from '@/lib/utils';
 import StatusBadge from '@/components/shared/status-badge';
 import StageProgressBar from '@/components/companies/stage-progress-bar';
+import { parseAssignedLocations } from '@/lib/sync/locations';
 
 export interface CompanyDetail {
   id: string;
@@ -37,6 +38,7 @@ export interface CompanyDetail {
     statusSource: string | null;
     statusConfidence: string | null;
     role: string | null;
+    category?: string | null;
     ctc: string | null;
     stipend: string | null;
     location: string | null;
@@ -123,8 +125,12 @@ export default function CompanyDetailClient({ company }: CompanyDetailClientProp
 
   const displayRole = (() => {
     const r = company.application?.role;
-    if (!r || /\byou\s*(?:are|have|re)\b|dear\s|greetings|eligible|registr/i.test(r)) {
-      return 'Campus Placement Drive';
+    if (
+      !r ||
+      /\byou\s*(?:are|have|re)\b|dear\s|greetings|eligible|registr|for the candidate|reserve a position|expect them/i.test(r) ||
+      /^(?:super\s+dream|dream|regular)(?:\s+(?:internship|offer|placement|drive))?$/i.test(r.trim())
+    ) {
+      return company.application?.category ? 'Campus Placement Drive' : 'Software Engineering Profile';
     }
     return r;
   })();
@@ -148,12 +154,21 @@ export default function CompanyDetailClient({ company }: CompanyDetailClientProp
               {company.name.charAt(0).toUpperCase()}
             </div>
             <div>
-              <div className="flex items-center gap-2.5">
+              <div className="flex items-center gap-2.5 flex-wrap">
                 <h1 className="text-2xl sm:text-3xl font-extrabold text-white tracking-tight">{company.name}</h1>
+                {company.application?.category && (
+                  <span className="px-3 py-1 rounded-full text-xs font-bold tracking-wide bg-indigo-500/15 text-indigo-300 border border-indigo-500/30 shadow-sm">
+                    {company.application.category}
+                  </span>
+                )}
               </div>
-              <p className="text-xs sm:text-sm text-zinc-400 mt-1 font-medium">
-                {displayRole}
-                {company.legalName && ` · ${company.legalName}`}
+              <p className="text-xs sm:text-sm text-zinc-300 mt-1.5 font-medium flex items-center gap-2 flex-wrap">
+                {company.application?.role ? (
+                  <span>Role: <span className="text-white font-semibold">{company.application.role}</span></span>
+                ) : (
+                  <span className="text-zinc-400">Campus Placement Drive</span>
+                )}
+                {company.legalName && <span className="text-zinc-500">· {company.legalName}</span>}
               </p>
             </div>
           </div>
@@ -252,7 +267,7 @@ export default function CompanyDetailClient({ company }: CompanyDetailClientProp
             cleanedLoc = cleanedLoc.replace(/\b(?:internship|placement|drive|hiring|offer|job|role|any\s+honeywell\s+site)\b/gi, '');
             cleanedLoc = cleanedLoc.replace(/^\s*(?:\(Core\):?|Core\):?)\s*/i, '');
             cleanedLoc = cleanedLoc.replace(/[\.\,\:\-\(\)\–—]+$/, '').replace(/^[\.\,\:\-\(\)\–—]+/, '').replace(/\s+/g, ' ').trim();
-            cleanedLoc = cleanedLoc.replace(/,([^\s])/g, ', $1');
+            cleanedLoc = cleanedLoc.replace(/\s*,\s*/g, ', ').replace(/\s+and\s+/gi, ', ').replace(/,([^\s])/g, ', $1');
             if (
               !cleanedLoc ||
               cleanedLoc.length < 2 ||
@@ -264,6 +279,8 @@ export default function CompanyDetailClient({ company }: CompanyDetailClientProp
           }
 
           const workLocationDisplay = cleanedLoc || 'Pan India / Remote';
+          const locationItems = parseAssignedLocations(workLocationDisplay);
+          const isMultiLocation = locationItems.length > 1;
 
           return (
             <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 pt-2">
@@ -301,11 +318,50 @@ export default function CompanyDetailClient({ company }: CompanyDetailClientProp
                 </span>
               </div>
 
-              <div className="p-3.5 bg-zinc-950/60 rounded-2xl border border-zinc-800/80">
-                <span className="text-[10px] text-zinc-500 font-bold uppercase tracking-wider block">Work Location</span>
+              <div
+                className={cn(
+                  'p-3.5 bg-zinc-950/60 rounded-2xl border border-zinc-800/80 relative transition-all',
+                  isMultiLocation || workLocationDisplay.length > 18
+                    ? 'group hover:border-indigo-500/40 hover:bg-zinc-900/60 cursor-pointer'
+                    : ''
+                )}
+                title={workLocationDisplay}
+              >
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] text-zinc-500 font-bold uppercase tracking-wider block">
+                    Work Location
+                  </span>
+                  {isMultiLocation && (
+                    <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-indigo-500/15 text-indigo-400 border border-indigo-500/20">
+                      +{locationItems.length - 1}
+                    </span>
+                  )}
+                </div>
                 <span className="text-sm font-bold text-zinc-200 mt-1 block truncate">
                   {workLocationDisplay}
                 </span>
+
+                {/* Floating Tooltip with full locations pill list on hover */}
+                {(isMultiLocation || workLocationDisplay.length > 18) && (
+                  <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-max max-w-[280px] p-3 rounded-2xl bg-[#12121e]/95 backdrop-blur-2xl border border-indigo-500/30 shadow-2xl shadow-black/90 pointer-events-none opacity-0 group-hover:opacity-100 group-hover:pointer-events-auto transition-all duration-200 z-50 translate-y-1 group-hover:translate-y-0">
+                    <div className="flex items-center gap-1.5 text-[11px] font-bold text-indigo-300 mb-2">
+                      <MapPin className="w-3.5 h-3.5 text-indigo-400 shrink-0" />
+                      <span>Assigned Locations ({locationItems.length})</span>
+                    </div>
+                    <div className="flex flex-wrap gap-1.5">
+                      {locationItems.map((loc, idx) => (
+                        <span
+                          key={idx}
+                          className="px-2 py-0.5 rounded-lg bg-indigo-500/15 border border-indigo-500/25 text-zinc-200 text-xs font-semibold"
+                        >
+                          {loc}
+                        </span>
+                      ))}
+                    </div>
+                    {/* Tooltip caret */}
+                    <div className="absolute top-full left-1/2 -translate-x-1/2 -mt-px border-4 border-transparent border-t-indigo-500/30 w-0 h-0" />
+                  </div>
+                )}
               </div>
 
               <div className="p-3.5 bg-zinc-950/60 rounded-2xl border border-zinc-800/80 col-span-2 sm:col-span-1">

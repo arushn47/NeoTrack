@@ -18,15 +18,28 @@ export interface ExtractedEvent {
   venue: string | null;
   mode: 'online' | 'offline' | 'hybrid' | 'unknown';
   confidence: 'high' | 'medium' | 'low';
+  hasExplicitTime?: boolean;
 }
 
 export interface ExtractedJobDetails {
   role: string | null;
+  category: string | null;
   ctc: string | null;
   stipend: string | null;
   location: string | null;
   neoIdMatched: boolean;
   matchedNeoIdValue: string | null;
+}
+
+/**
+ * Extracts official NeoPAT / CDC Drive Number (e.g. "pat-PL-2026-1261") from text.
+ */
+export function extractDriveNumber(text: string): string | null {
+  if (!text) return null;
+  const m =
+    text.match(/\b(pat-[A-Za-z0-9]+-\d{4}-\d{3,6})\b/i) ||
+    text.match(/drive\s+number\s*[:\-–—\t]?\s*([a-z0-9\-_]+)/i);
+  return m ? m[1].trim() : null;
 }
 
 // ============================================
@@ -70,12 +83,37 @@ const MONTH_PATTERN =
  * - "13th August 2026 by 11.00 am sharp"
  * - "14th Aug 2026 by 9.30 am"
  */
-export function parseDateTime(text: string): Date | null {
-  if (!text) return null;
+export interface ParsedDateTimeResult {
+  date: Date | null;
+  hasExplicitTime: boolean;
+}
+
+/**
+ * Parses a date/time string from Indian placement emails.
+ * Handles formats like:
+ * - "13th August 2026 by 02:30 PM"
+ * - "The PPT is at 3.30 pm."
+ * - "EY is moved to tomm 8 pm"
+ * - "11-08-2026 by 7pm"
+ * - "02.09.2026"
+ */
+export interface ParsedDateTimeResult {
+  date: Date | null;
+  hasExplicitTime: boolean;
+}
+
+/**
+ * Parses a date/time string and returns detailed result with explicit time flag.
+ */
+export function parseDateTimeWithConfidence(
+  text: string,
+  fallbackDate?: Date | null
+): ParsedDateTimeResult {
+  if (!text) return { date: null, hasExplicitTime: false };
 
   let day: number | null = null;
   let month: number | null = null;
-  let year = new Date().getFullYear();
+  let year = fallbackDate ? fallbackDate.getFullYear() : new Date().getFullYear();
 
   // 1. Check DD-MM-YYYY, DD/MM/YYYY, or DD.MM.YYYY numeric format (e.g. "02.09.2026", "11-08-2026")
   const numMatch = text.match(/(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{4}|\d{2})/);
@@ -115,15 +153,20 @@ export function parseDateTime(text: string): Date | null {
     }
   }
 
-  if (day === null || month === null) return null;
-
-  // 3. Extract Time (e.g. "by 3.30 pm", "by 3.30 p", "at 11:30 AM", "by 7pm", "by 8 pm", "by 11.00 am sharp")
+  // 3. Extract Time (e.g. "by 3.30 pm", "is at 3.30 pm", "at 11:30 AM", "by 7pm", "by 8 pm", "by 11.00 am sharp")
   let hours = 9;
   let minutes = 0;
+  let hasExplicitTime = false;
+
+  // Strip the matched date portion so "02.09.2026" doesn't get re-matched as time "2:09"
+  let timeText = text;
+  if (numMatch && numMatch.index !== undefined) {
+    timeText = text.slice(0, numMatch.index) + text.slice(numMatch.index + numMatch[0].length);
+  }
 
   const timeMatch =
-    text.match(/(?:by|at|@|from)?\s*(\d{1,2})(?::|\.)?(\d{2})?\s*(am|pm|a\.m\.|p\.m\.|p\b|a\b)/i) ||
-    text.match(/(?:by|at|@|from)?\s*(\d{1,2})(?::|\.)(\d{2})\s*(?:hours|hrs|sharp)?/i);
+    timeText.match(/(?:by|at|@|from|is\s+at)?\s*(\d{1,2})(?::|\.)?(\d{2})?\s*(am|pm|a\.m\.|p\.m\.|p\b|a\b)/i) ||
+    timeText.match(/(?:by|at|@|from|is\s+at)\s*(\d{1,2})(?::|\.)(\d{2})\s*(?:hours|hrs|sharp)?/i);
 
   if (timeMatch) {
     let h = parseInt(timeMatch[1], 10);
@@ -133,6 +176,22 @@ export function parseDateTime(text: string): Date | null {
     if (!isPm && indicator && h === 12) h = 0;
     hours = h;
     if (timeMatch[2]) minutes = parseInt(timeMatch[2], 10);
+    hasExplicitTime = true;
+  }
+
+  // 4. If no explicit calendar date was found, check relative words or fallback to email received date
+  if (day === null || month === null) {
+    if (fallbackDate) {
+      const ref = new Date(fallbackDate);
+      if (/tomm|tomorrow|tmrw|next\s+day/i.test(text)) {
+        ref.setDate(ref.getDate() + 1);
+      }
+      day = ref.getDate();
+      month = ref.getMonth();
+      year = ref.getFullYear();
+    } else {
+      return { date: null, hasExplicitTime: false };
+    }
   }
 
   // Construct explicitly in Indian Standard Time (IST, UTC+05:30)
@@ -144,7 +203,20 @@ export function parseDateTime(text: string): Date | null {
   const isoWithIstOffset = `${year}-${monthStr}-${dayStr}T${hourStr}:${minStr}:00+05:30`;
 
   const date = new Date(isoWithIstOffset);
-  return isNaN(date.getTime()) ? null : date;
+  return {
+    date: isNaN(date.getTime()) ? null : date,
+    hasExplicitTime,
+  };
+}
+
+/**
+ * Convenience helper returning Date directly.
+ */
+export function parseDateTime(
+  text: string,
+  fallbackDate?: Date | null
+): Date | null {
+  return parseDateTimeWithConfidence(text, fallbackDate).date;
 }
 
 // ============================================
@@ -157,79 +229,152 @@ export function parseDateTime(text: string): Date | null {
 export function extractEvents(email: ParsedEmail): ExtractedEvent[] {
   const events: ExtractedEvent[] = [];
   const fullText = `${email.subject}\n${email.bodyPlain || email.bodySnippet}`;
+  const refDate = email.receivedAt ? new Date(email.receivedAt) : new Date();
 
   // 1. Check for Pre-Placement Talk (PPT)
-  // Guard: exclude ".ppt" file attachment mentions (e.g. "find the attached PPT file")
-  if (/ppt|pre[\s-]*placement\s*talk/i.test(fullText) && !/ppt\s*file|\.ppt\b/i.test(fullText)) {
+  // Guard 1: exclude ".ppt" file attachment mentions (e.g. "find the attached PPT file")
+  // Guard 2: exclude casual mentions like "will be shared post Pre Placement Talk", "after PPT"
+  const isCasualPptMention = /shared\s+post|after\s+(?:the\s+)?ppt|will\s+be\s+shared\s+post|post\s+pre[\s-]*placement/i.test(fullText);
+  const isPptUnannounced = /(?:date\s+of\s+visit|ppt|pre[\s-]*placement)\s*[:\-–—\t]?\s*(?:will\s+be\s+(?:announced|informed|shared)|tba|tbd|to\s+be\s+(?:announced|disclosed))/i.test(fullText);
+
+  if (
+    /ppt|pre[\s-]*placement\s*talk/i.test(fullText) &&
+    !/ppt\s*file|\.ppt\b/i.test(fullText) &&
+    !isCasualPptMention &&
+    !isPptUnannounced
+  ) {
     const pptMatch = fullText.match(/(?:ppt|pre[\s-]*placement\s*talk)\s*[:\-–—]?\s*(.{1,100})/i);
-    const date = parseDateTime(pptMatch ? pptMatch[0] : fullText);
+    const snippetForPpt = pptMatch ? pptMatch[0] : fullText;
+    const parsed = parseDateTimeWithConfidence(snippetForPpt, refDate);
     const venue = extractVenue(fullText);
 
-    events.push({
-      eventType: 'ppt',
-      title: 'Pre-Placement Talk (PPT)',
-      startTime: date,
-      endTime: date ? new Date(date.getTime() + 60 * 60 * 1000) : null, // +1 hour
-      venue,
-      mode: determineMode(fullText, venue),
-      confidence: date ? 'high' : 'medium',
-    });
+    // GUARD: Only schedule a PPT event if the text contains an EXPLICIT date or explicit time!
+    const hasExplicitDateInText =
+      parsed.hasExplicitTime ||
+      /\b(?:\d{1,2}(?:st|nd|rd|th)?\s+(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)|\d{1,2}[\/\-\.]\d{1,2}[\/\-\.]\d{2,4}|tomm|tomorrow|tmrw)\b/i.test(snippetForPpt);
+
+    if (parsed.date && hasExplicitDateInText) {
+      events.push({
+        eventType: 'ppt',
+        title: 'Pre-Placement Talk (PPT)',
+        startTime: parsed.date,
+        endTime: new Date(parsed.date.getTime() + 60 * 60 * 1000), // +1 hour
+        venue,
+        mode: determineMode(fullText, venue),
+        confidence: 'high',
+        hasExplicitTime: parsed.hasExplicitTime,
+      });
+    }
   }
 
+  const isRegistrationCircular =
+    /registration/i.test(email.subject) ||
+    /last\s+date\s+for\s+registration/i.test(fullText) ||
+    /(?:category|eligibility|date\s+of\s+visit)[\s\S]{0,80}?(?:super\s+dream|dream\s+internship|dream\s+offer)/i.test(fullText);
+
+  const subjectMentionsTest = /(?:test|assessment|coding)\s+(?:is\s+)?scheduled|shortlist/i.test(email.subject);
+  const subjectMentionsInterview = /interview/i.test(email.subject);
+
   // 2. Check for Online / Coding Test
-  if (/(?:online|coding|aptitude|assessment)\s*test|hackerrank|hackerearth|mettl|amcat/i.test(fullText)) {
-    const testMatch = fullText.match(/(?:online|coding|aptitude|assessment)\s*test\s*[:\-–—]?\s*(.{1,100})/i);
-    const date = parseDateTime(testMatch ? testMatch[0] : fullText);
+  // GUARD: In registration circulars (where candidate is merely registering/applying),
+  // prospective test dates (e.g. "Date of Visit: Test: ...") are tentative campus drive milestones,
+  // NOT confirmed test invitations for the applicant. Candidates must be shortlisted before
+  // a test is scheduled on their calendar! Only PPTs may be scheduled from registration circulars.
+  const testMatch = fullText.match(
+    /(?:(?:online|coding|aptitude|assessment|written)?\s*test(?:\s+date)?|date\s+of\s+visit[\s\S]{0,40}?\btest)\s*[:\-–—\t]?\s*([^\r\n]{1,100})/i
+  );
+  const snippetForTest = testMatch ? testMatch[0] : fullText;
+  const hasTestKeyword =
+    /(?:online|coding|aptitude|assessment|written)\s*test|hackerrank|hackerearth|mettl|amcat/i.test(fullText) ||
+    Boolean(testMatch);
+
+  if (hasTestKeyword && (!isRegistrationCircular || subjectMentionsTest)) {
+    const parsed = parseDateTimeWithConfidence(snippetForTest, refDate);
     const venue = extractVenue(fullText);
 
-    events.push({
-      eventType: /coding/i.test(fullText) ? 'coding_test' : 'online_test',
-      title: /coding/i.test(fullText) ? 'Coding Test' : 'Online Assessment',
-      startTime: date,
-      endTime: date ? new Date(date.getTime() + 90 * 60 * 1000) : null, // +1.5 hours
-      venue: venue || 'Online Link / Mettl / HackerRank',
-      mode: 'online',
-      confidence: date ? 'high' : 'medium',
-    });
+    const hasExplicitDate =
+      parsed.hasExplicitTime ||
+      /\b(?:\d{1,2}(?:st|nd|rd|th)?\s+(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)|\d{1,2}[\/\-\.]\d{1,2}[\/\-\.]\d{2,4}|tomm|tomorrow|tmrw)\b/i.test(snippetForTest);
+
+    if (parsed.date && (hasExplicitDate || /hiring\s+test|coding\s+test\s+invitation|test\s+is\s+scheduled/i.test(fullText))) {
+      events.push({
+        eventType: 'online_test',
+        title: /coding/i.test(fullText) ? 'Coding Test' : 'Online Assessment',
+        startTime: parsed.date,
+        endTime: new Date(parsed.date.getTime() + 90 * 60 * 1000), // +1.5 hours
+        venue: venue || 'Online Link / Mettl / HackerRank',
+        mode: 'online',
+        confidence: parsed.hasExplicitTime ? 'high' : 'medium',
+        hasExplicitTime: parsed.hasExplicitTime,
+      });
+    }
   }
 
   // 3. Check for Interview / Next Selection Round
-  // GUARD: If we already extracted a test event from this email, only create an interview
-  // event if the SUBJECT explicitly mentions "interview". This prevents phantom interview
-  // events when the body casually mentions "selection process" or similar language.
+  // GUARD: Neither tests nor interviews are scheduled from registration circulars.
+  // Interviews only get scheduled when shortlisted!
   const alreadyHasTestEvent = events.some((e) =>
     ['online_test', 'coding_test'].includes(e.eventType)
   );
-  const subjectMentionsInterview = /interview/i.test(email.subject);
+
+  const isInterviewUnannounced = /(?:interview|selection\s+process|date\s+of\s+visit)\s*[:\-–—\t]?\s*(?:will\s+be\s+(?:announced|informed|shared)|tba|tbd|to\s+be\s+(?:announced|disclosed))/i.test(fullText);
 
   if (
-    /interview|next\s+round|selection\s+process/i.test(fullText) &&
-    (!alreadyHasTestEvent || subjectMentionsInterview)
+    /interview|next\s+round/i.test(fullText) &&
+    (!alreadyHasTestEvent || subjectMentionsInterview) &&
+    !isInterviewUnannounced &&
+    (!isRegistrationCircular || subjectMentionsInterview)
   ) {
     const isTech = /technical/i.test(fullText);
     // Word-boundary \b prevents matching "hr" inside words like "through", "share", "shortlisted"
     const isHr = /\bhr\b|human\s+resource/i.test(fullText);
     const interviewMatch = fullText.match(
-      /(?:interview|next\s+round(?:\s+of\s+selection\s+process)?|selection\s+process)\s*(?:is\s+scheduled)?\s*[:\-–—]?\s*(?:on\s+)?\(?(.{1,120})/i
+      /(?:interview|next\s+round(?:\s+of\s+selection\s+process)?)\s*(?:is\s+scheduled)?\s*[:\-–—]?\s*(?:on\s+)?\(?(.{1,120})/i
     );
-    const date = parseDateTime(interviewMatch ? interviewMatch[0] : fullText);
-    const venue = extractVenue(fullText);
+    const snippetForInterview = interviewMatch ? interviewMatch[0] : fullText;
+    const parsed = parseDateTimeWithConfidence(snippetForInterview, refDate);
 
-    events.push({
-      eventType: isTech ? 'technical_interview' : isHr ? 'hr_interview' : 'technical_interview',
-      title: isTech
-        ? 'Technical Interview'
-        : isHr
-        ? 'HR Interview'
-        : /next\s+round|selection\s+process/i.test(email.subject)
-        ? 'Next Round of Selection'
-        : 'Interview Round',
-      startTime: date,
-      endTime: date ? new Date(date.getTime() + 60 * 60 * 1000) : null,
-      venue,
-      mode: determineMode(fullText, venue),
-      confidence: date ? 'high' : 'medium',
-    });
+    // GUARD: Only schedule an interview event if the text contains an EXPLICIT date or explicit time!
+    const hasExplicitDateInText =
+      parsed.hasExplicitTime ||
+      /\b(?:\d{1,2}(?:st|nd|rd|th)?\s+(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)|\d{1,2}[\/\-\.]\d{1,2}[\/\-\.]\d{2,4}|tomm|tomorrow|tmrw)\b/i.test(snippetForInterview);
+    const isExplicitlyScheduled = /(?:interview|next\s+round)\s+(?:is\s+)?scheduled\s+on/i.test(fullText);
+
+    if (parsed.date && (hasExplicitDateInText || isExplicitlyScheduled)) {
+      const venue = extractVenue(fullText);
+
+      events.push({
+        eventType: isTech ? 'technical_interview' : isHr ? 'hr_interview' : 'technical_interview',
+        title: isTech
+          ? 'Technical Interview'
+          : isHr
+          ? 'HR Interview'
+          : /next\s+round|selection\s+process/i.test(email.subject)
+          ? 'Next Round of Selection'
+          : 'Interview Round',
+        startTime: parsed.date,
+        endTime: new Date(parsed.date.getTime() + 60 * 60 * 1000),
+        venue,
+        mode: determineMode(fullText, venue),
+        confidence: parsed.hasExplicitTime ? 'high' : 'medium',
+        hasExplicitTime: parsed.hasExplicitTime,
+      });
+    }
+  }
+
+  // 4. Disambiguate combined PPT & Test announcements
+  // When an email announces both PPT and Test in a single event schedule (e.g. "Chubb PPT & online Test is scheduled on 02.09.2026 by 3.30 pm"),
+  // the announced time corresponds to the Pre-Placement Talk. The test is scheduled right after the PPT (+2.5 hours, e.g. 3:30 PM -> 6:00 PM).
+  const pptEvent = events.find((e) => e.eventType === 'ppt');
+  const testEvent = events.find((e) => ['online_test', 'coding_test'].includes(e.eventType));
+
+  if (pptEvent && testEvent && pptEvent.startTime && testEvent.startTime) {
+    const diffMs = Math.abs(testEvent.startTime.getTime() - pptEvent.startTime.getTime());
+    if (diffMs < 30 * 60 * 1000) {
+      pptEvent.endTime = new Date(pptEvent.startTime.getTime() + 90 * 60 * 1000); // 1.5 hours (3:30 PM - 5:00 PM)
+      testEvent.startTime = new Date(pptEvent.startTime.getTime() + 2.5 * 60 * 60 * 1000); // +2.5 hours (e.g. 6:00 PM)
+      testEvent.endTime = new Date(testEvent.startTime.getTime() + 90 * 60 * 1000); // 1.5 hours (6:00 PM - 7:30 PM)
+    }
   }
 
   return events;
@@ -342,6 +487,9 @@ export function extractTravelRequirement(text: string): TravelRequirement {
     /physical\s+interview[^.\n]*?(?:@\s*)?(?:physical\s+)?vit\s+vellore/i.test(targetText) ||
     /interview[^.\n]*?(?:@\s*)?(?:physical\s+)?vit\s+vellore/i.test(targetText) ||
     /interview[^.\n]*?at\s+vellore\s+campus/i.test(targetText) ||
+    /interview[^.\n]*?at\s+vellore/i.test(targetText) ||
+    /physical[^.\n]*?at\s+vellore\s+campus/i.test(targetText) ||
+    /physical[^.\n]*?at\s+vellore/i.test(targetText) ||
     /bhopal[^.\n]*?have\s+to\s+travel.*vellore/i.test(targetText) ||
     /@\s*vit\s+vellore\s+campus\s*\(\s*entire\s+physical/i.test(targetText)
   ) {
@@ -353,7 +501,10 @@ export function extractTravelRequirement(text: string): TravelRequirement {
     /@\s*(?:physical\s+)?vit\s+chennai/i.test(targetText) ||
     /physical\s+interview[^.\n]*?(?:@\s*)?(?:physical\s+)?vit\s+chennai/i.test(targetText) ||
     /interview[^.\n]*?(?:@\s*)?(?:physical\s+)?vit\s+chennai/i.test(targetText) ||
-    /interview[^.\n]*?at\s+chennai\s+campus/i.test(targetText)
+    /interview[^.\n]*?at\s+chennai\s+campus/i.test(targetText) ||
+    /interview[^.\n]*?at\s+chennai/i.test(targetText) ||
+    /physical[^.\n]*?at\s+chennai\s+campus/i.test(targetText) ||
+    /physical[^.\n]*?at\s+chennai/i.test(targetText)
   ) {
     return 'chennai';
   }
@@ -390,8 +541,14 @@ export function extractJobDetails(text: string): ExtractedJobDetails {
   let stipend: string | null = null;
   let location: string | null = null;
 
-  // Clean markdown formatting, HTML entities, and excess whitespace
-  const cleanText = text
+  // Clean HTML tags, styles, CSS hex color codes (e.g. #333333, #666666), and excess whitespace
+  const noHtml = text
+    .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+    .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/#[0-9a-fA-F]{3,8}\b/g, ' ');
+
+  const cleanText = noHtml
     .replace(/[*_`>#]/g, ' ')
     .replace(/&nbsp;/gi, ' ')
     .replace(/&amp;/gi, '&')
@@ -401,7 +558,7 @@ export function extractJobDetails(text: string): ExtractedJobDetails {
 
   // 0. CSE Branch Eligibility Guard
   if (/other\s+than\s+(?:cse|computer)|(?:cse|computer|it)[^.\n]*?not\s+eligible|except\s+cse/i.test(cleanText)) {
-    return { role: null, ctc: null, stipend: null, location: null, neoIdMatched: false, matchedNeoIdValue: null };
+    return { role: null, category: null, ctc: null, stipend: null, location: null, neoIdMatched: false, matchedNeoIdValue: null };
   }
 
   // 1. CTC Extraction — handles single LPA, ranges (e.g. "8.5 - 10 LPA", "30 _ 31 LPA"), PPO formulas, and additions ("14+1 LPA")
@@ -409,22 +566,88 @@ export function extractJobDetails(text: string): ExtractedJobDetails {
   if (ctcBlockMatch && unannouncedPattern.test(ctcBlockMatch[1])) {
     ctc = null;
   } else {
-    const ctcText = ctcBlockMatch ? ctcBlockMatch[1].trim() : cleanText;
+    const isReferBelow = ctcBlockMatch && /refer (?:below|table|attached)|details below|as attached|refer\s+to\s+below/i.test(ctcBlockMatch[1]);
+    const ctcText = (ctcBlockMatch && !isReferBelow) ? ctcBlockMatch[1].trim() : cleanText;
     
-    // 1. Remove all parentheses and bracket contents completely (e.g. "(RB -2+3+4)", "(If Converted)", "(10% Var)")
-    const cleanCtc = ctcText
-      .replace(/\([^)]*\)/g, ' ')
-      .replace(/\[[^\]]*\]/g, ' ')
+    // 0. Clean out multi-year Retention Bonus (RB) formulas and internal fixed/variable breakdowns
+    // e.g. "14+1 +(RB -2+3+4) LPA" -> "14+1 LPA"
+    // e.g. "15 LPA (₹14 LPA Fixed + ₹1 LPA Variable) + Retention Bonus(2 Lakh +3 Lakh +4 Lakh)" -> "15 LPA"
+    const sanitizedCtcText = ctcText
+      .replace(/\+?\s*\(\s*(?:RB|Retention\s+Bonus)[^)]*\)/gi, ' ')
+      .replace(/\+?\s*(?:RB|Retention\s+Bonus)\s*\([^)]*\)/gi, ' ')
+      .replace(/\+?\s*Retention\s+Bonus\s*:[^,\n\r\.]+/gi, ' ')
+      .replace(/\(\s*(?:INR|₹|Rs\.?)?\s*\d+[^)]*(?:fixed|variable|base)[^)]*\)/gi, ' ');
+
+    // 1. Remove remaining bracket punctuation without deleting enclosed figures like "(CTC: ₹22 Lakhs)"
+    const cleanCtc = sanitizedCtcText
+      .replace(/[()\[\]]/g, ' ')
       .replace(/&nbsp;/gi, ' ')
       .replace(/\s+/g, ' ');
 
     const nums: number[] = [];
 
-    // 2. Check for addition formulas: e.g. "14+1 LPA", "14 + 1"
-    const addMatches = [...cleanCtc.matchAll(/(\d+(?:\.\d+)?)\s*\+\s*(\d+(?:\.\d+)?)(?:\s*(?:LPA|L\s*PA|Lakhs?|Lacs?|Lac|\bL\b))?/gi)];
-    for (const m of addMatches) {
-      const sum = parseFloat(m[1]) + parseFloat(m[2]);
-      if (sum >= 3 && sum < 200) nums.push(sum);
+    // 1.2. Structured TCTC (Total Cost To Company) Table Mapping:
+    // When an email has a breakdown table with columns like "Fixed Pay", "Bonus", "TCTC@Target", "TCTC @MEP" (e.g. American Express),
+    // extract values directly from the TCTC columns!
+    const cleanWithLines = noHtml
+      .replace(/[*_`>#]/g, ' ')
+      .replace(/&nbsp;/gi, ' ')
+      .replace(/&amp;/gi, '&')
+      .replace(/[ \t]+/g, ' ');
+
+    const tctcHeaderIndex = cleanWithLines.search(/\b(?:TCTC|Total\s+CTC)\b/i);
+    if (tctcHeaderIndex !== -1) {
+      const beforeTctc = cleanWithLines.slice(0, tctcHeaderIndex);
+      const lastTableStart = beforeTctc.lastIndexOf('Course') !== -1 
+        ? beforeTctc.lastIndexOf('Course') 
+        : beforeTctc.lastIndexOf('CTC');
+      const sliceStart = lastTableStart !== -1 ? lastTableStart : tctcHeaderIndex;
+      const tctcSlice = cleanWithLines.slice(sliceStart, sliceStart + 800);
+      const lines = tctcSlice.split(/\r?\n/).map((l) => l.trim()).filter((l) => l.length > 0 && !/^CTC$/i.test(l));
+
+      const firstDataIndex = lines.findIndex((l, idx) => idx > 0 && /(?:B\.?Tech|CSE|Engineering|\d{1,3}(?:,\d{2,3})+)/i.test(l));
+      if (firstDataIndex !== -1) {
+        const headerCount = firstDataIndex;
+        for (let i = 0; i < headerCount; i++) {
+          if (/\b(?:TCTC|Total\s+CTC)\b/i.test(lines[i])) {
+            const valLine = lines[headerCount + i];
+            if (valLine) {
+              const m = valLine.match(/\b(\d{1,3}(?:,\d{2,3})+|\d{6,8})\b/);
+              if (m) {
+                const val = parseInt(m[1].replace(/,/g, ''), 10);
+                if (val >= 300000 && val <= 50000000) {
+                  nums.push(Math.round((val / 100000) * 100) / 100);
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+
+    // 1.5. Explicit labeled CTC totals (e.g. "CTC: ₹22 Lakhs", "CTC: 26 Lakhs", "PPO CTC: ₹10 LPA", "Full-Time Compensation: 15 LPA")
+    if (nums.length === 0) {
+      const labeledCtcMatches = [...cleanCtc.matchAll(/(?:CTC|PPO\s+CTC|Total\s+CTC|Gross\s+CTC|Full-Time\s+Compensation|Compensation)\s*[:\-–—\s]\s*(?:INR|₹|Rs\.?)?\s*(\d+(?:\.\d+)?)\s*(?:LPA|L\s*PA|Lakhs?|Lacs?|Lac|\bL\b)/gi)];
+      if (labeledCtcMatches.length > 0) {
+        for (const m of labeledCtcMatches) {
+          const v = parseFloat(m[1]);
+          if (v >= 3 && v < 200) nums.push(v);
+        }
+      }
+    }
+
+    // 2. Check for addition formulas: e.g. "14+1 LPA", "9LPA+1.2 Lakh JB", "9 LPA+1.2 JB"
+    if (nums.length === 0) {
+      const addMatches = [...cleanCtc.matchAll(/(\d+(?:\.\d+)?)(?:\s*(?:LPA|L\s*PA|Lakhs?|Lacs?|Lac|\bL\b))?\s*\+\s*(\d+(?:\.\d+)?)(?:\s*(?:LPA|L\s*PA|Lakhs?|Lacs?|Lac|\bL\b|JB|Joining\s+Bonus))?/gi)];
+      for (const m of addMatches) {
+        const sum = parseFloat(m[1]) + parseFloat(m[2]);
+        if (sum >= 3 && sum < 200) {
+          // Push both base and total if desired, or at least the total
+          const base = parseFloat(m[1]);
+          if (base >= 3 && base < sum) nums.push(base);
+          nums.push(sum);
+        }
+      }
     }
 
     // 3. Match ranges like "12 - 15 LPA", "30 _ 31 LPA", "8.5 to 10 LPA"
@@ -447,9 +670,14 @@ export function extractJobDetails(text: string): ExtractedJobDetails {
       }
     }
 
-    // 5. Match raw rupee amounts like "12,00,000" or "7,61,250"
+    // 5. Match raw rupee amounts like "11,50,000", "INR 6,25,000", or plain 6-8 digit numbers inside an explicit CTC section
     if (nums.length === 0) {
-      const rupeeMatches = [...cleanCtc.matchAll(/(?:CTC|Package|Salary|Compensation|PPO|Research|Development|Growth)\s*[:\-–—\t]?\s*(?:INR|₹|Rs\.?)?\s*([\d,]+)(?:\s*(?:INR|₹|\/\-))?/gi)];
+      const rupeeMatches = [
+        ...cleanCtc.matchAll(/(?:(?:CTC|Package|Salary|Compensation|PPO)\s*[:\-–—\t]?\s*)?(?:INR|₹|Rs\.?)\s*([\d,]{6,12})(?:\s*(?:INR|₹|\/\-))?/gi),
+        ...cleanCtc.matchAll(/(?:CTC|Package|Salary|Compensation|PPO)\s*[:\-–—\t]?\s*([\d,]{6,12})/gi),
+        ...cleanCtc.matchAll(/\b(\d{1,3}(?:,\d{2,3})+)\b/g),
+        ...(ctcBlockMatch ? cleanCtc.matchAll(/\b(\d{6,8})\b/g) : []),
+      ];
       for (const m of rupeeMatches) {
         const val = parseInt(m[1].replace(/,/g, ''), 10);
         if (val >= 300000 && val <= 20000000 && ![2024, 2025, 2026, 2027, 2028, 2029].includes(val)) {
@@ -476,30 +704,57 @@ export function extractJobDetails(text: string): ExtractedJobDetails {
     stipend = null;
   } else if (stipendBlockMatch) {
     const stipendText = stipendBlockMatch[1];
-    const stipendMatches = [...stipendText.matchAll(/(?:INR|₹|Rs\.?)?\s*([\d,]+(?:\.\d+)?)\s*(?:k|thousand)?(?:\s*(?:\/\s*month|\/\s*mo|pm|p\.?m\.?|per\s+month))?/gi)];
-    const nums: number[] = [];
-    for (const m of stipendMatches) {
-      let rawNum = m[1].replace(/,/g, '');
-      let val = parseFloat(rawNum);
-      if (/k\b/i.test(m[0]) && val < 500) {
-        val = val * 1000;
-      }
-      if (val >= 5000 && val < 500000 && ![2024, 2025, 2026, 2027, 2028, 2029].includes(val)) {
-        nums.push(val);
+
+    // 2.1. Check for additive Base Stipend + Housing Stipend (e.g. Apple: Monthly Stipend 1,05,000 + Housing 35,100)
+    const baseStipendMatch = cleanText.match(/(?:Monthly\s+Stipend|Base\s+Stipend)\s*[:\-–—\t]?\s*(?:INR|₹|Rs\.?)?\s*([\d,]+)/i);
+    const housingMatch = cleanText.match(/(?:Monthly\s+Housing\s+Stipend|Housing\s+Stipend|Accommodation\s+Stipend|HRA)\s*[:\-–—\t]?\s*(?:INR|₹|Rs\.?)?\s*([\d,]+)/i);
+    if (baseStipendMatch && housingMatch) {
+      const baseVal = parseInt(baseStipendMatch[1].replace(/,/g, ''), 10);
+      const housingVal = parseInt(housingMatch[1].replace(/,/g, ''), 10);
+      if (baseVal >= 5000 && housingVal >= 5000) {
+        stipend = `₹${(baseVal + housingVal).toLocaleString('en-IN')}/month`;
       }
     }
-    if (nums.length > 0) {
-      const min = Math.min(...nums);
-      const max = Math.max(...nums);
-      if (min === max) {
-        stipend = `₹${min.toLocaleString('en-IN')}/month`;
-      } else {
-        stipend = `₹${min.toLocaleString('en-IN')} - ₹${max.toLocaleString('en-IN')}/month`;
+
+    // 2.2. Check for explicit addition formulas: e.g. "75,000 + 25,000"
+    if (!stipend) {
+      const addStipendMatch = stipendText.match(/(?:INR|₹|Rs\.?)?\s*([\d,]+)\s*\+\s*(?:INR|₹|Rs\.?)?\s*([\d,]+)/i);
+      if (addStipendMatch) {
+        const val1 = parseInt(addStipendMatch[1].replace(/,/g, ''), 10);
+        const val2 = parseInt(addStipendMatch[2].replace(/,/g, ''), 10);
+        if (val1 >= 5000 && val2 >= 1000) {
+          stipend = `₹${(val1 + val2).toLocaleString('en-IN')}/month`;
+        }
+      }
+    }
+
+    // 2.3. Default single amount or range
+    if (!stipend) {
+      const stipendMatches = [...stipendText.matchAll(/(?:INR|₹|Rs\.?)?\s*([\d,]+(?:\.\d+)?)\s*(?:k|thousand)?(?:\s*(?:\/\s*month|\/\s*mo|pm|p\.?m\.?|per\s+month))?/gi)];
+      const nums: number[] = [];
+      for (const m of stipendMatches) {
+        let rawNum = m[1].replace(/,/g, '');
+        let val = parseFloat(rawNum);
+        if (/k\b/i.test(m[0]) && val < 500) {
+          val = val * 1000;
+        }
+        if (val >= 5000 && val < 500000 && ![2024, 2025, 2026, 2027, 2028, 2029].includes(val)) {
+          nums.push(val);
+        }
+      }
+      if (nums.length > 0) {
+        const min = Math.min(...nums);
+        const max = Math.max(...nums);
+        if (min === max) {
+          stipend = `₹${min.toLocaleString('en-IN')}/month`;
+        } else {
+          stipend = `₹${min.toLocaleString('en-IN')} - ₹${max.toLocaleString('en-IN')}/month`;
+        }
       }
     }
   }
 
-  // 3. Category & Job Role Extraction
+  // 3. Category & Job Role Extraction (Strictly Separate!)
   let category: string | null = null;
   const categoryMatch = cleanText.match(
     /\bCategory\b\s*[:\-–—\t]?\s*([A-Za-z0-9\s\/\-\,\&]+?)(?:\s+(?:Date|Visit|Eligible|Eligibility|CTC|Stipend|Selection|Website|Process|Last\s+date)|$|\.|\r?\n)/i
@@ -516,30 +771,85 @@ export function extractJobDetails(text: string): ExtractedJobDetails {
   // Also check subject/body for common tier keywords if category not explicitly in table
   if (!category) {
     if (/super\s+dream\s+internship/i.test(cleanText)) category = 'Super Dream Internship';
+    else if (/super\s+dream\s+offer/i.test(cleanText)) category = 'Super Dream Offer';
     else if (/super\s+dream/i.test(cleanText)) category = 'Super Dream';
     else if (/dream\s+internship/i.test(cleanText)) category = 'Dream Internship';
+    else if (/dream\s+offer/i.test(cleanText)) category = 'Dream Offer';
     else if (/\bdream\b/i.test(cleanText)) category = 'Dream';
     else if (/regular\s+offer/i.test(cleanText)) category = 'Regular';
   }
 
-  const roleMatch = cleanText.match(
-    /(?:Job\s+Role|Designation|Position|Profile)\s*[:\-–—\t]?\s*([A-Za-z0-9\s\/\-\,\&]+?)(?:\s+(?:Service|Greetings|About|Campus|Eligible|Selection|Location|CTC|Stipend|Process|Note|Date)|$|\.|\r?\n)/i
-  );
-  if (roleMatch) {
-    const rawRole = roleMatch[1].replace(/^[*,\.\s>\-]+/, '').replace(/[*,\.\s>\-]+$/, '').trim().slice(0, 40);
-    if (
-      rawRole &&
-      rawRole.length >= 2 &&
-      !/\byou\b|\bwe\b|\bi\b|dear\s|greetings|hi\s+|hello\s|upcoming|forwarded|scheduled|not japanese|eligible|please|kindly|hereby|inform|congratulat|registr|passout|batch|drive|internship\s+registration|^[>,\.\*\s]+$/i.test(rawRole)
-    ) {
-      role = rawRole;
+  // VIT Placement Rule (VIT Bhopal / Vellore CDC Policy):
+  // Touching or above 10 LPA (or max of CTC range >= 10) -> Super Dream
+  // Below 10 LPA -> Dream (>= 4.5) or Regular (< 4.5)
+  if (!category && ctc) {
+    const matches = [...ctc.matchAll(/(\d+(?:\.\d+)?)/g)].map((m) => parseFloat(m[1]));
+    if (matches.length > 0) {
+      const maxCtc = Math.max(...matches);
+      const isIntern = stipend !== null || /internship|intern\b/i.test(cleanText);
+      if (maxCtc >= 10) {
+        category = isIntern ? 'Super Dream Internship' : 'Super Dream Offer';
+      } else if (maxCtc >= 4.5) {
+        category = isIntern ? 'Dream Internship' : 'Dream Offer';
+      } else {
+        category = 'Regular Offer';
+      }
     }
   }
 
-  // If no specific technical role was extracted, use the clean placement category (e.g. "Super Dream Internship")
-  if (!role && category) {
-    role = category;
+  // Role / Designation Extraction:
+  // Uses clean text with preserved line breaks so newline-terminated titles extract cleanly
+  const cleanWithLines = noHtml
+    .replace(/[*_`>#]/g, ' ')
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&amp;/gi, '&')
+    .replace(/[ \t]+/g, ' ');
+
+  // 1. Explicit headers: Designation, Job Role, Job Profile, Role, Position, Job Designation Offered
+  let roleMatch = cleanWithLines.match(
+    /\b(?:Job\s+Designation\s+Offered|Designation\s+Offered|Designation|Job\s+Role|Job\s+Profile|Role|Position)\b\s*[:\-–—\t]\s*([^\r\n]{2,100}(?:\r?\n[ \t]*[A-Za-z0-9\/\,\& \t\-]{2,80})?)/i
+  );
+
+  if (roleMatch) {
+    let raw = roleMatch[1].replace(/\r?\n[ \t]*/g, ' ').trim();
+    // Strip sub-headers like "Service line - Position Title:"
+    raw = raw.replace(/^(?:Service\s+line\s*[-–—]\s*)?Position\s+Title\s*[:\-–—\t]\s*/i, '');
+    // Stop at trailing label boundaries like "JD", "Location", "Note", "Duration", etc.
+    raw = raw.replace(/\s*(?:JD|Location|Eligible|Eligibility|Selection|CTC|Stipend|Process|Note|Registration|Date|Duration|As\s+part|We\s+would)\b.*$/i, '');
+    // Strip parenthetical notes like "(JD Attached)"
+    raw = raw.replace(/\s*\([^\)]*\)/g, '').replace(/[\(\[\{]/g, '');
+    // Strip trailing prose suffixes like " role", " Work"
+    raw = raw.replace(/\s+(?:role|Work)\b/i, '');
+    raw = raw.replace(/^[*,\.\s>\-]+/, '').replace(/[*,\.\s>\-]+$/, '').trim().slice(0, 100);
+
+    if (
+      raw &&
+      raw.length >= 2 &&
+      !/\byou\b|\bwe\b|\bi\b|dear\s|greetings|hi\s+|hello\s|upcoming|forwarded|scheduled|not japanese|eligible|please|kindly|hereby|inform|congratulat|registr|passout|batch|drive|internship\s+registration|for the candidate|reserve a position|expect them|next\s+round|depends on the function|^[>,\.\*\s]+$/i.test(raw) &&
+      !/^(?:super\s+dream|dream|regular)(?:\s+(?:internship|offer|placement))?$/i.test(raw)
+    ) {
+      role = raw;
+    }
   }
+
+  // 2. Also match PPO offer role formats like "Internship Upon PPO offer Sr. Analyst, Data Science"
+  if (!role) {
+    const ppoMatch = cleanWithLines.match(
+      /(?:Internship\s+Upon\s+PPO\s+offer|Upon\s+PPO\s+offer)\s*[:\-–—\t]?\s*([^\r\n]{2,100})/i
+    );
+    if (ppoMatch) {
+      let raw = ppoMatch[1].replace(/\s*(?:Job\s+location|Location|CTC|Stipend|All\s+the|Mandatory|Website)\b.*$/i, '').trim();
+      raw = raw.replace(/^[*,\.\s>\-]+/, '').replace(/[*,\.\s>\-]+$/, '').trim().slice(0, 100);
+      if (raw && raw.length >= 2) {
+        role = raw;
+      }
+    }
+  }
+
+  // NOTE: Category and Role are strictly separate!
+  // Category is the CDC placement bracket (e.g. "Super Dream Offer").
+  // Role is the engineering profile (e.g. "Associate Software Engineer").
+  // Never overwrite role with category.
 
   // 4. Job Location Extraction (extracts clean cities, states, and countries without internship/drive noise)
   const locMatch = cleanText.match(/(?:Job\s+)?Location\s*[:\-–—\t]?\s*([^\n\r*<>{}_]{2,80})/i);
@@ -559,7 +869,8 @@ export function extractJobDetails(text: string): ExtractedJobDetails {
     if (
       rawLoc &&
       rawLoc.length >= 2 &&
-      !/nonsense|come at|assistance|applicable|candidate|round\s+\d+|results|lab|service agreement|forwarded message|scheduled on|online test|@|own location|pearl research|anna auditorium|students with|clash|will be|tba|tbd|^[>,\.\*\s]+|those in|for you is|services interested|economy class|round\s+trip|will be subject|where we work|entities in|\bpre$|placement\s+office/i.test(rawLoc)
+      !/nonsense|come at|assistance|applicable|candidate|round\s+\d+|results|lab|service agreement|forwarded message|scheduled on|online test|@|own location|pearl research|anna auditorium|students with|clash|will be|tba|tbd|^[>,\.\*\s]+|those in|for you is|services interested|economy class|round\s+trip|will be subject|where we work|entities in|\bpre$|placement\s+office/i.test(rawLoc) &&
+      !/^(?:vit\s+)?(?:vellore|chennai|bhopal)(?:\s+campus)?$/i.test(rawLoc.trim())
     ) {
       if (/remote/i.test(rawLoc)) location = 'Remote';
       else if (/pan\s+india/i.test(rawLoc)) location = 'Pan India';
@@ -569,6 +880,7 @@ export function extractJobDetails(text: string): ExtractedJobDetails {
 
   return {
     role,
+    category,
     ctc,
     stipend,
     location,

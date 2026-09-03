@@ -533,20 +533,15 @@ export function isFuzzyCompanyMatch(compName: string, targetName: string): boole
   const cLower = compName.toLowerCase().trim();
   const tLower = targetName.toLowerCase().trim();
 
-  // Guard: Never merge EY GDS and EY SAP
-  if (
-    (cLower.includes('gds') && tLower.includes('sap')) ||
-    (cLower.includes('sap') && tLower.includes('gds'))
-  ) {
-    return false;
-  }
-
-  // Guard: Never merge Apple SDET and Apple SRE
-  if (
-    (cLower.includes('sdet') && tLower.includes('sre')) ||
-    (cLower.includes('sre') && tLower.includes('sdet'))
-  ) {
-    return false;
+  // Guard: Never merge distinct role tracks or divisions (SDET, SRE, SAP, GDS, Aerospace) with base company or each other
+  const trackTokens = ['sdet', 'sre', 'sap', 'gds', 'aerospace'];
+  for (const tok of trackTokens) {
+    if (
+      (cLower.includes(tok) && !tLower.includes(tok)) ||
+      (!cLower.includes(tok) && tLower.includes(tok))
+    ) {
+      return false;
+    }
   }
 
   if (cLower === tLower) return true;

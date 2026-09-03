@@ -100,6 +100,7 @@ export default async function CompanyDetailPage({
           statusSource: application.status_source,
           statusConfidence: application.status_confidence,
           role: application.role,
+          category: application.category,
           ctc: application.ctc,
           stipend: application.stipend,
           location: application.location,

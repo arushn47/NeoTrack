@@ -2,12 +2,12 @@
 
 ## 1. System Overview
 
-NeoPAT Placement Tracker is a **hybrid fullstack application** consisting of:
+NeoPAT Placement Tracker is a **modern unified fullstack application** consisting of:
 
 1. **Next.js 15+ Frontend & API Layer** — Dashboard UI, Google OAuth, Gmail API integration, and lightweight API routes.
-2. **FastAPI Microservice** — Document processing engine for XLSX/PDF/DOCX parsing, Neo ID matching, and AI-assisted extraction.
+2. **In-Node Document Processing Engine** — In-memory XLSX/CSV parsing via `xlsx` with layout-agnostic roll-number pattern detection (<100ms lookup).
 3. **Supabase** — Managed PostgreSQL database, file storage (for attachments/JDs), and Row Level Security.
-4. **External Services** — Gmail API, Google OAuth 2.0, Gemini API (optional).
+4. **External Services** — Gmail API, Google OAuth 2.0, Gemini API (optional AI fallback).
 
 ---
 
@@ -30,15 +30,14 @@ NeoPAT Placement Tracker is a **hybrid fullstack application** consisting of:
           │               │               │
           ▼               ▼               ▼
 ┌─────────────┐  ┌──────────────┐  ┌─────────────────┐
-│  Next.js    │  │   FastAPI    │  │    Supabase      │
-│  API Routes │  │  Microservice│  │  (PostgreSQL +   │
-│             │  │              │  │   Storage)        │
-│ • OAuth     │  │ • XLSX parse │  │                   │
-│ • Gmail API │  │ • PDF parse  │  │ • companies       │
-│ • Sync      │  │ • DOCX parse │  │ • applications    │
+│  Next.js    │  │   In-Node    │  │    Supabase      │
+│  API Routes │  │ Doc Engine   │  │  (PostgreSQL +   │
+│             │  │ (SheetJS)    │  │   Storage)        │
+│ • OAuth     │  │              │  │                   │
+│ • Gmail API │  │ • XLSX parse │  │ • companies       │
+│ • Sync      │  │ • CSV parse  │  │ • applications    │
 │ • Dashboard │  │ • Neo ID     │  │ • emails          │
 │   queries   │  │   matching   │  │ • events          │
-│             │  │ • AI fallback│  │ • attachments     │
 │             │  │   (Gemini)   │  │ • documents       │
 └──────┬──────┘  └──────┬───────┘  │ • candidate_match │
        │                │          └────────┬──────────┘
@@ -86,10 +85,9 @@ Next.js API Route: /api/sync
      ├─→ For attachments:
      │   ├─→ Download attachment via Gmail API
      │   ├─→ Upload to Supabase Storage
-     │   ├─→ Send to FastAPI for processing
-     │   │   ├─→ XLSX → Parse cells → Search for Neo ID
-     │   │   ├─→ PDF → Extract text → Parse JD fields / Search Neo ID
-     │   │   └─→ DOCX → Extract text → Parse JD fields
+     │   ├─→ In-Node Document Engine:
+     │   │   ├─→ XLSX/CSV → In-memory SheetJS cell search for Neo ID / roll numbers (<100ms)
+     │   │   └─→ JDs / Circulars → Structured extraction + gated AI fallback
      │   └─→ Store results in `candidate_matches`, `documents`
      │
      └─→ Run Status Engine → Compute canonical status per company
@@ -132,18 +130,15 @@ Gmail → Google Pub/Sub → Webhook (Next.js API Route)
 | jose               | JWT handling                         |
 | crypto (Node)      | Token encryption                     |
 
-### Backend — FastAPI Microservice
-
+### Backend — In-Node Document & Ingestion Engine
+ 
 | Technology       | Purpose                              |
 |------------------|--------------------------------------|
-| FastAPI          | Python HTTP framework                |
-| openpyxl         | XLSX parsing                         |
-| pandas           | Tabular data processing              |
-| pdfplumber       | PDF text extraction                  |
-| python-docx      | DOCX parsing                         |
+| Next.js API / Workers | Server-side execution           |
+| xlsx (SheetJS)   | In-memory XLSX/CSV parsing           |
+| googleapis       | Gmail API client                     |
 | google-generativeai | Gemini API (optional AI fallback) |
-| pydantic         | Request/response validation          |
-| uvicorn          | ASGI server                          |
+| jose             | Token encryption / JWT               |
 
 ### Database & Storage
 

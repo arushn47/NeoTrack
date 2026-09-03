@@ -1,6 +1,7 @@
 import type { gmail_v1 } from 'googleapis';
 import * as XLSX from 'xlsx';
 import type { ParsedAttachment } from '@/lib/gmail/client';
+import { searchRollNumberInWorkbook } from './xlsx-matcher';
 
 export interface ExcelMatchResult {
   matched: boolean;
@@ -110,66 +111,40 @@ export async function scanExcelAttachmentsForNeoId(
       if (!res.data.data) continue;
 
       const buffer = Buffer.from(res.data.data, 'base64url');
-      const workbook = XLSX.read(buffer, { type: 'buffer' });
 
-      for (const sheetName of workbook.SheetNames) {
-        const sheet = workbook.Sheets[sheetName];
-        if (!sheet) continue;
+      for (const token of searchTokens) {
+        const match = searchRollNumberInWorkbook(buffer, token);
 
-        const rows: unknown[][] = XLSX.utils.sheet_to_json(sheet, {
-          header: 1,
-          raw: false,
-          defval: '',
-        });
-
-        for (let rowIndex = 0; rowIndex < rows.length; rowIndex++) {
-          const row = rows[rowIndex];
-          if (!Array.isArray(row)) continue;
-
-          for (let colIndex = 0; colIndex < row.length; colIndex++) {
-            const cellValue = String(row[colIndex] || '').toUpperCase().trim();
-
-            for (const token of searchTokens) {
-              const matchesDirect = cellValue === token || cellValue.includes(token);
-              const matchesFlexible =
-                token.length >= 4 &&
-                cellValue.replace(/[0O]/g, '#0#').replace(/[1I]/g, '#1#').includes(
-                  token.replace(/[0O]/g, '#0#').replace(/[1I]/g, '#1#')
-                );
-
-              if (matchesDirect || matchesFlexible) {
-                // MATCH FOUND — look for Room / Venue in adjacent columns
-                let roomOrVenue: string | null = null;
-                for (let c = 0; c < row.length; c++) {
-                  if (c === colIndex) continue;
-                  const otherCell = String(row[c] || '').trim();
-                  if (otherCell && (otherCell.length < 30 || /room|hall|lab|prp|sjt|mb|tt/i.test(otherCell))) {
-                    roomOrVenue = otherCell;
-                    break;
-                  }
-                }
-
-                const result: ExcelMatchResult = {
-                  matched: true,
-                  filename: att.filename,
-                  matchedNeoId: token,
-                  details: `Matched in ${att.filename} (Sheet: ${sheetName}, Row: ${rowIndex + 1})${
-                    roomOrVenue ? ` - Details: ${roomOrVenue}` : ''
-                  }`,
-                  venueOrRoom: roomOrVenue,
-                  isActualShortlist: fileType === 'shortlist',
-                };
-
-                if (fileType === 'shortlist') {
-                  // Best possible result — return immediately
-                  return result;
-                } else {
-                  // Applied list match — save it but keep scanning for an actual shortlist
-                  if (!appliedListMatch) {
-                    appliedListMatch = result;
-                  }
-                }
+        if (match.isMatched) {
+          // Check for venue / room / lab in additional extracted data
+          let roomOrVenue: string | null = null;
+          if (match.additionalData) {
+            for (const [k, v] of Object.entries(match.additionalData)) {
+              if (/venue|room|hall|lab|place|location/i.test(k) || /prp|sjt|mb|tt|anna|channa|lc\s*\d+/i.test(v)) {
+                roomOrVenue = `${k}: ${v}`;
+                break;
               }
+            }
+          }
+
+          const result: ExcelMatchResult = {
+            matched: true,
+            filename: att.filename,
+            matchedNeoId: match.matchedValue || token,
+            details: `Matched in ${att.filename} (${match.matchedSheet}!${match.matchedCell})${
+              match.detectedIdColumnName ? ` [${match.detectedIdColumnName}]` : ''
+            }${roomOrVenue ? ` - ${roomOrVenue}` : ''}`,
+            venueOrRoom: roomOrVenue,
+            isActualShortlist: fileType === 'shortlist',
+          };
+
+          if (fileType === 'shortlist') {
+            // Best possible result (confirmed candidate shortlist) — return immediately
+            return result;
+          } else {
+            // Applied list match — record it but keep checking other attachments for an actual shortlist
+            if (!appliedListMatch) {
+              appliedListMatch = result;
             }
           }
         }

@@ -165,7 +165,7 @@ export async function processEmailForEventsAndStatus(
   // Check existing application status from DB
   const { data: existingApp } = await supabase
     .from('applications')
-    .select('status, manual_override, applied_at, location')
+    .select('status, manual_override, applied_at, location, ctc')
     .eq('user_id', userId)
     .eq('company_id', companyId)
     .single();
@@ -270,10 +270,12 @@ export async function processEmailForEventsAndStatus(
       if (existingEvents && existingEvents.length > 0) {
         // Event for this day/test already exists — refine details
         const updatePayload: Record<string, unknown> = {};
-        if (startTimeIso) updatePayload.start_time = startTimeIso;
-        if (event.endTime) updatePayload.end_time = event.endTime.toISOString();
-        if (event.venue) updatePayload.venue = event.venue;
-        if (event.mode) updatePayload.mode = event.mode;
+        if (startTimeIso && event.hasExplicitTime) {
+          updatePayload.start_time = startTimeIso;
+        }
+        if (event.endTime && event.hasExplicitTime) updatePayload.end_time = event.endTime.toISOString();
+        if (event.venue && event.venue !== 'Campus / Offline') updatePayload.venue = event.venue;
+        if (event.mode && event.mode !== 'unknown') updatePayload.mode = event.mode;
 
         if (Object.keys(updatePayload).length > 0) {
           await supabase
@@ -337,6 +339,95 @@ export async function processEmailForEventsAndStatus(
   // 4. Extract Job Details (Role, CTC, Stipend, Location)
   const jobDetails = extractJobDetails(fullText);
 
+  // 4b. Tier 2 AI Fallback Gating & Reconciliation
+  const { extractDriveNumber } = await import('@/lib/sync/events');
+  const driveNum = extractDriveNumber(fullText);
+
+  const { data: compRecord } = await supabase
+    .from('companies')
+    .select('name')
+    .eq('id', companyId)
+    .single();
+
+  const tier1Summary = {
+    companyName: compRecord?.name || null,
+    classification: emailClass,
+    ctc: jobDetails.ctc || null,
+    stipend: jobDetails.stipend || null,
+    eventsCount: extractedEvents.length,
+    driveNumber: driveNum,
+    rawMatchedFields: {
+      ctc_raw: jobDetails.ctc || '',
+    },
+  };
+
+  const existingDriveState = existingApp
+    ? {
+        companyId,
+        canonicalName: compRecord?.name || '',
+        ctc: existingApp.ctc || null,
+        status: existingApp.status || 'unknown',
+      }
+    : null;
+
+  const { shouldInvokeAiFallback, reconcileCompensation } = await import('@/lib/sync/ai-gating');
+  const gating = shouldInvokeAiFallback(tier1Summary, existingDriveState);
+
+  let isAiFlaggedForReview = false;
+  let aiReviewNotes: string | null = null;
+
+  if (gating.shouldInvoke) {
+    const { executeAiPlacementExtraction } = await import('@/lib/sync/ai-fallback');
+    const aiRes = await executeAiPlacementExtraction(
+      email.subject,
+      fullText,
+      email.receivedAt ? new Date(email.receivedAt) : new Date()
+    );
+
+    if (aiRes.success && aiRes.data) {
+      const ai = aiRes.data;
+
+      // Reconcile CTC
+      if (ai.ctc) {
+        const recon = reconcileCompensation(existingApp?.ctc || null, jobDetails.ctc || null, ai.ctc);
+        if (recon.action === 'update' || (recon.action === 'preserve' && !existingApp?.ctc)) {
+          jobDetails.ctc = recon.acceptedCtc || jobDetails.ctc;
+        } else if (recon.action === 'flag_for_review') {
+          isAiFlaggedForReview = true;
+          aiReviewNotes = `[NEEDS REVIEW] AI detected alternative CTC: ${ai.ctc} vs existing ${existingApp?.ctc}`;
+        }
+      }
+
+      // Reconcile Stipend
+      if (ai.stipend && !jobDetails.stipend) {
+        jobDetails.stipend = ai.stipend;
+      }
+
+      // Reconcile Events if Tier 1 found 0 events but AI verified scheduled round with quote
+      if (extractedEvents.length === 0 && ai.events.length > 0) {
+        for (const aiEvt of ai.events) {
+          if (aiEvt.isScheduled && aiEvt.startTime) {
+            extractedEvents.push({
+              eventType: aiEvt.eventType as any,
+              title: aiEvt.title,
+              startTime: new Date(aiEvt.startTime),
+              endTime: null,
+              venue: aiEvt.venue,
+              hasExplicitTime: true,
+              mode: 'unknown',
+              confidence: 'high',
+            });
+          }
+        }
+      }
+
+      if (!ai.isSanityCheckPassed) {
+        isAiFlaggedForReview = true;
+        aiReviewNotes = (aiReviewNotes ? `${aiReviewNotes}\n` : '') + `[NEEDS REVIEW] AI sanity failure: ${ai.sanityFailureReasons.join('; ')}`;
+      }
+    }
+  }
+
   // 5. Compute updated application status
   const emailReceivedTime = email.receivedAt ? new Date(email.receivedAt).getTime() : Date.now();
   const appliedTime = existingApp?.applied_at ? new Date(existingApp.applied_at).getTime() : null;
@@ -378,10 +469,10 @@ export async function processEmailForEventsAndStatus(
       newStatus = 'selected';
     } else if (/interview|next\s+round|selection\s+process/i.test(subjLower)) {
       newStatus = 'interview_scheduled';
-    } else if (/ppt|pre[\s-]*placement/i.test(subjLower)) {
-      newStatus = 'ppt_scheduled';
     } else if (/online\s+test|coding\s+test|assessment/i.test(subjLower)) {
       newStatus = 'test_scheduled';
+    } else if (/ppt|pre[\s-]*placement/i.test(subjLower)) {
+      newStatus = 'ppt_scheduled';
     } else {
       newStatus = 'shortlisted';
     }
@@ -478,25 +569,21 @@ export async function processEmailForEventsAndStatus(
   const { extractTravelRequirement } = await import('@/lib/sync/events');
   const travelReq = extractTravelRequirement(fullText);
   let resolvedLocation = jobDetails.location || existingApp?.location || null;
-  if (travelReq === 'vellore') {
-    resolvedLocation = '✈️ VIT Vellore';
-  } else if (travelReq === 'chennai') {
-    resolvedLocation = '✈️ VIT Chennai';
-  } else if (travelReq === 'bhopal_lab') {
-    resolvedLocation = '🏫 Bhopal Labs';
-  } else if (travelReq === 'online' && (!resolvedLocation || /remote|pan\s+india/i.test(resolvedLocation))) {
-    resolvedLocation = '💻 Online';
+  if (resolvedLocation && /^(?:vit\s+)?(?:vellore|chennai|bhopal)(?:\s+campus)?$/i.test(resolvedLocation.trim())) {
+    resolvedLocation = null;
   }
 
   if (jobDetails.role) appUpdate.role = jobDetails.role;
   if (jobDetails.ctc) appUpdate.ctc = jobDetails.ctc;
   if (jobDetails.stipend) appUpdate.stipend = jobDetails.stipend;
   if (resolvedLocation) appUpdate.location = resolvedLocation;
+  if (travelReq) appUpdate.notes = travelReq;
 
   if (newStatus) {
-    appUpdate.status = newStatus;
-    appUpdate.status_source = matchType === 'xlsx_cell' ? 'excel_shortlist_match' : 'sync_engine';
-    appUpdate.status_confidence = 'high';
+    appUpdate.status_confidence = isAiFlaggedForReview ? 'low' : 'high';
+    if (isAiFlaggedForReview && aiReviewNotes) {
+      appUpdate.notes = appUpdate.notes ? `${appUpdate.notes}\n${aiReviewNotes}` : aiReviewNotes;
+    }
 
     // If candidate withdrew, declined, or was not shortlisted/rejected, purge scheduled events
     if (['withdrawn', 'declined', 'rejected', 'not_shortlisted'].includes(newStatus)) {

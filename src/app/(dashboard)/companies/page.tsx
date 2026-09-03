@@ -26,7 +26,7 @@ export default async function CompaniesPage() {
 
     supabase
       .from('applications')
-      .select('id, company_id, status, role, ctc, stipend, location, notes, manual_override, applied_at, last_updated')
+      .select('id, company_id, status, role, category, ctc, stipend, location, notes, manual_override, applied_at, last_updated')
       .eq('user_id', session.userId),
 
     supabase
@@ -42,7 +42,7 @@ export default async function CompaniesPage() {
 
     supabase
       .from('emails')
-      .select('id, company_id')
+      .select('id, company_id, received_at')
       .eq('user_id', session.userId),
   ]);
 
@@ -70,10 +70,17 @@ export default async function CompaniesPage() {
   }
 
   const emailCountMap = new Map<string, number>();
+  const latestEmailMap = new Map<string, string>();
   if (emails) {
     for (const email of emails) {
       if (email.company_id) {
         emailCountMap.set(email.company_id, (emailCountMap.get(email.company_id) || 0) + 1);
+        if (email.received_at) {
+          const prev = latestEmailMap.get(email.company_id);
+          if (!prev || new Date(email.received_at) > new Date(prev)) {
+            latestEmailMap.set(email.company_id, email.received_at);
+          }
+        }
       }
     }
   }
@@ -95,11 +102,13 @@ export default async function CompaniesPage() {
       legal_name: comp.legal_name,
       aliases: comp.aliases,
       updated_at: comp.updated_at,
+      latestEmailDate: latestEmailMap.get(comp.id) || comp.updated_at,
       application: app
         ? {
             id: app.id,
             status: app.status,
             role: app.role,
+            category: app.category,
             ctc: app.ctc,
             stipend: app.stipend,
             location: app.location,

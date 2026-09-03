@@ -89,6 +89,35 @@ export default async function DashboardPage() {
       .filter(Boolean)
   );
 
+  // Define what event types belong to which pipeline stage (in order)
+  const EVENT_STAGE: Record<string, number> = {
+    ppt: 1,
+    online_test: 2,
+    coding_test: 2,
+    aptitude_test: 2,
+    group_discussion: 2,
+    technical_interview: 3,
+    hr_interview: 3,
+    interview: 3,
+    final_interview: 4,
+    offer: 5,
+  };
+
+  const STATUS_MAX_STAGE: Record<string, number> = {
+    applied: 1,            // only PPT/intro events (cannot see tests until shortlisted!)
+    ppt_scheduled: 1,      // only PPT
+    shortlisted: 2,        // shortlisted for test
+    test_scheduled: 2,     // can see test events, not interviews
+    interview_scheduled: 3, // can see interview events
+    selected: 5,
+    offer_received: 5,
+    rejected: 0,
+    not_shortlisted: 0,
+    not_applied: 0,
+    declined: 0,
+    withdrawn: 0,
+  };
+
   // Deduplicate upcoming events by (company_id, event_type, date) and filter out eliminated companies
   const uniqueUpcomingEvents: NonNullable<typeof rawUpcomingEvents> = [];
   const seenEventKeys = new Set<string>();
@@ -103,6 +132,15 @@ export default async function DashboardPage() {
       // Skip eliminated or opted-out companies
       if (['not_shortlisted', 'rejected', 'not_applied', 'withdrawn', 'declined'].includes(companyStatus)) {
         continue;
+      }
+
+      // Only show events up to the user's current pipeline stage unless manually overridden
+      if (!(event as any).manual_override) {
+        const maxStage = STATUS_MAX_STAGE[companyStatus] ?? 2;
+        const evtStage = EVENT_STAGE[event.event_type] ?? 2;
+        if (evtStage > maxStage) {
+          continue;
+        }
       }
 
       // Deduplicate: 1 single timing per event stage
