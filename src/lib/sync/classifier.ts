@@ -538,71 +538,86 @@ export function extractCompanyName(
   // e.g. "Super Dream Internship - 2027 Batch Name of the Company Kinaxis Category Super Dream Internship"
   // e.g. "Placement Drive Date Update ... Drive Name: Sabre Drive Number: pat-PL-2026-1108"
   if (bodySnippet) {
-    // 1. Structured NeoPAT field: Check "Company: <Name>" FIRST if it exists, because "Company" is more specific than "Drive Name"
-    // e.g. Drive Name: "Honeywell" vs Company: "Honeywell Aerospace"
-    // e.g. Drive Name: "Honeywell" vs Company: "Honeywell Technology Solutions Lab"
+    const candidates: Array<{ raw: string; cleaned: string; normalized: string; score: number }> = [];
+
+    const addCandidate = (raw: string | undefined, sourceWeight: number) => {
+      if (!raw) return;
+      const cleaned = cleanCompanyName(raw);
+      if (
+        !cleaned ||
+        cleaned.length < 2 ||
+        cleaned.length >= 50 ||
+        NON_COMPANY_WORDS.includes(cleaned.toLowerCase())
+      ) {
+        return;
+      }
+
+      let candidateClean = cleaned;
+      if (/^honeywell$/i.test(cleaned)) {
+        if (/aerospace/i.test(bodySnippet)) candidateClean = 'Honeywell Aerospace';
+        else if (/technology\s+solutions/i.test(bodySnippet)) candidateClean = 'Honeywell Technology Solutions Lab';
+      }
+
+      const normalized = normalizeCompanyName(candidateClean);
+      const lowerNorm = normalized.toLowerCase();
+      const lowerClean = candidateClean.toLowerCase();
+
+      if (['super', 'dream', 'internship', 'placement', 'drive', 'finance'].includes(lowerNorm)) {
+        return;
+      }
+
+      let score = sourceWeight;
+
+      // 1. Direct match in COMPANY_ALIASES (+100)
+      // e.g. "ey sap" or "ey gds" matches alias directly, beating bare "ey"
+      if (COMPANY_ALIASES[lowerClean] || COMPANY_ALIASES[lowerNorm]) {
+        score += 100;
+      }
+
+      // 2. Track / specialization tokens (+50)
+      if (/\b(?:sdet|sre|sap|gds|aerospace|technology\s+solutions|analytics|bpm)\b/i.test(lowerNorm)) {
+        score += 50;
+      }
+
+      // 3. Specificity / word count (+10 per meaningful word)
+      const words = lowerNorm.split(/\s+/).filter((w) => w.length >= 2);
+      score += words.length * 10;
+
+      // Penalize generic single-word abbreviations that have known specializations
+      if (['ey'].includes(lowerNorm)) {
+        score -= 20;
+      }
+
+      candidates.push({ raw, cleaned: candidateClean, normalized, score });
+    };
+
+    // 1. Company: <Name>
     const companyMatch = bodySnippet.match(
       /(?:^|\s|\n|\r)company\s*[:\-–—]\s*([A-Za-z0-9&\s\-\.()]+?)(?:\s+(?:drive\s+name|drive\s+number|new\s+drive\s+date|category|date\s+of\s+visit|eligibility|eligible|ctc|role|stipend|\n|\r|\*))/i
     );
     if (companyMatch && companyMatch[1]) {
-      const extracted = cleanCompanyName(companyMatch[1]);
-      if (
-        extracted &&
-        extracted.length >= 2 &&
-        extracted.length < 50 &&
-        !NON_COMPANY_WORDS.includes(extracted.toLowerCase())
-      ) {
-        const norm = normalizeCompanyName(extracted);
-        if (!['super', 'dream', 'internship', 'placement', 'drive', 'finance'].includes(norm.toLowerCase())) {
-          return norm;
-        }
-      }
+      addCandidate(companyMatch[1], 10);
     }
 
-    // 2. Drive Name with strict delimiter (preserves specific role tracks like "Zluri SDET", "Apple SDET")
+    // 2. Drive Name: <Name>
     const driveNameMatch = bodySnippet.match(
       /(?:drive\s+name|name\s+of\s+the\s+drive)\s*[:\-*]*\s*([A-Za-z0-9&\s\-\.()]+?)(?:\s+(?:drive\s+number|new\s+drive\s+date|category|date\s+of\s+visit|eligibility|eligible|ctc|role|stipend|\n|\r|\*))/i
     );
     if (driveNameMatch && driveNameMatch[1]) {
-      const extractedDrive = cleanCompanyName(driveNameMatch[1]);
-      if (
-        extractedDrive &&
-        extractedDrive.length >= 2 &&
-        extractedDrive.length < 50 &&
-        !NON_COMPANY_WORDS.includes(extractedDrive.toLowerCase())
-      ) {
-        // Disambiguate generic "Honeywell" drive name based on division keywords in body
-        if (/^honeywell$/i.test(extractedDrive)) {
-          if (/aerospace/i.test(bodySnippet)) return 'Honeywell Aerospace';
-          if (/technology\s+solutions/i.test(bodySnippet)) return 'Honeywell Technology Solutions Lab';
-        }
-        const norm = normalizeCompanyName(extractedDrive);
-        if (!['super', 'dream', 'internship', 'placement', 'drive', 'finance'].includes(norm.toLowerCase())) {
-          return norm;
-        }
-      }
+      addCandidate(driveNameMatch[1], 15);
     }
 
-    // 3. Name of Company with strict delimiter
+    // 3. Name of the Company / Company Name: <Name>
     const bodyCompMatch = bodySnippet.match(
       /(?:name\s+of\s+the\s+company|company\s+name)\s*[:\-*]*\s*([A-Za-z0-9&\s\-\.()]+?)(?:\s+(?:category|date\s+of\s+visit|eligibility|eligible|ctc|role|stipend|\n|\r|\*))/i
     );
     if (bodyCompMatch && bodyCompMatch[1]) {
-      const extractedFromCustomBody = cleanCompanyName(bodyCompMatch[1]);
-      if (
-        extractedFromCustomBody &&
-        extractedFromCustomBody.length >= 2 &&
-        extractedFromCustomBody.length < 50 &&
-        !NON_COMPANY_WORDS.includes(extractedFromCustomBody.toLowerCase())
-      ) {
-        const norm = normalizeCompanyName(extractedFromCustomBody);
-        const lowerNorm = norm.toLowerCase();
-        if (
-          !['super', 'dream', 'internship', 'placement', 'drive', 'finance'].includes(lowerNorm)
-        ) {
-          return norm;
-        }
-      }
+      addCandidate(bodyCompMatch[1], 10);
+    }
+
+    if (candidates.length > 0) {
+      candidates.sort((a, b) => b.score - a.score);
+      return candidates[0].normalized;
     }
   }
 
