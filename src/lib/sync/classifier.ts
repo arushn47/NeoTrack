@@ -433,24 +433,25 @@ const SUBJECT_COMPANY_PATTERNS: RegExp[] = [
  */
 const SUBJECT_PREFIXES = [
   /^(?:fwd|re|fw)\s*:\s*/i,
-  /^(?:extended\s+deadline|extension\s+of\s+deadline|deadline\s+extended)\s*[-:]\s*/i,
-  /^(?:updated|update|revised|revision)\s*[-:]\s*/i,
-  /^(?:urgent|immediately|immediate|important|critical)\s*[-:]\s*/i,
-  /^(?:kind\s+attention!!?|attention!!?)\s*[-:]?\s*/i,
+  /^(?:extended\s+deadline|extension\s+of\s+deadline|deadline\s+extended)\s*(?:[-:]\s*)?/i,
+  /^(?:updated|update|revised|revision)\s*(?:regarding|on|for)?\s*(?:[-:]\s*)?/i,
+  /^(?:urgent|immediately|immediate|important|critical)\s*(?:[-:]\s*)?/i,
+  /^(?:kind\s+attention!!?|attention!!?)\s*(?:[-:]\s*)?/i,
   /^confirmed\s*:\s*(?:your\s+registration\s+for\s+)?/i,
   /^confirmation\s*:\s*/i,
   /^congratulations!{1,3}\s*(?:you'?re\s+)?(?:eligible\s+for\s+)?/i,
   /^(?:important|urgent|update|reminder)?\s*[-:]?\s*date\s+change\s+(?:for|:)\s*/i,
   /^(?:date\s+change|rescheduled|schedule\s+change|time\s+change|venue\s+change)\s*(?:for|:)\s*/i,
-  /^(?:placement\s+drive\s+date\s+update|drive\s+date\s+update)\s*[-:]\s*/i,
-  /^updated\s+optional\s+form\s+available\s*[-–—:]\s*/i,
+  /^(?:placement\s+drive\s+date\s+update|drive\s+date\s+update)\s*(?:[-:]\s*)?/i,
+  /^updated\s+optional\s+form\s+available\s*(?:[-–—:]\s*)?/i,
   /^venue\s+update\s*:\s*/i,
-  /^registration\s*:\s*/i,
+  /^registration\s*(?:for)?\s*(?:[-:]\s*)?/i,
   /^reminder\s*:\s*/i,
   /^report\s+immediately\s*:\s*/i,
-  /^shortlist\s+(?:for|of)?\s*[-:]\s*/i,
-  /^(?:corrigendum|addendum|rescheduled)\s*[-:]\s*/i,
-  /^(?:registration\s+extended|last\s+date\s+extended)\s*[-:]\s*/i,
+  /^shortlist(?:ed)?\s+(?:candidates|students)?\s*(?:for|of)?\s*(?:[-:]\s*)?/i,
+  /^selection\s+(?:list|process)\s+(?:for|of)?\s*(?:[-:]\s*)?/i,
+  /^(?:corrigendum|addendum|rescheduled)\s*(?:[-:]\s*)?/i,
+  /^(?:registration\s+extended|last\s+date\s+extended)\s*(?:[-:]\s*)?/i,
 ];
 
 /**
@@ -704,6 +705,22 @@ export function extractCompanyName(
       ) {
         return normalizeCompanyName(cleaned);
       }
+    }
+  }
+
+  // If no pattern matched, but the cleaned subject is short (1-4 words) and looks like a company name
+  if (cleanedSubject && cleanedSubject.split(/\s+/).length <= 4) {
+    const cleaned = cleanCompanyName(cleanedSubject);
+    if (
+      cleaned &&
+      cleaned.length >= 2 &&
+      cleaned.length < 50 &&
+      !NON_COMPANY_WORDS.includes(cleaned.toLowerCase()) &&
+      !/^(?:portal|webinar|survey|assessment|feedback|cdc|vit|profile|course|day\s+\d+|session|prelims|passout\s+batch|complete|reminder|shortlist)/i.test(cleaned) &&
+      !/^(?:ps\s+)?(?:associate\s+)?(?:software\s+)?(?:engineer|developer|analyst|scientist|trainee|consultant|specialist)$/i.test(cleaned) &&
+      !/(?:software\s+engineer|associate\s+engineer|data\s+scientist|data\s+analyst|graduate\s+trainee)/i.test(cleaned)
+    ) {
+      return normalizeCompanyName(cleaned);
     }
   }
 

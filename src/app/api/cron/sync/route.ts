@@ -3,7 +3,7 @@ import { createAdminClient } from '@/lib/supabase/admin';
 import { runSync } from '@/lib/sync/engine';
 
 export const dynamic = 'force-dynamic';
-export const maxDuration = 60;
+export const maxDuration = 300; // 5 min — handles multi-user sync on Vercel Pro
 
 /**
  * GET /api/cron/sync

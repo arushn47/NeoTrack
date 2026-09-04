@@ -214,9 +214,15 @@ export async function runSync(
       // Known NeoPAT/CDC senders that always pass (no keyword check needed)
       const TRUSTED_PLACEMENT_SENDERS = [
         'noreply.cdcinfo@vitstudent.ac.in',
+        'cdcinfo@vitstudent.ac.in',
         'vitlions2027@vitbhopal.ac.in',
         'placementoffice@vitbhopal.ac.in',
       ];
+      // Trust entire @vitstudent.ac.in domain on personal accounts — these are all CDC/NeoPAT
+      const isTrustedSender = (senderEmail: string) =>
+        isPersonal
+          ? /@vitstudent\.ac\.in$/i.test(senderEmail)
+          : TRUSTED_PLACEMENT_SENDERS.includes(senderEmail.toLowerCase());
 
       // Known non-placement senders to always skip (Google, Microsoft notifications, social media, etc.)
       const BLOCKED_SENDERS = /noreply-accounts@google|no-reply@accounts\.google|noreply@github|notifications@github|@linkedin\.com|@facebookmail|@discord|@slack|noreply@medium|noreply@.*\.zoom\.us|security-noreply|account-security|password.*reset|verify.*email|do-not-reply@|mailer-daemon/i;
@@ -239,7 +245,7 @@ export async function runSync(
                 shouldFetchFull = false;
               }
               // B. Always allow trusted CDC/NeoPAT senders
-              else if (TRUSTED_PLACEMENT_SENDERS.some((s) => senderLower === s)) {
+              else if (isTrustedSender(senderLower)) {
                 shouldFetchFull = true;
               }
               // C. For all other senders, require placement keywords in subject

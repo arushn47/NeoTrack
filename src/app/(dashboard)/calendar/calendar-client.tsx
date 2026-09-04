@@ -83,7 +83,7 @@ function formatTime(iso: string) {
   return `${h}:${m} ${ampm}`;
 }
 
-function EventCard({ evt, onClose }: { evt: CalendarEvent; onClose?: () => void }) {
+function EventCard({ evt, onClose, showDate }: { evt: CalendarEvent; onClose?: () => void; showDate?: boolean }) {
   const gcalUrl = evt.startTime
     ? `https://calendar.google.com/calendar/render?action=TEMPLATE&text=${encodeURIComponent(evt.title || 'Placement Event')}&dates=${new Date(evt.startTime).toISOString().replace(/-|:|\.\d+/g, '')}/${new Date(new Date(evt.startTime).getTime() + 3600000).toISOString().replace(/-|:|\.\d+/g, '')}&location=${encodeURIComponent(evt.venue || 'VIT Campus / Online')}`
     : null;
@@ -105,7 +105,9 @@ function EventCard({ evt, onClose }: { evt: CalendarEvent; onClose?: () => void 
           </div>
           {evt.startTime && (
             <span className="text-[10px] sm:text-[11px] font-bold text-zinc-300 font-mono flex-shrink-0 bg-zinc-800/80 px-2 py-0.5 sm:py-1 rounded-lg border border-zinc-700/50">
-              {formatTime(evt.startTime)}
+              {showDate 
+                ? `${new Date(evt.startTime).toLocaleDateString('en-IN', { month: 'short', day: 'numeric' })} • ${formatTime(evt.startTime)}`
+                : formatTime(evt.startTime)}
             </span>
           )}
         </div>
@@ -582,7 +584,7 @@ export default function CalendarClient({ events }: CalendarClientProps) {
               </div>
             ) : (
               <div className="space-y-2">
-                {upcomingEvents.map((evt) => <EventCard key={evt.id} evt={evt} />)}
+                {upcomingEvents.map((evt) => <EventCard key={evt.id} evt={evt} showDate />)}
               </div>
             )}
           </div>
@@ -600,7 +602,7 @@ export default function CalendarClient({ events }: CalendarClientProps) {
                 <div className="mt-3 space-y-2 animate-fade-in">
                   {pastTimelineEvents.map((evt) => (
                     <div key={evt.id} className="opacity-40 hover:opacity-70 transition-opacity">
-                      <EventCard evt={evt} />
+                      <EventCard evt={evt} showDate />
                     </div>
                   ))}
                 </div>

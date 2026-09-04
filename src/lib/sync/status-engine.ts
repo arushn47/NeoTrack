@@ -227,8 +227,15 @@ export async function processEmailForEventsAndStatus(
       }
 
       if ((isTestOrInterview || isShortlistEmail) && !isNeoMatched) {
-        // User was not shortlisted for this test/event/PPT — do not add to personal schedule
-        continue;
+        // User was not found in the shortlist/test email.
+        // If they are 'applied' or 'ppt_scheduled', we still schedule the event so they can
+        // see the round is happening (it will show as not_shortlisted after reprocess).
+        // Only hard-skip if user is already in a terminal elimination state.
+        const currentStatus = existingApp?.status || 'not_applied';
+        const isAppliedOrPpt = ['applied', 'ppt_scheduled', 'shortlisted'].includes(currentStatus);
+        if (!isAppliedOrPpt) {
+          continue;
+        }
       }
 
       // Check if duplicate event exists for this company + event_type on the same calendar day

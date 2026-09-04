@@ -16,6 +16,8 @@ import {
   User,
   Check,
   RefreshCw,
+  Trash2,
+  AlertTriangle,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { timeAgo } from '@/lib/utils';
@@ -52,6 +54,9 @@ export default function SettingsClient({ accounts, neoId: initialNeoId, userEmai
     collegeCircularsDiscarded?: number;
     updatedApplications?: number;
   } | null>(null);
+
+  const [resetting, setResetting] = useState(false);
+  const [resetConfirmOpen, setResetConfirmOpen] = useState(false);
 
   const handleReprocess = async () => {
     setReprocessing(true);
@@ -282,6 +287,79 @@ export default function SettingsClient({ accounts, neoId: initialNeoId, userEmai
 
       {/* Notification Preferences Section */}
       <NotificationSettings />
+
+      {/* Danger Zone: Nuclear Reset */}
+      <section className="rounded-3xl bg-[#101018]/90 backdrop-blur-2xl border border-red-900/40 overflow-hidden shadow-xl shadow-black/20">
+        <div className="px-6 py-5 border-b border-red-900/30">
+          <h2 className="text-sm font-bold text-red-400 flex items-center gap-2">
+            <AlertTriangle className="w-4 h-4" />
+            Danger Zone
+          </h2>
+          <p className="text-xs text-zinc-400 mt-1">
+            Irreversible actions that will permanently delete your placement data.
+          </p>
+        </div>
+        <div className="p-6">
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+            <div>
+              <p className="text-sm font-semibold text-white">Wipe All Drives & Start Fresh</p>
+              <p className="text-xs text-zinc-500 mt-1">
+                Deletes all companies, applications, events, stored emails, and resets sync history. Your connected Gmail accounts and Neo ID will be preserved.
+              </p>
+            </div>
+            {!resetConfirmOpen ? (
+              <button
+                onClick={() => setResetConfirmOpen(true)}
+                className="flex items-center gap-2 px-4 py-2.5 rounded-2xl bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/30 text-xs font-bold transition-all active:scale-95 flex-shrink-0"
+              >
+                <Trash2 className="w-4 h-4" />
+                Reset Everything
+              </button>
+            ) : (
+              <div className="flex items-center gap-2 flex-shrink-0">
+                <button
+                  onClick={() => setResetConfirmOpen(false)}
+                  disabled={resetting}
+                  className="px-4 py-2.5 rounded-2xl bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-xs font-bold transition-all"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={async () => {
+                    setResetting(true);
+                    try {
+                      const res = await fetch('/api/sync/reset', { method: 'POST' });
+                      const data = await res.json();
+                      if (res.ok) {
+                        setResetConfirmOpen(false);
+                        router.refresh();
+                        // Show a brief success then reload
+                        alert(data.message || 'All data wiped. Trigger a sync to re-fetch.');
+                        window.location.reload();
+                      } else {
+                        alert(data.error || 'Reset failed');
+                      }
+                    } catch {
+                      alert('Reset failed — check your network.');
+                    } finally {
+                      setResetting(false);
+                    }
+                  }}
+                  disabled={resetting}
+                  className="flex items-center gap-2 px-4 py-2.5 rounded-2xl bg-red-600 hover:bg-red-500 text-white text-xs font-bold transition-all shadow-md shadow-red-600/30 disabled:opacity-50 active:scale-95"
+                >
+                  {resetting ? (
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <Trash2 className="w-4 h-4" />
+                  )}
+                  {resetting ? 'Wiping...' : 'Yes, Wipe Everything'}
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+      </section>
     </div>
   );
 }

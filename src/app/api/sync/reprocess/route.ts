@@ -358,6 +358,23 @@ export async function performReprocess(userId: string) {
       }
     }
 
+    // 4. Reverse Search fallback: if no match yet, check if any known NeoPAT company name is mentioned in the subject
+    if (!matchedCompanyId) {
+      const subjectLower = subject.toLowerCase();
+      // Sort valid companies by canonical name length descending to match longest first
+      const knownCompanies = Array.from(validCompanyMap.values()).sort((a, b) => b.canonicalName.length - a.canonicalName.length);
+      
+      for (const comp of knownCompanies) {
+        if (comp.canonicalName.length < 3) continue; // Skip very short generic names
+        const escaped = comp.canonicalName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const regex = new RegExp(`(?:^|[^a-z0-9])${escaped}(?:[^a-z0-9]|$)`, 'i');
+        if (regex.test(subjectLower)) {
+          matchedCompanyId = comp.id;
+          break;
+        }
+      }
+    }
+
     if (matchedCompanyId) {
       emailUpdates.push({
         id: email.id,
@@ -788,8 +805,8 @@ export async function performReprocess(userId: string) {
 
   return {
     success: true,
-    message: `Successfully re-indexed: ${validCompanyMap.size} official NeoPAT drives tracked`,
-    neoPatDrivesCount: validCompanyMap.size,
+    message: `Successfully re-indexed: ${validCompanyIdSet.size} official NeoPAT drives tracked`,
+    neoPatDrivesCount: validCompanyIdSet.size,
     deletedNonNeoPatCompanies: deletedCompanyNames,
     collegeCircularsLinked: collegeLinkedCount,
     collegeCircularsDiscarded: collegeDiscardedCount,
