@@ -191,6 +191,27 @@ const CLASSIFICATION_RULES: ClassificationRule[] = [
     reason: 'Subject mentions interview (no schedule keyword)',
   },
 
+  // --- COHORT / PROGRAM ANNOUNCEMENTS (before general catchall) ---
+  // Subjects like: "Capgemini Exceller 2027: Introducing Our Cohorts & Career Opportunities"
+  //                "TCS NQT 2027: Registration Open" / "Infosys Springboard Hiring"
+  // These are always placement-relevant registrations, never 'general' junk.
+  {
+    classification: 'registration',
+    confidence: 'high',
+    match: (s) =>
+      /^[A-Za-z0-9\s&]+?\s+(?:exceller|nqt|springboard|ignite|codevita|hackwithinfy|genc|genplorer|launchpad|catalyst)\b/i.test(s) ||
+      /(?:exceller|nqt|springboard|ignite|codevita|hackwithinfy|genc|genplorer|launchpad|catalyst)\s+\d{4}/i.test(s),
+    reason: 'Known campus program/cohort name detected in subject (Capgemini Exceller, TCS NQT, Infosys Springboard, etc.)',
+  },
+  {
+    classification: 'registration',
+    confidence: 'medium',
+    match: (s, b, sender) =>
+      /vitlions2027|vitbhopal|vitstudent|cdc|placementoffice/i.test(sender) &&
+      /(?:introducing\s+(?:our\s+)?cohorts|flagship\s+hiring|campus\s+hiring\s+season|apply\s+in\s+the\s+neo\s*pat|career\s+opportunities|cohort.*career|campus\s+recruitment)/i.test(b),
+    reason: 'Trusted CDC sender + cohort/flagship program announcement in body',
+  },
+
   // --- LOW CONFIDENCE CATCHALLS ---
   {
     classification: 'general',
@@ -619,12 +640,47 @@ export function extractCompanyName(
       candidates.sort((a, b) => b.score - a.score);
       return candidates[0].normalized;
     }
+
+    // 4. Greeting / Body opening pattern: "Greetings from <Company>!"
+    // Used by Capgemini, Infosys and other direct company circulars forwarded via CDC
+    const greetingMatch = bodySnippet.match(
+      /greetings\s+from\s+([A-Za-z0-9&\s\-\.]+?)\s*[!,\.\n]/i
+    );
+    if (greetingMatch && greetingMatch[1]) {
+      const gc = cleanCompanyName(greetingMatch[1]);
+      if (gc && gc.length >= 2 && gc.length < 40 && !NON_COMPANY_WORDS.includes(gc.toLowerCase())) {
+        return normalizeCompanyName(gc);
+      }
+    }
+
+    // 5. "details about <Company [Program]>" — e.g. "share more details about Capgemini Exceller"
+    const detailsMatch = bodySnippet.match(
+      /(?:details|information)\s+about\s+([A-Za-z0-9&]+)(?:\s+[A-Za-z]+)?/i
+    );
+    if (detailsMatch && detailsMatch[1]) {
+      const dc = cleanCompanyName(detailsMatch[1]);
+      if (dc && dc.length >= 2 && dc.length < 40 && !NON_COMPANY_WORDS.includes(dc.toLowerCase())) {
+        return normalizeCompanyName(dc);
+      }
+    }
   }
 
   // Clean the subject to remove prefixes like "Confirmed: Your Registration for"
   const cleanedSubject = cleanSubjectNoise(subject);
   const lowerCleaned = cleanedSubject.toLowerCase();
   const lowerBody = (bodySnippet || '').toLowerCase();
+
+  // Check subject for program-name patterns:
+  // "Capgemini Exceller 2027: Introducing...", "TCS NQT 2027...", "Infosys Springboard..."
+  const programSubjectMatch = cleanedSubject.match(
+    /^([A-Za-z0-9&\s\-\.]+?)\s+(?:exceller|nqt|springboard|ignite|codevita|hackwithinfy|genc|genplorer|launchpad|catalyst)\b/i
+  );
+  if (programSubjectMatch && programSubjectMatch[1]) {
+    const pc = cleanCompanyName(programSubjectMatch[1]);
+    if (pc && pc.length >= 2 && pc.length < 40 && !NON_COMPANY_WORDS.includes(pc.toLowerCase())) {
+      return normalizeCompanyName(pc);
+    }
+  }
 
   // Disambiguate EY SAP vs EY GDS
   const isEyEmail =
