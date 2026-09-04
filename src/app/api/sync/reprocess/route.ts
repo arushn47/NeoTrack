@@ -1,9 +1,14 @@
 import { NextResponse } from 'next/server';
 import { getSession } from '@/lib/auth';
 import { createAdminClient } from '@/lib/supabase/admin';
-import { classifyEmail, extractCompanyName, normalizeCompanyName } from '@/lib/sync/classifier';
+import { classifyEmail, cleanCompanyName, extractCompanyName, normalizeCompanyName } from '@/lib/sync/classifier';
 import { extractDriveNumber, extractEvents, extractJobDetails, extractTravelRequirement } from '@/lib/sync/events';
 import { isFuzzyCompanyMatch } from '@/lib/sync/engine';
+import {
+  buildCircularCatalog,
+  loadAllDriveResolutions,
+  resolveDriveByTimingCorrelation,
+} from '@/lib/sync/drive-correlator';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 120;
@@ -95,6 +100,14 @@ export async function performReprocess(userId: string) {
   neoPatEmails.sort((a, b) => new Date(a.received_at || 0).getTime() - new Date(b.received_at || 0).getTime());
   const collegeEmails = emails.filter((e) => !isNeoPatSender(e.sender || ''));
 
+  // 2.5 Dynamic Timing Correlation Setup
+  const circularCatalog = buildCircularCatalog(collegeEmails);
+  const persistedResolutions = await loadAllDriveResolutions(supabase);
+  const driveResolutionsMap = new Map<string, string>();
+  for (const [dNum, r] of persistedResolutions.entries()) {
+    driveResolutionsMap.set(dNum, r.resolvedCompanyName);
+  }
+
   // 3. Phase 1: Establish Official NeoPAT Companies ONLY
   // ONLY emails from noreply.cdcinfo@vitstudent.ac.in define the company drives in NeoTrack!
   const validCompanyMap = new Map<string, { id: string; canonicalName: string; activeDriveDate: Date }>(); // name -> { id, canonicalName, activeDriveDate }
@@ -123,10 +136,30 @@ export async function performReprocess(userId: string) {
       hasAttachments: false,
       attachments: [],
       labels: [],
-    });
+    }, driveResolutionsMap);
 
-    const companyName = classification.companyName;
+    let companyName = classification.companyName;
     const isPlacement = !['irrelevant', 'unclassified', 'general'].includes(classification.classification);
+
+    // If this NeoPAT email has a drive number and was identified with a base company (like 'Apple' or 'Honeywell'),
+    // run timing correlation against circular catalog to resolve specific track (e.g. Apple SDET vs Apple SRE)
+    if (driveNumber && companyName && isPlacement) {
+      const baseClean = cleanCompanyName(companyName);
+      if (['Apple', 'Honeywell', 'Zluri', 'EY'].some((b) => b.toLowerCase() === baseClean.toLowerCase())) {
+        const resolution = await resolveDriveByTimingCorrelation(
+          supabase,
+          driveNumber,
+          baseClean,
+          emailDate,
+          circularCatalog,
+          persistedResolutions
+        );
+        if (resolution) {
+          companyName = resolution.resolvedCompanyName;
+          driveResolutionsMap.set(driveNumber, resolution.resolvedCompanyName);
+        }
+      }
+    }
 
     if (companyName && isPlacement) {
       const normalized = normalizeCompanyName(companyName);
@@ -331,7 +364,7 @@ export async function performReprocess(userId: string) {
       hasAttachments: false,
       attachments: [],
       labels: [],
-    });
+    }, driveResolutionsMap);
 
     const fullEmailText = `${subject}\n${bodySnippet}`;
     const driveNumber = extractDriveNumber(fullEmailText);

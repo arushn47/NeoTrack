@@ -1,4 +1,5 @@
 import type { ParsedEmail } from '@/lib/gmail/client';
+import { extractDriveNumber } from '@/lib/sync/events';
 
 // ============================================
 // Email Classification Types
@@ -209,7 +210,10 @@ const CLASSIFICATION_RULES: ClassificationRule[] = [
  * Classifies a parsed email into a placement category using deterministic rules.
  * Rules are evaluated in priority order — first match wins.
  */
-export function classifyEmail(email: ParsedEmail): ClassificationResult {
+export function classifyEmail(
+  email: ParsedEmail,
+  knownDriveResolutions?: Map<string, string>
+): ClassificationResult {
   const subject = email.subject.toLowerCase();
   const body = (email.bodySnippet || email.bodyPlain || '').toLowerCase().slice(0, 1000);
   const sender = email.senderEmail.toLowerCase();
@@ -223,7 +227,8 @@ export function classifyEmail(email: ParsedEmail): ClassificationResult {
           email.subject,
           email.senderEmail,
           email.bodySnippet || email.bodyPlain,
-          email.receivedAt
+          email.receivedAt,
+          knownDriveResolutions
         ),
         reason: rule.reason,
       };
@@ -498,8 +503,17 @@ export function extractCompanyName(
   subject: string,
   _senderEmail: string,
   bodySnippet?: string,
-  receivedAt?: Date | string
+  receivedAt?: Date | string,
+  knownDriveResolutions?: Map<string, string>
 ): string | null {
+  const fullEmailText = `${subject}\n${bodySnippet || ''}`;
+  const driveNumber = extractDriveNumber(fullEmailText);
+
+  // If this email carries a drive_number that has already been resolved by timing correlation, use it
+  if (driveNumber && knownDriveResolutions?.has(driveNumber)) {
+    return knownDriveResolutions.get(driveNumber)!;
+  }
+
   // 0. Immediately reject non-placement / marketing / personal senders
   if (
     /bookmyshow|pinterest|manutd|netflix|spotify|quora|chess\.com|myntra|plumgoodness|truecaller|dribbble|rockstargames|ifttt|openrouter|emergent\.sh|resumeworded|insideapple|mygate|newsgram\.hp|digital\.metamail|cron-job|vercel|onlinegdb/i.test(
@@ -647,22 +661,12 @@ export function extractCompanyName(
     ) {
       return 'Apple SRE';
     }
-    // Track-based disambiguation by drive number for NeoPAT circulars
-    if (bodySnippet && /pat-PL-2026-1220|1220/i.test(bodySnippet)) {
-      return 'Apple SRE';
+    // If drive resolution was resolved via timing correlation, use it
+    if (driveNumber && knownDriveResolutions?.has(driveNumber)) {
+      return knownDriveResolutions.get(driveNumber)!;
     }
-    if (bodySnippet && /pat-PL-2026-1216|1216/i.test(bodySnippet)) {
-      return 'Apple SDET';
-    }
-    // For general Apple circulars without explicit role tokens, disambiguate by drive cycle:
-    // Aug 24 was the launch of the SRE drive ("New Role !")
-    if (receivedAt) {
-      const d = new Date(receivedAt);
-      if (d >= new Date('2026-08-24T00:00:00Z')) {
-        return 'Apple SRE';
-      }
-    }
-    return 'Apple SDET';
+    // Generic fallback: timing correlation engine will resolve the drive_number
+    return 'Apple';
   }
 
   // Disambiguate Zluri SWE vs Zluri SDET

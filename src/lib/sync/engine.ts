@@ -8,10 +8,17 @@ import {
 } from '@/lib/gmail/client';
 import {
   classifyEmail,
+  cleanCompanyName,
   extractCompanyName,
   normalizeCompanyName,
   type ClassificationResult,
 } from '@/lib/sync/classifier';
+import { extractDriveNumber } from '@/lib/sync/events';
+import {
+  buildCircularCatalog,
+  loadAllDriveResolutions,
+  resolveDriveByTimingCorrelation,
+} from '@/lib/sync/drive-correlator';
 import { createAdminClient } from '@/lib/supabase/admin';
 
 // ============================================
@@ -118,6 +125,22 @@ export async function runSync(
     errors: [],
     accounts: [],
   };
+
+  // Load pre-resolved drive mappings
+  const persistedResolutions = await loadAllDriveResolutions(supabase);
+  const driveResolutionsMap = new Map<string, string>();
+  for (const [dNum, r] of persistedResolutions.entries()) {
+    driveResolutionsMap.set(dNum, r.resolvedCompanyName);
+  }
+
+  // Pre-fetch stored college circulars to seed catalog for timing correlation
+  const { data: storedCirculars } = await supabase
+    .from('emails')
+    .select('id, subject, sender, body_snippet, received_at')
+    .eq('user_id', userId)
+    .not('sender', 'ilike', '%noreply.cdcinfo@vitstudent.ac.in%');
+
+  const circularCatalog = buildCircularCatalog(storedCirculars || []);
 
   // 2. Process each account
   for (const account of sortedAccounts) {
@@ -267,23 +290,67 @@ export async function runSync(
               const parsedEmail = await fetchMessageDetail(gmail, msgId);
               progress.currentSubject = parsedEmail.subject.slice(0, 80);
 
-              // Classify the email
-              const classification = classifyEmail(parsedEmail);
+              const fullEmailText = `${parsedEmail.subject}\n${parsedEmail.bodyPlain || parsedEmail.bodySnippet || ''}`;
+              const driveNumber = extractDriveNumber(fullEmailText);
+
+              // Classify the email with resolved drive numbers
+              const classification = classifyEmail(parsedEmail, driveResolutionsMap);
+              let companyName = classification.companyName;
+
+              // If this NeoPAT email has a drive number and was identified with a base company,
+              // run timing correlation against circular catalog to resolve specific track (e.g. Apple SDET vs Apple SRE)
+              if (isPersonal && driveNumber && companyName) {
+                const baseClean = cleanCompanyName(companyName);
+                if (['Apple', 'Honeywell', 'Zluri', 'EY'].some((b) => b.toLowerCase() === baseClean.toLowerCase())) {
+                  const resolution = await resolveDriveByTimingCorrelation(
+                    supabase,
+                    driveNumber,
+                    baseClean,
+                    parsedEmail.receivedAt,
+                    circularCatalog,
+                    persistedResolutions
+                  );
+                  if (resolution) {
+                    companyName = resolution.resolvedCompanyName;
+                    driveResolutionsMap.set(driveNumber, resolution.resolvedCompanyName);
+                  }
+                }
+              }
+
+              // If this is a college email with explicit role text, also index it into the catalog
+              if (!isPersonal) {
+                const baseCompanies = ['Apple', 'Honeywell', 'Zluri', 'EY'];
+                for (const base of baseCompanies) {
+                  if (new RegExp(`\\b${base}\\b`, 'i').test(parsedEmail.subject) || new RegExp(`\\b${base}\\b`, 'i').test(parsedEmail.bodyPlain || parsedEmail.bodySnippet || '')) {
+                    const { extractTrackOrRole } = await import('@/lib/sync/drive-correlator');
+                    const trackInfo = extractTrackOrRole(fullEmailText, base);
+                    if (trackInfo) {
+                      const key = base.toLowerCase();
+                      if (!circularCatalog.has(key)) circularCatalog.set(key, []);
+                      circularCatalog.get(key)!.push({
+                        emailId: parsedEmail.gmailMessageId,
+                        companyBaseName: base,
+                        role: trackInfo.role,
+                        track: trackInfo.track,
+                        resolvedCompanyName: trackInfo.resolvedCompanyName,
+                        sourceDate: parsedEmail.receivedAt,
+                        subject: parsedEmail.subject,
+                      });
+                    }
+                  }
+                }
+              }
 
               // Extract/create company
               // GUARD: Don't create companies from irrelevant/unclassified/general emails.
-              // These are noise (Google notifications, account updates, etc.) that slipped
-              // through the metadata filter.
               let companyId: string | null = null;
               const isPlacementClassification = !['irrelevant', 'unclassified', 'general'].includes(
                 classification.classification
               );
 
-              if (classification.companyName && isPlacementClassification) {
+              if (companyName && isPlacementClassification) {
                 // RULE: ONLY emails from noreply.cdcinfo@vitstudent.ac.in (the official NeoPAT sender)
                 // on the personal account are allowed to create new companies.
-                // College emails have thousands of drives for all branches/batches and should
-                // ONLY match against existing NeoPAT companies for enrichment/verification.
                 const isNeoPatEmail =
                   isPersonal &&
                   /noreply\.cdcinfo@vitstudent\.ac\.in/i.test(
@@ -294,7 +361,7 @@ export async function runSync(
                 companyId = await upsertCompany(
                   supabase,
                   userId,
-                  classification.companyName,
+                  companyName,
                   allowCreate
                 );
 
