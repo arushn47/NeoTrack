@@ -19,6 +19,7 @@ export type EmailClassification =
   | 'venue_update'
   | 'result'
   | 'general'
+  | 'unclassified_placement_notice'
   | 'irrelevant'
   | 'unclassified';
 
@@ -101,7 +102,7 @@ const CLASSIFICATION_RULES: ClassificationRule[] = [
     classification: 'test',
     confidence: 'high',
     match: (s) =>
-      /(online\s+test|coding\s+test|online\s+assessment|aptitude\s+test|test\s+schedule|test\s+link|assessment\s+(?:test|link|scheduled|window))/i.test(s),
+      /(online\s+test|coding\s+test|online\s+assessment|aptitude\s+test|test\s+schedule|test\s+link|assessment\s+(?:test|link|scheduled|window)|thanks\s+for\s+taking\s+(?:the\s+)?assessment)/i.test(s),
     reason: 'Subject mentions online test or assessment',
   },
   {
@@ -115,16 +116,43 @@ const CLASSIFICATION_RULES: ClassificationRule[] = [
   {
     classification: 'withdrawal',
     confidence: 'high',
-    match: (s, b) =>
-      /withdraw(al|n)?/i.test(s) ||
-      /registration.*has been withdrawn|drive.*has been withdrawn|status:\s*withdrawn/i.test(s + ' ' + b),
+    match: (s, b) => {
+      const full = s + ' ' + b;
+      if (
+        /who\s+(?:wish|want)\s+to\s+opt|if\s+you\s+(?:wish|want)\s+to\s+opt|opt[\s-]*out\s+(?:form|link|google|portal)|voluntary\s+withdrawal\s+only|forms\.gle/i.test(
+          full
+        )
+      ) {
+        return false;
+      }
+      return (
+        /registration.*has been withdrawn|drive.*has been withdrawn|status:\s*withdrawn/i.test(full) ||
+        (/confirmation.*drive\s+registration\s+update/i.test(s) && /withdrawn/i.test(full)) ||
+        /your\s+registration\s+for\s+the\s+following\s+placement\s+drive\s+has\s+been\s+withdrawn/i.test(full)
+      );
+    },
     reason: 'Email confirms registration withdrawal',
   },
   {
     classification: 'decline',
     confidence: 'high',
-    match: (s, b) =>
-      /decline(d)?|opt(\s|-)?out/i.test(s + ' ' + b),
+    match: (s, b) => {
+      const full = s + ' ' + b;
+      if (
+        /who\s+(?:wish|want)\s+to\s+opt|if\s+you\s+(?:wish|want)\s+to\s+opt|opt[\s-]*out\s+(?:form|link|google|portal)|voluntary\s+withdrawal\s+only|forms\.gle/i.test(
+          full
+        )
+      ) {
+        return false;
+      }
+      return (
+        /confirmation.*drive\s+registration\s+update.*withdrawn/i.test(full) ||
+        /your\s+registration\s+for\s+the\s+following\s+placement\s+drive\s+has\s+been\s+withdrawn/i.test(full) ||
+        /you\s+have\s+(?:successfully\s+)?(?:declined|opted\s*out)/i.test(full) ||
+        /declined\s+(?:the\s+)?(?:placement\s+)?drive/i.test(full) ||
+        /status:\s*(?:declined|opted\s*out|withdrawn)/i.test(full)
+      );
+    },
     reason: 'Email confirms decline or opt-out',
   },
   {
@@ -212,14 +240,25 @@ const CLASSIFICATION_RULES: ClassificationRule[] = [
     reason: 'Trusted CDC sender + cohort/flagship program announcement in body',
   },
 
-  // --- LOW CONFIDENCE CATCHALLS ---
+  // --- TRUSTED CDC UNCLASSIFIED NOTICES ---
+  // Emails from official placement offices or student placement mailing lists that did not match
+  // a specific round rule (e.g. general circulars, cohort announcements, student briefings).
+  // These are NEVER discarded as irrelevant; they remain visible as placement notices.
+  {
+    classification: 'unclassified_placement_notice',
+    confidence: 'medium',
+    match: (_s, _b, sender) =>
+      /vitlions2027|vitbhopal|vitstudent|cdc|placementoffice|noreply\.cdc/i.test(sender),
+    reason: 'Email from trusted placement office/cell with general circular content',
+  },
+
+  // --- LOW CONFIDENCE CATCHALLS (Non-trusted senders) ---
   {
     classification: 'general',
     confidence: 'low',
-    match: (s, _b, sender) =>
-      /(placement|campus|recruit|career|hiring|drive)/i.test(s) ||
-      /(placement|cdc|career|neopat)/i.test(sender),
-    reason: 'General placement-related keywords detected',
+    match: (s, _b, _sender) =>
+      /(placement|campus|recruit|career|hiring|drive)/i.test(s),
+    reason: 'General placement-related keywords from non-trusted sender',
   },
 ];
 
@@ -256,16 +295,19 @@ export function classifyEmail(
     }
   }
 
+  const isTrustedSender = /vitlions2027|vitbhopal|vitstudent|cdc|placementoffice|noreply\.cdc/i.test(sender);
   return {
-    classification: 'unclassified',
-    confidence: 'low',
+    classification: isTrustedSender ? 'unclassified_placement_notice' : 'unclassified',
+    confidence: isTrustedSender ? 'medium' : 'low',
     companyName: extractCompanyName(
       email.subject,
       email.senderEmail,
       email.bodySnippet || email.bodyPlain,
       email.receivedAt
     ),
-    reason: 'No classification rule matched',
+    reason: isTrustedSender
+      ? 'Trusted placement sender with unclassified content'
+      : 'No classification rule matched',
   };
 }
 
@@ -346,6 +388,8 @@ export const COMPANY_ALIASES: Record<string, string> = {
   'zs': 'ZS Associates',
   'zs associates': 'ZS Associates',
   'london stock exchange': 'London Stock Exchange Group (LSEG)',
+  'honeywell': 'Honeywell Technologies',
+  'honeywell technologies': 'Honeywell Technologies',
   'honeywell aerospace': 'Honeywell Aerospace',
   'honeywell technology solutions': 'Honeywell Technology Solutions Lab',
   'honeywell technology solutions lab': 'Honeywell Technology Solutions Lab',
@@ -396,6 +440,11 @@ export const COMPANY_ALIASES: Record<string, string> = {
   'zensar technologies': 'Zensar',
   'tresvista financial': 'Tresvista',
   'tresvista financial services': 'Tresvista',
+  'rfpio': 'Responsive',
+  'rfpio india': 'Responsive',
+  'rfpio india pvt ltd': 'Responsive',
+  'rfp software': 'Responsive',
+  'responsive (rfp software)': 'Responsive',
 };
 
 /**
@@ -433,7 +482,10 @@ const SUBJECT_COMPANY_PATTERNS: RegExp[] = [
   // "Amazon PPT & online test is scheduled on..."
   // "BluBridge Technologies Pvt. Ltd Physical selection process is scheduled on..."
   // "Wakefit next round of selection process is scheduled on..."
-  /^([A-Za-z0-9&\s\-\.]+?)\s*(?:\([^)]+\))?\s*[-–—]?\s*(?:online\s+test|assessment|coding\s+test|physical\s+selection|selection\s+process|next\s+round|ppt|interview|selection\s+list)/i,
+  // "Goldman sachs application registration link & test link"
+  /^([A-Za-z0-9&\s\-\.]+?)\s*(?:\([^)]+\))?\s*[-–—]?\s*(?:online\s+test|assessment|coding\s+test|physical\s+selection|selection\s+process|next\s+round|ppt|interview|selection\s+list|application\s+registration|test\s+link|registration\s+link)/i,
+  // "Thanks for taking the Assessment Goldman Sachs UG Summer Internship 2027 - Pooled STEM"
+  /(?:thanks\s+for\s+taking\s+(?:the\s+)?assessment|assessment\s+completed)\s+([A-Za-z0-9&\s\-\.]+?)\s+(?:ug|summer|internship|placement|drive|pooled)/i,
   // "Company Name Super Dream Internship..."
   /^([A-Za-z0-9&\s\-\.]+?)\s+(?:super\s+dream|dream|regular)\s+(?:internship|placement)/i,
   // "Report Immediately : MUFG PPT"
@@ -487,6 +539,11 @@ const SUBJECT_SUFFIXES = [
   /\s+(?:super\s+dream|dream|regular)\s+(?:internship|placement|drive|offer).*$/i,
   /\s+(?:super\s+dream|dream|regular)$/i,
   /\s+(?:placement\s+drive|campus\s+drive|internship\s+drive|drive).*$/i,
+  /\s+\d+\s*[-]?\s*months?\b.*$/i,      // "6 months", "6-month"
+  /\s+\d+\s*moths?\b.*$/i,              // "6moths"
+  /\s+\d+\s*mo\b.*$/i,                  // "6mo", "6 mo"
+  /\s+ect\b.*$/i,                       // "ECT" (Early Career Talent style suffixes)
+  /\s+\d{4}\s*(?:batch)?.*$/i,          // trailing bare years like "2027", "2027 batch"
   /\s+(?:internship|intern|offer|placement)$/i,
   /\s+2027\s+batch.*$/i,
   /\s+2026\s+batch.*$/i,
@@ -516,6 +573,66 @@ const NON_COMPANY_WORDS = [
   'graduate trainee', 'system engineer', 'technical consultant', 'consultant',
   'full stack developer', 'backend developer', 'frontend developer', 'intern', 'internship',
 ];
+
+/**
+ * Common English stopwords, determiners, pronouns, prepositions, and generic placement terms
+ * that can NEVER be treated as company names or fuzzy match anchors.
+ */
+export const ENGLISH_STOPWORDS = new Set([
+  // Articles & Determiners
+  'a', 'an', 'the', 'this', 'that', 'these', 'those', 'each', 'every', 'all', 'any', 'some', 'no', 'none', 'both', 'either', 'neither', 'not', 'never',
+  // Pronouns
+  'i', 'me', 'my', 'myself', 'we', 'our', 'ours', 'ourselves', 'you', 'your', 'yours', 'yourself', 'yourselves',
+  'he', 'him', 'his', 'himself', 'she', 'her', 'hers', 'herself', 'it', 'its', 'itself', 'they', 'them', 'their', 'theirs', 'themselves',
+  'what', 'which', 'who', 'whom', 'whose', 'where', 'when', 'why', 'how',
+  // Prepositions & Conjunctions
+  'about', 'above', 'across', 'after', 'against', 'along', 'among', 'around', 'at', 'before', 'behind', 'below', 'beneath',
+  'beside', 'between', 'beyond', 'by', 'down', 'during', 'except', 'for', 'from', 'in', 'inside', 'into', 'near', 'of',
+  'off', 'on', 'onto', 'out', 'outside', 'over', 'past', 'regarding', 'since', 'through', 'throughout', 'to', 'toward',
+  'under', 'underneath', 'until', 'up', 'upon', 'with', 'within', 'without', 'and', 'but', 'or', 'nor', 'so', 'yet', 'if',
+  // Auxiliary & Common Verbs
+  'am', 'is', 'are', 'was', 'were', 'be', 'been', 'being', 'have', 'has', 'had', 'having', 'do', 'does', 'did', 'doing',
+  'will', 'would', 'shall', 'should', 'can', 'could', 'may', 'might', 'must', 'get', 'got', 'give', 'given', 'take', 'taken',
+  // Common College & Placement Non-Company Entities
+  'dear', 'student', 'students', 'candidate', 'candidates', 'batch', 'campus', 'college', 'university', 'department',
+  'office', 'notice', 'circular', 'announcement', 'update', 'link', 'form', 'registration', 'placement', 'drive',
+  'internship', 'process', 'selection', 'shortlist', 'shortlisted', 'eligible', 'eligibility', 'urgent', 'important',
+  'reminder', 'invitation', 'congratulations', 'details', 'information', 'schedule', 'venue', 'timing', 'dates',
+  'morning', 'afternoon', 'evening', 'today', 'tomorrow', 'yesterday', 'passout', 'prelims', 'portal', 'day', 'slots',
+  'week', 'month', 'year', 'thanks', 'thank', 'regards', 'team', 'attend', 'attended', 'attending', 'report', 'reported',
+  'test', 'tests', 'interview', 'interviews', 'assessment', 'assessments', 're', 'fwd', 'fw',
+]);
+
+/**
+ * Validates whether a candidate string is NOT a legitimate company name.
+ * Centrally blocks stopwords, articles, numbers, and generic non-company phrases.
+ */
+export function isInvalidCompanyName(name: string): boolean {
+  if (!name) return true;
+  const clean = name.trim().toLowerCase().replace(/^[^a-z0-9]+|[^a-z0-9]+$/g, '');
+  if (clean.length < 2) return true;
+  if (/^\d+$/.test(clean)) return true; // Purely numbers
+
+  // Exact match in NON_COMPANY_WORDS
+  if (NON_COMPANY_WORDS.includes(clean)) return true;
+
+  // Single word is a stopword
+  const words = clean.split(/\s+/).filter(Boolean);
+  if (words.length === 1 && ENGLISH_STOPWORDS.has(words[0])) {
+    return true;
+  }
+
+  // If every word in the phrase is a stopword or noise word, reject it
+  // e.g. "Students Who Got The Link But Not In", "Batch 2 Of"
+  const substantiveWords = words.filter(
+    (w) => !ENGLISH_STOPWORDS.has(w) && !COMPANY_NOISE_WORDS.includes(w) && w.length >= 2
+  );
+  if (substantiveWords.length === 0) {
+    return true;
+  }
+
+  return false;
+}
 
 /**
  * Extracts and normalizes a company name from the email subject.
@@ -563,13 +680,17 @@ export function extractCompanyName(
 
     const addCandidate = (raw: string | undefined, sourceWeight: number) => {
       if (!raw) return;
-      const cleaned = cleanCompanyName(raw);
-      if (
-        !cleaned ||
-        cleaned.length < 2 ||
-        cleaned.length >= 50 ||
-        NON_COMPANY_WORDS.includes(cleaned.toLowerCase())
-      ) {
+
+      // Pre-strip duration/batch/year noise on raw candidate string before scoring
+      const preCleaned = raw
+        .replace(/\s+\d+\s*[-]?\s*months?\b.*$/i, '')
+        .replace(/\s+\d+\s*moths?\b.*$/i, '')
+        .replace(/\s+\d+\s*mo\b.*$/i, '')
+        .replace(/\s+ect\b.*$/i, '')
+        .replace(/\s+\d{4}\s*(?:batch)?.*$/i, '');
+
+      const cleaned = cleanCompanyName(preCleaned);
+      if (!cleaned || isInvalidCompanyName(cleaned)) {
         return;
       }
 
@@ -583,7 +704,7 @@ export function extractCompanyName(
       const lowerNorm = normalized.toLowerCase();
       const lowerClean = candidateClean.toLowerCase();
 
-      if (['super', 'dream', 'internship', 'placement', 'drive', 'finance'].includes(lowerNorm)) {
+      if (isInvalidCompanyName(normalized) || ['super', 'dream', 'internship', 'placement', 'drive', 'finance'].includes(lowerNorm)) {
         return;
       }
 
@@ -599,10 +720,6 @@ export function extractCompanyName(
       if (/\b(?:sdet|sre|sap|gds|aerospace|technology\s+solutions|analytics|bpm)\b/i.test(lowerNorm)) {
         score += 50;
       }
-
-      // 3. Specificity / word count (+10 per meaningful word)
-      const words = lowerNorm.split(/\s+/).filter((w) => w.length >= 2);
-      score += words.length * 10;
 
       // Penalize generic single-word abbreviations that have known specializations
       if (['ey'].includes(lowerNorm)) {
@@ -644,22 +761,22 @@ export function extractCompanyName(
     // 4. Greeting / Body opening pattern: "Greetings from <Company>!"
     // Used by Capgemini, Infosys and other direct company circulars forwarded via CDC
     const greetingMatch = bodySnippet.match(
-      /greetings\s+from\s+([A-Za-z0-9&\s\-\.]+?)\s*[!,\.\n]/i
+      /greetings\s+from\s+(?:the\s+)?([A-Za-z0-9&\s\-\.]+?)\s*[!,\.\n]/i
     );
     if (greetingMatch && greetingMatch[1]) {
       const gc = cleanCompanyName(greetingMatch[1]);
-      if (gc && gc.length >= 2 && gc.length < 40 && !NON_COMPANY_WORDS.includes(gc.toLowerCase())) {
+      if (gc && !isInvalidCompanyName(gc)) {
         return normalizeCompanyName(gc);
       }
     }
 
     // 5. "details about <Company [Program]>" — e.g. "share more details about Capgemini Exceller"
     const detailsMatch = bodySnippet.match(
-      /(?:details|information)\s+about\s+([A-Za-z0-9&]+)(?:\s+[A-Za-z]+)?/i
+      /(?:details|information)\s+about\s+(?:the\s+)?([A-Z][A-Za-z0-9&]+(?:\s+[A-Za-z]+)?)/
     );
     if (detailsMatch && detailsMatch[1]) {
       const dc = cleanCompanyName(detailsMatch[1]);
-      if (dc && dc.length >= 2 && dc.length < 40 && !NON_COMPANY_WORDS.includes(dc.toLowerCase())) {
+      if (dc && !isInvalidCompanyName(dc)) {
         return normalizeCompanyName(dc);
       }
     }
@@ -677,7 +794,7 @@ export function extractCompanyName(
   );
   if (programSubjectMatch && programSubjectMatch[1]) {
     const pc = cleanCompanyName(programSubjectMatch[1]);
-    if (pc && pc.length >= 2 && pc.length < 40 && !NON_COMPANY_WORDS.includes(pc.toLowerCase())) {
+    if (pc && !isInvalidCompanyName(pc)) {
       return normalizeCompanyName(pc);
     }
   }
@@ -697,15 +814,36 @@ export function extractCompanyName(
     return 'EY GDS';
   }
 
-  // Disambiguate Honeywell Aerospace vs Honeywell Technology Solutions Lab
+  // Disambiguate Honeywell Aerospace vs Honeywell Technology Solutions Lab vs Honeywell Technologies
   if (lowerCleaned.includes('honeywell') || lowerBody.includes('honeywell')) {
     if (lowerCleaned.includes('aerospace') || lowerBody.includes('aerospace')) {
       return 'Honeywell Aerospace';
     }
-    if (lowerCleaned.includes('technology solutions') || lowerBody.includes('technology solutions')) {
+    if (
+      lowerCleaned.includes('technology solutions') ||
+      lowerCleaned.includes('solutions lab') ||
+      lowerBody.includes('technology solutions') ||
+      lowerBody.includes('solutions lab') ||
+      /pat-pl-2026-1135/i.test(lowerCleaned) ||
+      /pat-pl-2026-1135/i.test(lowerBody)
+    ) {
       return 'Honeywell Technology Solutions Lab';
     }
-    return 'Honeywell Technology Solutions Lab';
+    // July 27 - August 11 Super Dream Internship cycle is Honeywell Technology Solutions Lab
+    if (
+      (/super\s*dream/i.test(lowerCleaned) && !lowerCleaned.includes('aerospace')) ||
+      /ppt.*online\s+test.*sjt|next\s+round.*sjt717|alumni\s+mock/i.test(lowerCleaned) ||
+      /sarojini\s+naidu\s+gallery/i.test(lowerBody)
+    ) {
+      return 'Honeywell Technology Solutions Lab';
+    }
+    if (lowerCleaned.includes('technologies') || lowerBody.includes('technologies')) {
+      return 'Honeywell Technologies';
+    }
+    if (lowerCleaned.includes('dream internship')) {
+      return 'Honeywell Technologies';
+    }
+    return 'Honeywell Technologies';
   }
 
   // Disambiguate Apple SDET vs Apple SRE
@@ -765,9 +903,7 @@ export function extractCompanyName(
       const cleaned = cleanCompanyName(match[1]);
       if (
         cleaned &&
-        cleaned.length >= 2 &&
-        cleaned.length < 50 &&
-        !NON_COMPANY_WORDS.includes(cleaned.toLowerCase()) &&
+        !isInvalidCompanyName(cleaned) &&
         !/^(?:portal|webinar|survey|assessment|feedback|cdc|vit|profile|course|day\s+\d+|session|prelims|passout\s+batch|complete|reminder)/i.test(
           cleaned
         ) &&
@@ -788,9 +924,7 @@ export function extractCompanyName(
     const cleaned = cleanCompanyName(cleanedSubject);
     if (
       cleaned &&
-      cleaned.length >= 2 &&
-      cleaned.length < 50 &&
-      !NON_COMPANY_WORDS.includes(cleaned.toLowerCase()) &&
+      !isInvalidCompanyName(cleaned) &&
       !/^(?:portal|webinar|survey|assessment|feedback|cdc|vit|profile|course|day\s+\d+|session|prelims|passout\s+batch|complete|reminder|shortlist)/i.test(cleaned) &&
       !/^(?:ps\s+)?(?:associate\s+)?(?:software\s+)?(?:engineer|developer|analyst|scientist|trainee|consultant|specialist)$/i.test(cleaned) &&
       !/(?:software\s+engineer|associate\s+engineer|data\s+scientist|data\s+analyst|graduate\s+trainee)/i.test(cleaned)
@@ -836,12 +970,31 @@ export function cleanCompanyName(name: string): string {
   // Strip leading date change / update noise if any slipped through
   str = str.replace(/^(?:date\s+change\s+(?:for|:)?|rescheduled\s+(?:for|:)?)/i, '').trim();
 
+  // Strip duration/batch/year noise before general suffixes
+  str = str.replace(/\s+\d+\s*[-]?\s*months?\b.*$/i, '');
+  str = str.replace(/\s+\d+\s*moths?\b.*$/i, '');
+  str = str.replace(/\s+\d+\s*mo\b.*$/i, '');
+  str = str.replace(/\s+ect\b.*$/i, '');
+  str = str.replace(/\s+\d{4}\s*(?:batch)?.*$/i, '');
+
   // Strip trailing suffixes
   for (const s of SUBJECT_SUFFIXES) {
     str = str.replace(s, '').trim();
   }
 
-  // Remove content in parentheses e.g. "(Mitsubishi UFJ Financial Group)"
+  // 1. Check for trading brand names in parentheses: e.g. "RFPIO India Pvt Ltd (DBA Responsive)" -> "Responsive"
+  const dbaMatch = str.match(/\((?:dba|d\/b\/a|doing\s+business\s+as|aka|a\.k\.a\.|now)\s+([A-Za-z0-9&\s\-\.]+?)\)/i);
+  if (dbaMatch && dbaMatch[1]) {
+    const brand = dbaMatch[1].trim();
+    if (brand && !isInvalidCompanyName(brand)) {
+      return brand;
+    }
+  }
+
+  // 2. Remove parenthetical subsidiary / owner notes: e.g. "(A Siemens Company)"
+  str = str.replace(/\((?:a|an|the)?\s*[^)]*?(?:company|group|subsidiary|division)[^)]*\)/gi, ' ').trim();
+
+  // 3. Remove content in remaining parentheses e.g. "(Mitsubishi UFJ Financial Group)"
   str = str.replace(/\(.*?\)/g, '').trim();
 
   // Remove trailing noise legal words
@@ -854,6 +1007,10 @@ export function cleanCompanyName(name: string): string {
   // Remove leading/trailing punctuation
   str = str.replace(/^[:\-\s\|,.\/]+|[:\-\s\|,.\/]+$/g, '').trim();
 
+  if (isInvalidCompanyName(str)) {
+    return '';
+  }
+
   return str;
 }
 
@@ -861,6 +1018,10 @@ export function cleanCompanyName(name: string): string {
  * Normalizes a company name using the known aliases map.
  */
 export function normalizeCompanyName(name: string): string {
+  if (!name || isInvalidCompanyName(name)) {
+    return '';
+  }
+
   const lower = name.toLowerCase().trim();
 
   // Check exact alias match

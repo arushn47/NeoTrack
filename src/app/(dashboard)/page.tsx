@@ -129,17 +129,24 @@ export default async function DashboardPage() {
 
       const companyStatus = appStatusMap.get(event.company_id) || 'unknown';
 
-      // Skip eliminated or opted-out companies
-      if (['not_shortlisted', 'rejected', 'not_applied', 'withdrawn', 'declined'].includes(companyStatus)) {
-        continue;
-      }
-
-      // Only show events up to the user's current pipeline stage unless manually overridden
-      if (!(event as any).manual_override) {
-        const maxStage = STATUS_MAX_STAGE[companyStatus] ?? 2;
-        const evtStage = EVENT_STAGE[event.event_type] ?? 2;
-        if (evtStage > maxStage) {
+      // Registration Deadline rule:
+      // Keep it in upcoming events only if user hasn't applied yet
+      if (event.event_type === 'registration_deadline') {
+        const hasApplied = companyStatus !== 'not_applied' && companyStatus !== 'unknown';
+        if (hasApplied) continue;
+      } else {
+        // Skip eliminated or opted-out companies
+        if (['not_shortlisted', 'rejected', 'not_applied', 'withdrawn', 'declined'].includes(companyStatus)) {
           continue;
+        }
+
+        // Only show events up to the user's current pipeline stage unless manually overridden
+        if (!(event as any).manual_override) {
+          const maxStage = STATUS_MAX_STAGE[companyStatus] ?? 2;
+          const evtStage = EVENT_STAGE[event.event_type] ?? 2;
+          if (evtStage > maxStage) {
+            continue;
+          }
         }
       }
 

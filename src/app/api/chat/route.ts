@@ -513,7 +513,7 @@ export async function POST(request: Request) {
     // If query is specifically about CTC / Compensation:
     if (isCtcQuery) {
       return NextResponse.json({
-        reply: `💰 **${targetComp.name} Compensation Details:**\n• **CTC**: ${app?.ctc || 'Not specified'}\n• **Stipend**: ${app?.stipend || 'Not specified'}\n• **Role**: ${app?.role || 'Software Engineer'}\n• **Location**: ${app?.location || 'Pan India / Remote'}`,
+        reply: `💰 **${targetComp.name} Compensation Details:**\n• **CTC**: ${app?.ctc || 'Not specified'}\n• **Stipend**: ${app?.stipend || 'Not specified'}\n• **Role**: ${app?.role || 'Software Engineer'}\n• **Location**: ${app?.location || 'Not specified'}`,
       });
     }
 
@@ -524,7 +524,7 @@ export async function POST(request: Request) {
       : '';
 
     return NextResponse.json({
-      reply: `🏢 **${targetComp.name} Overview:**\n• **Status**: **${statusStr}**\n• **Role**: ${app?.role || 'Software Engineer'}\n• **CTC**: ${app?.ctc || 'Not specified'}\n• **Stipend**: ${app?.stipend || 'Not specified'}\n• **Location**: ${app?.location || 'Pan India / Remote'}${eventSummary}`,
+      reply: `🏢 **${targetComp.name} Overview:**\n• **Status**: **${statusStr}**\n• **Role**: ${app?.role || 'Software Engineer'}\n• **CTC**: ${app?.ctc || 'Not specified'}\n• **Stipend**: ${app?.stipend || 'Not specified'}\n• **Location**: ${app?.location || 'Not specified'}${eventSummary}`,
     });
   }
 

@@ -22,6 +22,7 @@ export const EMAIL_CLASSIFICATIONS = {
   VENUE_UPDATE: 'venue_update',
   RESULT: 'result',
   GENERAL: 'general',
+  UNCLASSIFIED_PLACEMENT_NOTICE: 'unclassified_placement_notice',
   IRRELEVANT: 'irrelevant',
   UNCLASSIFIED: 'unclassified',
 } as const;

@@ -10,6 +10,12 @@ CRITICAL RULES TO PREVENT HALLUCINATIONS:
 3. CASUAL MENTIONS ARE NOT EVENTS: Phrasings like "details will be shared post Pre Placement Talk" or "before the interview" mean the round is NOT scheduled yet. Set is_explicitly_scheduled to false and date_text_raw to null.
 4. VERBATIM SOURCE QUOTE: For every event, category, and compensation statement, you MUST provide a short verbatim quote from the text (source_quote, category_source_quote, compensation_source_quote). If not explicitly stated, return null and leave category as 'Unknown'.
 5. NO TRUNCATION OF CONTEXT: Read the entire email, including tables and eligibility sections.
+6. COMPANY NAME IS THE LEGAL/BRAND NAME ONLY: Strip all role descriptors, durations, and internship/job type qualifiers from company_name. Examples:
+   - "Intel 6 Months Hardware Intern" → company_name = "Intel"
+   - "Google Summer Intern 2026" → company_name = "Google"
+   - "Amazon SDE Full Time" → company_name = "Amazon"
+   - "RFPIO India Pvt Ltd (DBA Responsive)" → company_name = "Responsive"
+   Duration strings ("6 months", "6-month", "2 months"), role titles ("Intern", "Engineer", "Analyst", "SDE"), and seasonal labels ("Summer", "Winter") are NEVER part of the company name.
 
 Return ONLY a JSON object with this exact shape:
 {

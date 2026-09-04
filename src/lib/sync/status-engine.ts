@@ -1,5 +1,5 @@
 import type { ParsedEmail } from '@/lib/gmail/client';
-import { extractEvents, extractJobDetails } from '@/lib/sync/events';
+import { extractEvents, extractJobDetails, type ExtractedEvent } from '@/lib/sync/events';
 import { createAdminClient } from '@/lib/supabase/admin';
 
 /**
@@ -59,7 +59,7 @@ export function checkNeoIdMatch(
   }
 
   // 2. Check registration number pattern (e.g. "23BCE10472")
-  // Only match standalone registration numbers (not part of email addresses)
+  // VIT branch codes are exactly 3 letters (BCE, CSE, MIS, etc.)
   const regMatch = userEmail.match(/([0-9]{2}[a-z]{3}[0-9]{4,5})/i);
   if (regMatch && regMatch[1]) {
     const regNo = regMatch[1].toUpperCase();
@@ -106,6 +106,20 @@ export async function processEmailForEventsAndStatus(
     : null;
   let matchType = 'email_body';
 
+  // Compute isShortlistEmail early — needed both for attachment scanning context (below)
+  // and for status computation logic further down.
+  const isShortlistEmail =
+    /shortlist|selection\s+list|selected\s+candidates|shortlisted\s+students|shortlist\s+for|candidates\s+shortlisted|online\s+test\s+is\s+scheduled|assessment\s+is\s+scheduled|coding\s+test\s+is\s+scheduled/i.test(
+      subjLower
+    ) ||
+    /find\s+the\s+below\s+shortlist|below\s+is\s+the\s+shortlist|shortlisted\s+candidates|shortlisted\s+students|attached\s+list\s+of\s+shortlisted|shortlist\s+for\s+next\s+round/i.test(
+      fullText
+    ) ||
+    (email.hasAttachments &&
+      email.attachments.some((a) =>
+        /shortlist|selection[_\s-]*list|test[_\s-]*shortlist|selected[_\s-]*student/i.test(a.filename)
+      ));
+
   // 2. If attachments exist and gmail client is available, scan Excel attachments ONLY if relevant!
   const isAttachmentRelevant =
     /shortlist|selection|eligible|candidate|student|list|test|assessment|interview|ppt|schedule|result|round|score/i.test(
@@ -131,7 +145,8 @@ export async function processEmailForEventsAndStatus(
       email.gmailMessageId,
       email.attachments,
       userNeoId,
-      userEmail
+      userEmail,
+      isShortlistEmail  // Pass shortlist context so unnamed Excel files get correct classification
     );
 
     if (excelMatch && excelMatch.matched) {
@@ -141,9 +156,41 @@ export async function processEmailForEventsAndStatus(
         matchType = 'xlsx_cell';
         matchDetail = excelMatch.details;
       } else {
-        // Matched in an applied/opt-in/eligible list → just confirms application
+        // Matched in an applied/opt-in list — confirms application/registration roster.
+        // It does NOT qualify as a confirmed test/interview shortlist if an actual shortlist exists or is issued later.
         isInAppliedList = true;
+        matchType = 'xlsx_applied_list';
         matchDetail = excelMatch.details;
+      }
+    }
+  }
+
+  // 2b. Check Google Sheets pubhtml shortlists in email text
+  let gsheetEventToAdd: ExtractedEvent | null = null;
+  if (!isNeoMatched) {
+    const { extractGoogleSheetUrls, scanGoogleSheetForCandidate } = await import('@/lib/sync/gsheet-parser');
+    const gUrls = extractGoogleSheetUrls(fullText);
+    for (const gUrl of gUrls) {
+      const gMatch = await scanGoogleSheetForCandidate(gUrl, userEmail, userNeoId);
+      if (gMatch && gMatch.matched) {
+        isNeoMatched = true;
+        matchType = 'xlsx_cell';
+        matchDetail = gMatch.details;
+        if (gMatch.eventDate) {
+          const startTime = new Date(gMatch.eventDate);
+          startTime.setHours(gMatch.slot && /slot\s*2/i.test(gMatch.slot) ? 14 : 9, 0, 0, 0);
+          gsheetEventToAdd = {
+            eventType: 'online_test',
+            title: `Online Assessment${gMatch.slot ? ` (${gMatch.slot})` : ''}`,
+            startTime,
+            endTime: null,
+            venue: 'Campus / Offline',
+            mode: 'online',
+            confidence: 'high',
+            hasExplicitTime: true,
+          };
+        }
+        break;
       }
     }
   }
@@ -165,7 +212,7 @@ export async function processEmailForEventsAndStatus(
   // Check existing application status from DB
   const { data: existingApp } = await supabase
     .from('applications')
-    .select('status, manual_override, applied_at, location, ctc')
+    .select('status, manual_override, applied_at, location, ctc, notes')
     .eq('user_id', userId)
     .eq('company_id', companyId)
     .single();
@@ -185,31 +232,27 @@ export async function processEmailForEventsAndStatus(
   // 3. Extract Events (PPT, Test, Interview) with Deduplication
   // Hoist extractedEvents so the status computation block can reference it
   const extractedEvents = extractEvents(email);
+  if (gsheetEventToAdd) {
+    extractedEvents.push(gsheetEventToAdd);
+  }
 
-  const isShortlistEmail =
-    /shortlist|selection\s+list|selected\s+candidates|shortlisted\s+students|shortlist\s+for|candidates\s+shortlisted|online\s+test\s+is\s+scheduled|assessment\s+is\s+scheduled|coding\s+test\s+is\s+scheduled/i.test(
-      subjLower
-    ) ||
-    /find\s+the\s+below\s+shortlist|below\s+is\s+the\s+shortlist|shortlisted\s+candidates|shortlisted\s+students|attached\s+list\s+of\s+shortlisted|shortlist\s+for\s+next\s+round/i.test(
-      fullText
-    ) ||
-    (email.hasAttachments &&
-      email.attachments.some((a) =>
-        /shortlist|selection[_\s-]*list|test[_\s-]*shortlist|selected[_\s-]*student/i.test(a.filename)
-      ));
+  const isBroadcastOptOutNotice =
+    /who\s+(?:wish|want)\s+to\s+opt|if\s+you\s+(?:wish|want)\s+to\s+opt|opt[\s-]*out\s+(?:form|link|google|portal)|voluntary\s+withdrawal\s+only|forms\.gle/i.test(fullText);
 
-  // Check if candidate is withdrawn or opted out
   const isWithdrawn =
-    existingApp?.status === 'withdrawn' ||
-    existingApp?.status === 'declined' ||
-    emailClass === 'withdrawal' ||
-    emailClass === 'decline' ||
-    // General withdrawal patterns
-    /registration.*(?:has\s+been\s+)?withdrawn|opted\s+out|declined\s+drive/i.test(fullText) ||
-    // NeoPAT-specific: "Confirmation: X Drive Registration Update" + body says withdrawn
-    (/confirmation.*drive\s+registration\s+update/i.test(subjLower) && /withdrawn/i.test(fullText)) ||
-    // NeoPAT body: "your registration for the following placement drive has been withdrawn"
-    /your\s+registration\s+for\s+the\s+following\s+placement\s+drive\s+has\s+been\s+withdrawn/i.test(fullText);
+    !isNeoMatched &&
+    !isBroadcastOptOutNotice && (
+      existingApp?.status === 'withdrawn' ||
+      existingApp?.status === 'declined' ||
+      emailClass === 'withdrawal' ||
+      emailClass === 'decline' ||
+      // General withdrawal patterns
+      /registration.*(?:has\s+been\s+)?withdrawn|declined\s+(?:the\s+)?(?:placement\s+)?drive/i.test(fullText) ||
+      // NeoPAT-specific: "Confirmation: X Drive Registration Update" + body says withdrawn
+      (/confirmation.*drive\s+registration\s+update/i.test(subjLower) && /withdrawn/i.test(fullText)) ||
+      // NeoPAT body: "your registration for the following placement drive has been withdrawn"
+      /your\s+registration\s+for\s+the\s+following\s+placement\s+drive\s+has\s+been\s+withdrawn/i.test(fullText)
+    );
 
 
   if (isWithdrawn) {
@@ -219,11 +262,11 @@ export async function processEmailForEventsAndStatus(
     for (const event of extractedEvents) {
       // RULE: For tests, interviews, and PPTs: ONLY add to user's schedule if candidate is shortlisted or actively participating!
       const currentAppStatus = existingApp?.status || 'not_applied';
-      const isEliminated = ['not_shortlisted', 'rejected', 'withdrawn', 'declined', 'not_applied'].includes(currentAppStatus);
+      const isEliminated = ['not_shortlisted', 'rejected', 'withdrawn', 'declined'].includes(currentAppStatus);
       const isTestOrInterview = ['online_test', 'coding_test', 'technical_interview', 'hr_interview', 'final_interview'].includes(event.eventType);
 
       if (isEliminated && !isNeoMatched) {
-        continue; // Do not add events for companies where user is not registered or not shortlisted
+        continue; // Do not add events for companies where user is withdrawn, rejected, or eliminated
       }
 
       if ((isTestOrInterview || isShortlistEmail) && !isNeoMatched) {
@@ -291,8 +334,10 @@ export async function processEmailForEventsAndStatus(
             .eq('id', existingEvents[0].id);
         }
       } else {
-        // Clean up title (remove "Re: ", "Fwd: ")
-        const cleanTitle = email.subject.replace(/^(?:fwd|re|fw)\s*:\s*/i, '').slice(0, 60);
+        // Clean up title
+        const { data: compRec } = await supabase.from('companies').select('name').eq('id', companyId).single();
+        const displayComp = compRec?.name || email.subject.replace(/^(?:fwd|re|fw)\s*:\s*/i, '').slice(0, 40);
+        const finalTitle = `${displayComp} - ${event.title}`;
 
         // Insert new unique event into DB
         const { data: insertedEvt } = await supabase
@@ -302,7 +347,7 @@ export async function processEmailForEventsAndStatus(
             company_id: companyId,
             source_email_id: emailDbId,
             event_type: event.eventType,
-            title: `${cleanTitle} - ${event.title}`,
+            title: finalTitle,
             start_time: startTimeIso,
             end_time: event.endTime ? event.endTime.toISOString() : null,
             venue: event.venue,
@@ -453,19 +498,8 @@ export async function processEmailForEventsAndStatus(
   if (existingApp?.manual_override) {
     // User has manually set their status — preserve it
     newStatus = null;
-  } else if (isWithdrawn) {
-    // A. Withdrawal / Opt-Out (always highest priority)
-    newStatus = 'withdrawn';
-  } else if (existingApp?.status === 'withdrawn' || existingApp?.status === 'declined') {
-    // Already withdrawn — nothing can override it unless a new registration arrives later
-    if (isConfirmation && isEmailAfterApplication) {
-      newStatus = 'applied';
-    } else {
-      newStatus = existingApp.status;
-    }
   } else if (isNeoMatched) {
-    // B. Candidate is confirmed in an actual shortlist / test / interview Excel or body match
-    // Check for rejection language BEFORE checking for "selected" — order matters
+    // Candidate is confirmed in an actual shortlist / test / interview Excel, GSheet, or body match
     const isRejectionLanguage =
       emailClass === 'result' &&
       /not\s+selected|regret|unfortunately|could\s+not\s+be\s+selected/i.test(subjLower + ' ' + fullText);
@@ -476,13 +510,17 @@ export async function processEmailForEventsAndStatus(
       newStatus = 'selected';
     } else if (/interview|next\s+round|selection\s+process/i.test(subjLower)) {
       newStatus = 'interview_scheduled';
-    } else if (/online\s+test|coding\s+test|assessment/i.test(subjLower)) {
+    } else if (/online\s+test|coding\s+test|assessment/i.test(subjLower) || matchDetail?.includes('Google Sheet')) {
       newStatus = 'test_scheduled';
     } else if (/ppt|pre[\s-]*placement/i.test(subjLower)) {
       newStatus = 'ppt_scheduled';
     } else {
       newStatus = 'shortlisted';
     }
+  } else if (isWithdrawn) {
+    // A. Withdrawal / Opt-Out (always highest priority unless candidate matched in shortlist)
+    newStatus = 'withdrawn';
+  } else if (existingApp?.status === 'withdrawn' || existingApp?.status === 'declined') {
   } else if (isInAppliedList) {
     // C. Found in an applied/opt-in list — confirms application but does NOT mean shortlisted
     const current = existingApp?.status || 'not_applied';
@@ -561,7 +599,17 @@ export async function processEmailForEventsAndStatus(
     // block the downgrade. Terminal states (withdrawn, rejected, not_shortlisted) are
     // always allowed to be applied.
     const isTerminal = (s: string) => ['withdrawn', 'declined', 'rejected', 'not_shortlisted'].includes(s);
-    if (!isTerminal(newStatus) && newPriority < existingPriority) {
+
+    // EXCEPTION: A positive Excel/body match (isNeoMatched) is concrete evidence the candidate
+    // IS participating. It must be allowed to override a previous 'not_shortlisted' determination,
+    // which is only an absence-of-evidence signal from an earlier email scan.
+    // e.g. "Test Scheduled" email + user found in opt-in Excel → test_scheduled should win over not_shortlisted.
+    const isConfirmedParticipation =
+      isNeoMatched &&
+      existingApp?.status === 'not_shortlisted' &&
+      ['shortlisted', 'test_scheduled', 'interview_scheduled', 'ppt_scheduled'].includes(newStatus);
+
+    if (!isTerminal(newStatus) && newPriority < existingPriority && !isConfirmedParticipation) {
       newStatus = null; // Block the downgrade
     }
   }
@@ -584,13 +632,29 @@ export async function processEmailForEventsAndStatus(
   if (jobDetails.ctc) appUpdate.ctc = jobDetails.ctc;
   if (jobDetails.stipend) appUpdate.stipend = jobDetails.stipend;
   if (resolvedLocation) appUpdate.location = resolvedLocation;
-  if (travelReq) appUpdate.notes = travelReq;
+
+  // Accumulate notes: travel requirement + AI review flags occupy the same column.
+  // Build them separately and join so neither overwrites the other.
+  const noteParts: string[] = [];
+  if (travelReq) {
+    noteParts.push(travelReq);
+  } else if (existingApp?.notes) {
+    // Preserve previously extracted travel mode so later circulars (e.g. test links) don't overwrite it
+    const prevTravel = existingApp.notes.split('\n')[0]?.trim();
+    if (['vellore', 'chennai', 'bhopal_lab', 'online'].includes(prevTravel)) {
+      noteParts.push(prevTravel);
+    }
+  }
+  if (isAiFlaggedForReview && aiReviewNotes) noteParts.push(aiReviewNotes);
+  if (noteParts.length > 0) appUpdate.notes = noteParts.join('\n');
 
   if (newStatus) {
-    appUpdate.status_confidence = isAiFlaggedForReview ? 'low' : 'high';
-    if (isAiFlaggedForReview && aiReviewNotes) {
-      appUpdate.notes = appUpdate.notes ? `${appUpdate.notes}\n${aiReviewNotes}` : aiReviewNotes;
+    appUpdate.status = newStatus;
+    if (newStatus === 'applied' && !existingApp?.applied_at) {
+      appUpdate.applied_at = email.receivedAt ? new Date(email.receivedAt).toISOString() : new Date().toISOString();
     }
+    appUpdate.status_confidence = isAiFlaggedForReview ? 'low' : 'high';
+    // AI review notes are already included in appUpdate.notes above (with travelReq), skip double-append
 
     // If candidate withdrew, declined, or was not shortlisted/rejected, purge scheduled events
     if (['withdrawn', 'declined', 'rejected', 'not_shortlisted'].includes(newStatus)) {

@@ -111,14 +111,23 @@ export default async function CompanyDetailPage({
           lastUpdated: application.last_updated,
         }
       : null,
-    events: (events || []).map((e) => ({
-      id: e.id,
-      eventType: e.event_type,
-      title: e.title,
-      startTime: e.start_time,
-      venue: e.venue,
-      mode: e.mode,
-    })),
+    events: (events || [])
+      .filter((e) => {
+        if (e.event_type === 'registration_deadline') {
+          const isRegistered = application && application.status !== 'not_applied';
+          const isPast = e.start_time && new Date(e.start_time).getTime() <= Date.now();
+          if (isRegistered || isPast) return false;
+        }
+        return true;
+      })
+      .map((e) => ({
+        id: e.id,
+        eventType: e.event_type,
+        title: e.title,
+        startTime: e.start_time,
+        venue: e.venue,
+        mode: e.mode,
+      })),
     emails: (emails || []).map((em) => ({
       id: em.id,
       subject: em.subject,

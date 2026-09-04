@@ -75,21 +75,32 @@ export default async function CalendarPage() {
   const calendarEvents: CalendarEvent[] = [];
 
   if (events) {
+    const now = Date.now();
     for (const evt of events) {
       const status = appStatusMap.get(evt.company_id) || 'not_applied';
       const isManual = (evt as any).manual_override;
 
-      // Exclude eliminated, opted-out, or not-applied companies unless manually added
-      if (['not_shortlisted', 'rejected', 'not_applied', 'withdrawn', 'declined'].includes(status) && !isManual) {
-        continue;
-      }
-
-      // Only show events up to the user's current pipeline stage
-      if (!isManual) {
-        const maxStage = STATUS_MAX_STAGE[status] ?? 2;
-        const evtStage = EVENT_STAGE[evt.event_type] ?? 2;
-        if (evtStage > maxStage) {
+      // Registration Deadline rule:
+      // Keep it in upcoming events/calendar only if the deadline is still in the future and you haven't applied yet
+      if (evt.event_type === 'registration_deadline') {
+        const isFuture = evt.start_time ? new Date(evt.start_time).getTime() > now : false;
+        const hasApplied = status !== 'not_applied' && status !== 'unknown';
+        if (!isFuture || hasApplied) {
           continue;
+        }
+      } else {
+        // Exclude eliminated, opted-out, or not-applied companies unless manually added
+        if (['not_shortlisted', 'rejected', 'not_applied', 'withdrawn', 'declined'].includes(status) && !isManual) {
+          continue;
+        }
+
+        // Only show events up to the user's current pipeline stage
+        if (!isManual) {
+          const maxStage = STATUS_MAX_STAGE[status] ?? 2;
+          const evtStage = EVENT_STAGE[evt.event_type] ?? 2;
+          if (evtStage > maxStage) {
+            continue;
+          }
         }
       }
 

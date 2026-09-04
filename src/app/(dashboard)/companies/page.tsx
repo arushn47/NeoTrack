@@ -50,19 +50,24 @@ export default async function CompaniesPage() {
   const appMap = new Map((applications || []).map((app) => [app.company_id, app]));
   const nowIso = new Date().toISOString();
   const eventMap = new Map();
+  const allEventsByCompany = new Map<string, typeof events>();
   if (events) {
     for (const event of events) {
+      const app = appMap.get(event.company_id);
+      const isRegistered = app && app.status !== 'not_applied';
+      const isPast = event.start_time && event.start_time < nowIso;
+
+      // Filter registration deadlines: hide if already registered or in the past
+      if (event.event_type === 'registration_deadline' && (isRegistered || isPast)) {
+        continue;
+      }
+
       if (event.start_time && event.start_time >= nowIso) {
         if (!eventMap.has(event.company_id)) {
           eventMap.set(event.company_id, event);
         }
       }
-    }
-  }
 
-  const allEventsByCompany = new Map<string, typeof events>();
-  if (events) {
-    for (const event of events) {
       const existing = allEventsByCompany.get(event.company_id) || [];
       existing.push(event);
       allEventsByCompany.set(event.company_id, existing);

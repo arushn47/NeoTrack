@@ -57,21 +57,66 @@ export default function StageProgressBar({
   // 1. Handle Negative Terminal States
   if (status === 'withdrawn' || status === 'declined') {
     return (
-      <div className={cn('p-3 rounded-2xl bg-zinc-900/60 border border-zinc-800 text-xs flex items-center justify-between', className)}>
-        <span className="flex items-center gap-2 font-semibold text-zinc-400">
-          <LogOut className="w-4 h-4 text-zinc-500 flex-shrink-0" />
-          Opted Out / Declined
-        </span>
-        {interactive && (
-          <span className="text-[11px] text-indigo-400 font-medium cursor-pointer hover:underline" onClick={() => onStageClick?.(0, 'applied', 'applied')}>
-            Click to re-activate stage ›
+      <div className={cn('space-y-2.5 py-1', className)}>
+        {/* Visual Stepper Bar with Withdrawn/Declined Indicator */}
+        <div className="relative flex items-center justify-between px-1">
+          <div className="absolute top-1/2 left-3 right-3 h-1 -translate-y-1/2 bg-zinc-800/80 rounded-full z-0" />
+
+          {STAGES.map((stage, idx) => {
+            const isFirst = idx === 0;
+
+            return (
+              <div
+                key={stage.id}
+                onClick={() => isFirst && interactive && onStageClick?.(0, 'applied', 'applied')}
+                className={cn(
+                  'relative z-10 flex flex-col items-center group',
+                  isFirst && interactive && 'cursor-pointer select-none'
+                )}
+                title={isFirst && interactive ? 'Click to re-activate stage' : stage.label}
+              >
+                <div
+                  className={cn(
+                    'w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold transition-all duration-200',
+                    isFirst
+                      ? 'bg-zinc-800 text-zinc-400 border border-zinc-700 ring-2 ring-zinc-700/30'
+                      : 'bg-[#181824] text-zinc-600 border border-zinc-800'
+                  )}
+                >
+                  {isFirst ? '⊘' : idx + 1}
+                </div>
+                <span
+                  className={cn(
+                    'text-[9px] font-semibold mt-1 whitespace-nowrap transition-colors',
+                    isFirst ? 'text-zinc-400 font-medium' : 'text-zinc-600'
+                  )}
+                >
+                  {stage.label}
+                </span>
+              </div>
+            );
+          })}
+        </div>
+
+        {/* Stage Subtitle */}
+        <div className="flex items-center justify-between text-[11px] pt-1.5 border-t border-zinc-800/80">
+          <span className="flex items-center gap-1.5 font-semibold text-zinc-400">
+            <LogOut className="w-3.5 h-3.5 text-zinc-500 flex-shrink-0" />
+            Opted Out / Declined
           </span>
-        )}
-        {!interactive && (
-          <span className="text-[11px] text-zinc-500 font-medium">
-            Drive Inactive
-          </span>
-        )}
+          {interactive ? (
+            <span
+              className="text-[11px] text-indigo-400 font-medium cursor-pointer hover:underline"
+              onClick={() => onStageClick?.(0, 'applied', 'applied')}
+            >
+              Click to re-activate stage ›
+            </span>
+          ) : (
+            <span className="text-[11px] text-zinc-500 font-medium">
+              Drive Inactive
+            </span>
+          )}
+        </div>
       </div>
     );
   }
@@ -104,9 +149,15 @@ export default function StageProgressBar({
         eliminatedText = 'Wrote Test · Did Not Qualify';
       }
     } else {
-      furthestIdx = 0; // Passed applied only
-      eliminatedIdx = 1; // Screened out at shortlist / PPT round
-      eliminatedText = 'Out at Shortlist Round';
+      if (pptEvent) {
+        furthestIdx = 1; // Passed applied & attended PPT
+        eliminatedIdx = 2; // Eliminated before online test (not shortlisted for test)
+        eliminatedText = 'Not Shortlisted for Test';
+      } else {
+        furthestIdx = 0; // Passed applied only
+        eliminatedIdx = 1; // Screened out at shortlist / PPT round
+        eliminatedText = 'Out at Shortlist Round';
+      }
     }
 
     return (
@@ -174,20 +225,65 @@ export default function StageProgressBar({
 
   if (status === 'not_applied') {
     return (
-      <div className={cn('p-3 rounded-2xl bg-zinc-900/60 border border-zinc-800 text-xs flex items-center justify-between', className)}>
-        <span className="flex items-center gap-2 font-semibold text-zinc-400">
-          <Presentation className="w-4 h-4 text-zinc-500 flex-shrink-0" />
-          Drive Announced
-        </span>
-        {interactive ? (
-          <span className="text-[11px] text-indigo-400 font-medium cursor-pointer hover:underline" onClick={() => onStageClick?.(0, 'applied', 'applied')}>
-            Click to mark Applied ›
+      <div className={cn('space-y-2.5 py-1', className)}>
+        {/* Visual Stepper Bar for Not Yet Applied */}
+        <div className="relative flex items-center justify-between px-1">
+          <div className="absolute top-1/2 left-3 right-3 h-1 -translate-y-1/2 bg-zinc-800/80 rounded-full z-0" />
+
+          {STAGES.map((stage, idx) => {
+            const isFirst = idx === 0;
+
+            return (
+              <div
+                key={stage.id}
+                onClick={() => isFirst && interactive && onStageClick?.(0, 'applied', 'applied')}
+                className={cn(
+                  'relative z-10 flex flex-col items-center group',
+                  isFirst && interactive && 'cursor-pointer select-none'
+                )}
+                title={isFirst && interactive ? 'Click to mark Applied' : stage.label}
+              >
+                <div
+                  className={cn(
+                    'w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold transition-all duration-200',
+                    'bg-[#181824] text-zinc-500 border border-zinc-800',
+                    isFirst && interactive && 'group-hover:border-indigo-500 group-hover:text-indigo-400'
+                  )}
+                >
+                  {idx + 1}
+                </div>
+                <span
+                  className={cn(
+                    'text-[9px] font-semibold mt-1 whitespace-nowrap transition-colors text-zinc-500',
+                    isFirst && interactive && 'group-hover:text-indigo-300'
+                  )}
+                >
+                  {stage.label}
+                </span>
+              </div>
+            );
+          })}
+        </div>
+
+        {/* Stage Subtitle */}
+        <div className="flex items-center justify-between text-[11px] pt-1.5 border-t border-zinc-800/80">
+          <span className="flex items-center gap-1.5 font-semibold text-zinc-400">
+            <Presentation className="w-3.5 h-3.5 text-zinc-500 flex-shrink-0" />
+            Drive Announced
           </span>
-        ) : (
-          <span className="text-[11px] text-zinc-500 font-medium">
-            Not Applied
-          </span>
-        )}
+          {interactive ? (
+            <span
+              className="text-[11px] text-indigo-400 font-medium cursor-pointer hover:underline"
+              onClick={() => onStageClick?.(0, 'applied', 'applied')}
+            >
+              Click to mark Applied ›
+            </span>
+          ) : (
+            <span className="text-[11px] text-zinc-500 font-medium">
+              Not Registered
+            </span>
+          )}
+        </div>
       </div>
     );
   }

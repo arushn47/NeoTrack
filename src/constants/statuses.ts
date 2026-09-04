@@ -46,7 +46,7 @@ export const STATUS_COLORS: Record<ApplicationStatus, { bg: string; text: string
   rejected:             { bg: 'bg-red-500/10',     text: 'text-red-400',     dot: 'bg-red-400',     border: 'border-red-500/30' },
   not_shortlisted:      { bg: 'bg-rose-500/10',    text: 'text-rose-400',    dot: 'bg-rose-400',    border: 'border-rose-500/30' },
   withdrawn:            { bg: 'bg-gray-500/10',    text: 'text-gray-400',    dot: 'bg-gray-400',    border: 'border-gray-500/30' },
-  declined:             { bg: 'bg-orange-500/10',  text: 'text-orange-400',  dot: 'bg-orange-400',  border: 'border-orange-500/30' },
+  declined:             { bg: 'bg-gray-500/10',    text: 'text-gray-400',    dot: 'bg-gray-400',    border: 'border-gray-500/30' },
   offer_received:       { bg: 'bg-yellow-500/15',  text: 'text-yellow-400',  dot: 'bg-yellow-400',  border: 'border-yellow-500/30' },
   unknown:              { bg: 'bg-zinc-500/10',    text: 'text-zinc-400',    dot: 'bg-zinc-400',    border: 'border-zinc-500/30' },
 };

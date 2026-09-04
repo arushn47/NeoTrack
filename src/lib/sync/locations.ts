@@ -14,14 +14,18 @@
  * while preserving distinct cities ("Bangalore, Mumbai and Gurgaon" -> ["Bangalore", "Mumbai", "Gurgaon"]).
  */
 export function parseAssignedLocations(rawLocation: string | null | undefined): string[] {
-  if (!rawLocation) return ['Pan India / Remote'];
+  if (!rawLocation) return [];
 
   const trimmed = rawLocation.replace(/\s+/g, ' ').trim();
   if (
     !trimmed ||
-    /^(?:pan\s+india\s*\/?\s*remote|remote|pan\s+india|to\s+be\s+announced|tbd|tba)$/i.test(trimmed)
+    /^(?:to\s+be\s+announced|tbd|tba|not\s+(?:specified|mentioned))$/i.test(trimmed)
   ) {
-    return [trimmed || 'Pan India / Remote'];
+    return [];
+  }
+
+  if (/^(?:pan\s+india\s*\/?\s*remote|remote|pan\s+india)$/i.test(trimmed)) {
+    return [trimmed];
   }
 
   // 1. Split across major multi-city delimiters: ";", "|", or "/" (when not hybrid/remote)
@@ -73,5 +77,5 @@ export function parseAssignedLocations(rawLocation: string | null | undefined): 
     .map((loc) => loc.replace(/^[*,\.\s>\-]+/, '').replace(/[*,\.\s>\-]+$/, '').trim())
     .filter((loc) => loc.length > 0 && !/^\d+$/.test(loc));
 
-  return cleaned.length > 0 ? cleaned : ['Pan India / Remote'];
+  return cleaned;
 }

@@ -104,6 +104,15 @@ export default function CompanyDetailClient({ company }: CompanyDetailClientProp
     }
   }, [company.application?.status]);
 
+  const isRegistered = Boolean(company.application && company.application.status !== 'not_applied');
+  const visibleEvents = company.events.filter((evt) => {
+    if (evt.eventType === 'registration_deadline') {
+      const isPast = evt.startTime && new Date(evt.startTime).getTime() <= Date.now();
+      if (isRegistered || isPast) return false;
+    }
+    return true;
+  });
+
   const handleStatusChange = async (newStatus: string) => {
     setIsUpdating(true);
     setShowStatusMenu(false);
@@ -247,15 +256,15 @@ export default function CompanyDetailClient({ company }: CompanyDetailClientProp
 
         {/* Quick Metadata Bar */}
         {(() => {
-          const travelReq = company.application?.notes;
+          const notesStr = (company.application?.notes || '').toLowerCase();
           const driveModeDisplay =
-            travelReq === 'vellore'
+            notesStr.includes('vellore')
               ? '✈️ VIT Vellore'
-              : travelReq === 'chennai'
+              : notesStr.includes('chennai')
               ? '✈️ VIT Chennai'
-              : travelReq === 'bhopal_lab'
+              : notesStr.includes('bhopal_lab')
               ? '🏫 Bhopal Labs'
-              : travelReq === 'online'
+              : notesStr.includes('online')
               ? '💻 Online'
               : 'To be announced';
 
@@ -263,7 +272,7 @@ export default function CompanyDetailClient({ company }: CompanyDetailClientProp
           const rawLocation = company.application?.location;
           let cleanedLoc = rawLocation ? rawLocation.replace(/<[^>]+>/g, ' ').replace(/^[*,\.\s>\-]+/, '').replace(/[*,\.\s>\-]+$/, '').trim() : null;
           if (cleanedLoc) {
-            cleanedLoc = cleanedLoc.replace(/\s*(?:All\s+the|All\s+interested|Placement\s+Office|On\s+(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)|Students\s+with|Registered\s+students|Registration|Note|Eligibility|Skills|Service|Work\s+Mode|Joining|Economy|Round\s+Trip|Depending\s+on|Below\s+attachment|Job\s+Description|JD).*$/i, '');
+            cleanedLoc = cleanedLoc.replace(/\s*(?:All\s+the|All\s+interested|Placement\s+Office|On\s+(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)|Students\s+with|Registered\s+students|Registration|Note|Eligibility|Skills|Service|Work\s+Mode|Joining|Economy|Round\s+Trip|Depending\s+on|Below\s+attachment|Job\s+Description|JD|You\s+can|Write\s+from|Forwarded|Queries|LC\s*\d|PRP|SJT|Anna|Lab|Hall|Venue|---).*$/i, '');
             cleanedLoc = cleanedLoc.replace(/\b(?:internship|placement|drive|hiring|offer|job|role|any\s+honeywell\s+site)\b/gi, '');
             cleanedLoc = cleanedLoc.replace(/^\s*(?:\(Core\):?|Core\):?)\s*/i, '');
             cleanedLoc = cleanedLoc.replace(/[\.\,\:\-\(\)\–—]+$/, '').replace(/^[\.\,\:\-\(\)\–—]+/, '').replace(/\s+/g, ' ').trim();
@@ -271,15 +280,15 @@ export default function CompanyDetailClient({ company }: CompanyDetailClientProp
             if (
               !cleanedLoc ||
               cleanedLoc.length < 2 ||
-              /please find|mail with|nonsense|come at|assistance|applicable|candidate|round\s+\d+|results|service agreement|forwarded message|candidates list|as per business|interested students|shortlisted stu|economy class|round\s+trip|placement office|online|^[>,\.\*\s]+$/i.test(cleanedLoc) ||
+              /\byou\b|\bwe\b|\bi\b|\bcan\b|\bwrite\b|\bwant\b|\bfrom\s+(?:lc|sjt|prp|lab|home|hostel)\b|\bqueries\b|---|forwarded|own\s+location|\b(?:lc|sjt|prp|tt|mb|cb|smv)\s*\d+\b|please find|mail with|nonsense|come at|assistance|applicable|candidate|round\s+\d+|results|service agreement|forwarded message|candidates list|as per business|interested students|shortlisted stu|economy class|round\s+trip|placement office|online|^[>,\.\*\s]+$/i.test(cleanedLoc) ||
               /^(?:vit\s+)?(?:vellore|chennai|bhopal(?:\s+labs)?)$/i.test(cleanedLoc.trim())
             ) {
               cleanedLoc = null;
             }
           }
 
-          const workLocationDisplay = cleanedLoc || 'Pan India / Remote';
-          const locationItems = parseAssignedLocations(workLocationDisplay);
+          const workLocationDisplay = cleanedLoc || 'Not specified';
+          const locationItems = cleanedLoc ? parseAssignedLocations(cleanedLoc) : [];
           const isMultiLocation = locationItems.length > 1;
 
           return (
@@ -293,7 +302,7 @@ export default function CompanyDetailClient({ company }: CompanyDetailClientProp
 
               <div className="p-3.5 bg-zinc-950/60 rounded-2xl border border-zinc-800/80">
                 <span className="text-[10px] text-zinc-500 font-bold uppercase tracking-wider block">Stipend</span>
-                <span className="text-sm font-bold text-zinc-200 mt-1 block truncate">
+                <span className={cn('text-sm mt-1 block truncate', company.application?.stipend ? 'font-extrabold text-emerald-400' : 'font-bold text-zinc-500')}>
                   {company.application?.stipend ? company.application.stipend.replace(/\*/g, '').trim() : 'Not specified'}
                 </span>
               </div>
@@ -321,11 +330,11 @@ export default function CompanyDetailClient({ company }: CompanyDetailClientProp
               <div
                 className={cn(
                   'p-3.5 bg-zinc-950/60 rounded-2xl border border-zinc-800/80 relative transition-all',
-                  isMultiLocation || workLocationDisplay.length > 18
+                  isMultiLocation || (cleanedLoc && workLocationDisplay.length > 18)
                     ? 'group hover:border-indigo-500/40 hover:bg-zinc-900/60 cursor-pointer'
                     : ''
                 )}
-                title={workLocationDisplay}
+                title={cleanedLoc ? workLocationDisplay : undefined}
               >
                 <div className="flex items-center justify-between">
                   <span className="text-[10px] text-zinc-500 font-bold uppercase tracking-wider block">
@@ -337,12 +346,12 @@ export default function CompanyDetailClient({ company }: CompanyDetailClientProp
                     </span>
                   )}
                 </div>
-                <span className="text-sm font-bold text-zinc-200 mt-1 block truncate">
+                <span className={cn('text-sm mt-1 block truncate', cleanedLoc ? 'font-bold text-zinc-200' : 'font-bold text-zinc-500')}>
                   {workLocationDisplay}
                 </span>
 
                 {/* Floating Tooltip with full locations pill list on hover */}
-                {(isMultiLocation || workLocationDisplay.length > 18) && (
+                {cleanedLoc && (isMultiLocation || workLocationDisplay.length > 18) && (
                   <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-max max-w-[280px] p-3 rounded-2xl bg-[#12121e]/95 backdrop-blur-2xl border border-indigo-500/30 shadow-2xl shadow-black/90 pointer-events-none opacity-0 group-hover:opacity-100 group-hover:pointer-events-auto transition-all duration-200 z-50 translate-y-1 group-hover:translate-y-0">
                     <div className="flex items-center gap-1.5 text-[11px] font-bold text-indigo-300 mb-2">
                       <MapPin className="w-3.5 h-3.5 text-indigo-400 shrink-0" />
@@ -418,7 +427,7 @@ export default function CompanyDetailClient({ company }: CompanyDetailClientProp
           )}
         >
           <Calendar className="w-4 h-4" />
-          Placement Timeline & Events ({company.events.length})
+          Placement Timeline & Events ({visibleEvents.length})
         </button>
 
         <button
@@ -438,7 +447,7 @@ export default function CompanyDetailClient({ company }: CompanyDetailClientProp
       {/* Tab Content: Timeline */}
       {activeTab === 'timeline' && (
         <div className="space-y-4">
-          {company.events.length === 0 && company.emails.length === 0 ? (
+          {visibleEvents.length === 0 && company.emails.length === 0 ? (
             <div className="p-12 text-center bg-[#101018]/90 border border-zinc-800/80 rounded-3xl">
               <Calendar className="w-10 h-10 text-zinc-600 mx-auto mb-2" />
               <p className="text-sm text-zinc-300 font-semibold">No timeline events detected yet</p>
@@ -448,7 +457,7 @@ export default function CompanyDetailClient({ company }: CompanyDetailClientProp
             </div>
           ) : (
             <div className="relative pl-6 border-l-2 border-zinc-800 space-y-6 ml-3 py-2">
-              {company.events.map((evt) => (
+              {visibleEvents.map((evt) => (
                 <div key={evt.id} className="relative group">
                   {/* Timeline dot */}
                   <div className="absolute -left-[31px] top-1.5 w-4 h-4 rounded-full bg-indigo-500 border-4 border-[#0a0a10] ring-2 ring-indigo-500/30" />

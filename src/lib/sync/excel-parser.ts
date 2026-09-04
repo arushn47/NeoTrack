@@ -63,7 +63,13 @@ export async function scanExcelAttachmentsForNeoId(
   messageId: string,
   attachments: ParsedAttachment[],
   userNeoId: string | null,
-  userEmail: string
+  userEmail: string,
+  /**
+   * True when the email subject/body itself announces a shortlist (e.g. "Shortlisted Candidates",
+   * "Test is Scheduled"). In this context, even Excel files without "shortlist" in their filename
+   * should be treated as actual shortlists — CDC doesn't always name files consistently.
+   */
+  isShortlistContext: boolean = false
 ): Promise<ExcelMatchResult | null> {
   const excelAttachments = attachments.filter((att) =>
     /\.(xlsx|xls|csv)$/i.test(att.filename)
@@ -83,6 +89,12 @@ export async function scanExcelAttachmentsForNeoId(
   const regMatch = userEmail.match(/([0-9]{2}[a-z]{3}[0-9]{4,5})/i);
   if (regMatch && regMatch[1]) {
     searchTokens.push(regMatch[1].toUpperCase().trim());
+  }
+
+  // Include user email address
+  if (userEmail && userEmail.includes('@')) {
+    searchTokens.push(userEmail.toLowerCase().trim());
+    searchTokens.push(userEmail.toUpperCase().trim());
   }
 
   if (searchTokens.length === 0) {
@@ -127,6 +139,13 @@ export async function scanExcelAttachmentsForNeoId(
             }
           }
 
+          // A file is an actual shortlist / participant list if:
+          // (a) its filename says "shortlist", OR
+          // (b) the email itself announces a shortlist or scheduled round (test, interview, assessment, PPT)
+          // CRITICAL: An applied / opt-in list is NEVER an actual shortlist, even if attached to a test/round announcement!
+          const isActualShortlist =
+            fileType === 'shortlist' || (isShortlistContext && fileType !== 'applied_list');
+
           const result: ExcelMatchResult = {
             matched: true,
             filename: att.filename,
@@ -135,10 +154,10 @@ export async function scanExcelAttachmentsForNeoId(
               match.detectedIdColumnName ? ` [${match.detectedIdColumnName}]` : ''
             }${roomOrVenue ? ` - ${roomOrVenue}` : ''}`,
             venueOrRoom: roomOrVenue,
-            isActualShortlist: fileType === 'shortlist',
+            isActualShortlist,
           };
 
-          if (fileType === 'shortlist') {
+          if (result.isActualShortlist) {
             // Best possible result (confirmed candidate shortlist) — return immediately
             return result;
           } else {

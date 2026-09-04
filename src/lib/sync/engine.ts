@@ -11,6 +11,7 @@ import {
   cleanCompanyName,
   extractCompanyName,
   normalizeCompanyName,
+  ENGLISH_STOPWORDS,
   type ClassificationResult,
 } from '@/lib/sync/classifier';
 import { extractDriveNumber } from '@/lib/sync/events';
@@ -227,12 +228,37 @@ export async function runSync(
       progress.processedMessages = 0;
       onProgress?.(progress);
 
-      // 3. Process each NEW message in controlled concurrency batches (Worker pool: 5)
+      // 3. Process each NEW message in controlled concurrency batches
       progress.phase = 'processing';
       onProgress?.(progress);
 
       const isPersonal = account.account_type === 'personal';
-      const BATCH_SIZE = 5;
+      // Use smaller batches on initial syncs (no history_id = thousands of messages)
+      const isInitialSync = !account.last_history_id;
+      const BATCH_SIZE = isInitialSync ? 3 : 5;
+      // Inter-batch delay: throttle during large initial syncs to avoid quota exhaustion
+      const INTER_BATCH_DELAY_MS = isInitialSync ? 500 : 0;
+
+      // Retry a Gmail API call with exponential backoff on quota/rate-limit errors
+      async function withQuotaBackoff<T>(fn: () => Promise<T>, maxRetries = 3): Promise<T> {
+        const BACKOFF_DELAYS = [10_000, 30_000, 90_000]; // 10s, 30s, 90s
+        for (let attempt = 0; attempt <= maxRetries; attempt++) {
+          try {
+            return await fn();
+          } catch (err: unknown) {
+            const msg = err instanceof Error ? err.message : String(err);
+            const isQuota = /quota exceeded|rate.?limit|units.?per.?minute|rateLimitExceeded/i.test(msg);
+            if (isQuota && attempt < maxRetries) {
+              const delay = BACKOFF_DELAYS[attempt] ?? 90_000;
+              console.warn(`Gmail quota hit — backing off ${delay / 1000}s (attempt ${attempt + 1}/${maxRetries})`);
+              await new Promise((r) => setTimeout(r, delay));
+              continue;
+            }
+            throw err;
+          }
+        }
+        throw new Error('withQuotaBackoff: unreachable');
+      }
 
       // Known NeoPAT/CDC senders that always pass (no keyword check needed)
       const TRUSTED_PLACEMENT_SENDERS = [
@@ -255,11 +281,9 @@ export async function runSync(
 
         for (const msgId of batch) {
             try {
-              // Stage 1: Cheap metadata inspection — filter out non-placement emails
-              // For BOTH personal and college accounts during incremental sync (history.list),
-              // we must verify each email is placement-relevant before full processing.
+              // Stage 1: Cheap metadata inspection
               let shouldFetchFull = true;
-              const metadata = await fetchMessageMetadata(gmail, msgId);
+              const metadata = await withQuotaBackoff(() => fetchMessageMetadata(gmail, msgId));
               const subj = metadata.subject.toLowerCase();
               const senderLower = metadata.senderEmail.toLowerCase();
 
@@ -287,7 +311,7 @@ export async function runSync(
               }
 
               // Stage 2: Full message detail & attachments
-              const parsedEmail = await fetchMessageDetail(gmail, msgId);
+              const parsedEmail = await withQuotaBackoff(() => fetchMessageDetail(gmail, msgId));
               progress.currentSubject = parsedEmail.subject.slice(0, 80);
 
               const fullEmailText = `${parsedEmail.subject}\n${parsedEmail.bodyPlain || parsedEmail.bodySnippet || ''}`;
@@ -452,7 +476,13 @@ export async function runSync(
                   subject: parsedEmail.subject,
                   sender: parsedEmail.sender,
                   received_at: parsedEmail.receivedAt.toISOString(),
-                  body_snippet: (parsedEmail.bodyPlain || parsedEmail.bodySnippet || '').slice(0, 10000),
+                  // College CDC circulars contain full JD tables (role, CTC, eligibility) deep in HTML bodies.
+                  // Store up to 50,000 chars for trusted college senders so extractJobDetails() reaches the CTC.
+                  // Personal NeoPAT emails are short plain-text — 10,000 is sufficient.
+                  body_snippet: (parsedEmail.bodyPlain || parsedEmail.bodySnippet || '').slice(
+                    0,
+                    !isPersonal && isTrustedSender(parsedEmail.senderEmail || parsedEmail.sender) ? 50000 : 10000
+                  ),
                   classification: classification.classification,
                   is_processed: true,
                   is_relevant: classification.classification !== 'irrelevant',
@@ -498,16 +528,26 @@ export async function runSync(
               accountResult.emailsProcessed++;
               result.totalEmailsProcessed++;
             } catch (emailErr) {
-              const errMsg =
-                emailErr instanceof Error ? emailErr.message : String(emailErr);
-              console.error(`Error processing message ${msgId}:`, errMsg);
-              progress.errors.push(`Error processing message: ${errMsg.slice(0, 80)}`);
-              result.errors.push(errMsg);
+              const errMsg = emailErr instanceof Error ? emailErr.message : String(emailErr);
+              // Don't surface quota errors as user-facing failures — they were already retried
+              const isQuota = /quota exceeded|rate.?limit|units.?per.?minute/i.test(errMsg);
+              if (!isQuota) {
+                console.error(`Error processing message ${msgId}:`, errMsg);
+                progress.errors.push(`Error processing message: ${errMsg.slice(0, 80)}`);
+                result.errors.push(errMsg);
+              } else {
+                console.warn(`Quota error skipping message ${msgId} after all retries`);
+              }
             }
         }
 
         progress.processedMessages = Math.min(i + batch.length, chronoSortedMsgIds.length);
         onProgress?.(progress);
+
+        // Throttle between batches on large initial syncs to stay within Gmail quota
+        if (INTER_BATCH_DELAY_MS > 0 && i + BATCH_SIZE < chronoSortedMsgIds.length) {
+          await new Promise((r) => setTimeout(r, INTER_BATCH_DELAY_MS));
+        }
       }
 
       // 4. Update last_sync_at and last_history_id
@@ -534,51 +574,127 @@ export async function runSync(
     result.accounts.push(accountResult);
   }
 
-  // 5. If new companies were created, reconcile any unlinked college circulars in DB
-  if (result.newCompanies > 0) {
-    try {
-      const { data: unlinkedEmails } = await supabase
-        .from('emails')
-        .select('id, subject, sender, body_snippet, received_at')
-        .eq('user_id', userId)
-        .is('company_id', null);
+  // 5. Unconditional circular reconciliation: reconcile unlinked college circulars against user companies
+  try {
+    const { data: unlinkedEmails } = await supabase
+      .from('emails')
+      .select('id, thread_id, subject, sender, body_snippet, received_at')
+      .eq('user_id', userId)
+      .is('company_id', null);
 
-      if (unlinkedEmails && unlinkedEmails.length > 0) {
-        const { data: allUserComps } = await supabase
-          .from('companies')
-          .select('id, name, aliases')
-          .eq('user_id', userId);
+    if (unlinkedEmails && unlinkedEmails.length > 0) {
+      const { data: allUserComps } = await supabase
+        .from('companies')
+        .select('id, name, aliases')
+        .eq('user_id', userId);
 
-        if (allUserComps && allUserComps.length > 0) {
-          for (const email of unlinkedEmails) {
-            const compName = extractCompanyName(
-              email.subject || '',
-              email.sender || '',
-              email.body_snippet || ''
-            );
-            if (compName) {
-              const norm = normalizeCompanyName(compName).toLowerCase();
-              const matched = allUserComps.find((c) => {
-                const cLower = c.name.toLowerCase();
-                return (
-                  cLower === norm ||
-                  (c.aliases || []).includes(norm) ||
-                  isFuzzyCompanyMatch(c.name, compName)
-                );
-              });
-              if (matched) {
-                await supabase
-                  .from('emails')
-                  .update({ company_id: matched.id, is_relevant: true })
-                  .eq('id', email.id);
-              }
+      if (allUserComps && allUserComps.length > 0) {
+        // A. Build Thread-to-Company map from confident, already-linked emails
+        // Directionality guard: Only inherit if a thread has EXACTLY ONE unique company_id
+        const { data: threadLinkedEmails } = await supabase
+          .from('emails')
+          .select('thread_id, company_id')
+          .eq('user_id', userId)
+          .not('thread_id', 'is', null)
+          .not('company_id', 'is', null);
+
+        const threadCompanyMap = new Map<string, Set<string>>();
+        for (const te of threadLinkedEmails || []) {
+          if (te.thread_id && te.company_id) {
+            const set = threadCompanyMap.get(te.thread_id) || new Set<string>();
+            set.add(te.company_id);
+            threadCompanyMap.set(te.thread_id, set);
+          }
+        }
+
+        // B. Build NeoPAT registration timeline map for timing correlation (±24h window)
+        const { data: neoPatEmails } = await supabase
+          .from('emails')
+          .select('company_id, received_at')
+          .eq('user_id', userId)
+          .not('company_id', 'is', null)
+          .ilike('sender', '%noreply.cdcinfo@vitstudent.ac.in%');
+
+        const neoPatTimelines = (neoPatEmails || []).map((ne) => {
+          const comp = allUserComps.find((c) => c.id === ne.company_id);
+          return {
+            companyId: ne.company_id as string,
+            companyName: comp ? comp.name : '',
+            time: new Date(ne.received_at).getTime(),
+          };
+        }).filter((n) => n.companyName.length > 0);
+
+        const WINDOW_MS = 24 * 60 * 60 * 1000; // ±24h window
+
+        for (const email of unlinkedEmails) {
+          let matchedCompanyId: string | null = null;
+
+          // 1. Direct Company Name Extraction Match
+          const compName = extractCompanyName(
+            email.subject || '',
+            email.sender || '',
+            email.body_snippet || '',
+            email.received_at ? new Date(email.received_at) : undefined
+          );
+
+          if (compName) {
+            const norm = normalizeCompanyName(compName).toLowerCase();
+            const matched = allUserComps.find((c) => {
+              const cLower = c.name.toLowerCase();
+              return (
+                cLower === norm ||
+                (c.aliases || []).includes(norm) ||
+                isFuzzyCompanyMatch(c.name, compName)
+              );
+            });
+            if (matched) {
+              matchedCompanyId = matched.id;
+            }
+          }
+
+          // 2. Thread Inheritance (Directionality: only if thread has EXACTLY 1 unique company)
+          if (!matchedCompanyId && email.thread_id) {
+            const candidateSet = threadCompanyMap.get(email.thread_id);
+            if (candidateSet && candidateSet.size === 1) {
+              matchedCompanyId = Array.from(candidateSet)[0];
+            }
+          }
+
+          // 3. Same-Day Timing Correlation (Unambiguous only: strictly 1 candidate)
+          // Directionality guard: NEVER hijack emails that already have an extracted company name (e.g. Divum, Danfoss)
+          // and ONLY match against email subject, NEVER against body_snippet (which contains random branch names & course terms).
+          if (!matchedCompanyId && !compName && email.received_at) {
+            const emailTime = new Date(email.received_at).getTime();
+            const candidates = neoPatTimelines.filter((n) => {
+              if (Math.abs(n.time - emailTime) > WINDOW_MS) return false;
+              return isFuzzyCompanyMatch(n.companyName, email.subject || '');
+            });
+
+            const uniqueCandidates = Array.from(new Set(candidates.map((c) => c.companyId)));
+            if (uniqueCandidates.length === 1) {
+              matchedCompanyId = uniqueCandidates[0];
+            }
+            // If > 1 candidates, ambiguous: do not guess!
+          }
+
+          if (matchedCompanyId) {
+            await supabase
+              .from('emails')
+              .update({ company_id: matchedCompanyId, is_relevant: true })
+              .eq('id', email.id);
+
+            // Register newly linked email to thread map for downstream emails in same pass
+            if (email.thread_id) {
+              const set = threadCompanyMap.get(email.thread_id) || new Set<string>();
+              set.add(matchedCompanyId);
+              threadCompanyMap.set(email.thread_id, set);
             }
           }
         }
       }
-    } catch (reconcileErr) {
-      console.warn('Post-sync circular reconciliation non-critical error:', reconcileErr);
     }
+  } catch (reconcileErr) {
+    console.warn('Post-sync circular reconciliation non-critical error:', reconcileErr);
   }
 
   return result;
@@ -596,6 +712,8 @@ const GENERIC_MATCH_TOKENS = new Set([
   'super', 'dream', 'regular', 'core', 'internship', 'placement', 'drive',
   'finance', 'batch', '2026', '2027', '2028', 'urgent', 'extended', 'deadline',
   'update', 'updated', 'campus', 'hiring', 'recruitment', 'talk', 'test',
+  'intelligence', 'intelligent', 'artificial', 'hardware',
+  ...ENGLISH_STOPWORDS,
 ]);
 
 /**
@@ -606,8 +724,8 @@ export function isFuzzyCompanyMatch(compName: string, targetName: string): boole
   const cLower = compName.toLowerCase().trim();
   const tLower = targetName.toLowerCase().trim();
 
-  // Guard: Never merge distinct role tracks or divisions (SDET, SRE, SAP, GDS, Aerospace) with base company or each other
-  const trackTokens = ['sdet', 'sre', 'sap', 'gds', 'aerospace'];
+  // Guard: Never merge distinct role tracks or divisions (SDET, SRE, SAP, GDS, Aerospace, Solutions Lab, Technologies) with base company or each other
+  const trackTokens = ['sdet', 'sre', 'sap', 'gds', 'aerospace', 'solutions lab', 'technologies'];
   for (const tok of trackTokens) {
     if (
       (cLower.includes(tok) && !tLower.includes(tok)) ||
@@ -633,13 +751,18 @@ export function isFuzzyCompanyMatch(compName: string, targetName: string): boole
     return false;
   }
 
+  const tokenMatches = (a: string, b: string) => {
+    if (a === b) return true;
+    // Allow minor stem variations (e.g. plural s, es) but strictly limit length difference to <= 2
+    if (a.length >= 5 && b.length >= 5 && (a.startsWith(b) || b.startsWith(a))) {
+      return Math.abs(a.length - b.length) <= 2;
+    }
+    return false;
+  };
+
   // Match if all distinctive tokens of target exist in comp, or vice versa
-  const allTargetInComp = tTokens.every((t) =>
-    cTokens.some((c) => c === t || (c.length >= 5 && t.length >= 5 && (c.startsWith(t) || t.startsWith(c))))
-  );
-  const allCompInTarget = cTokens.every((c) =>
-    tTokens.some((t) => c === t || (c.length >= 5 && t.length >= 5 && (c.startsWith(t) || t.startsWith(c))))
-  );
+  const allTargetInComp = tTokens.every((t) => cTokens.some((c) => tokenMatches(c, t)));
+  const allCompInTarget = cTokens.every((c) => tTokens.some((t) => tokenMatches(c, t)));
 
   return allTargetInComp || allCompInTarget;
 }

@@ -1,4 +1,5 @@
 import type { Metadata } from 'next';
+import { Suspense } from 'react';
 import { requireSession } from '@/lib/auth';
 import { createAdminClient } from '@/lib/supabase/admin';
 import SearchClient, { type SearchData } from './search-client';
@@ -79,5 +80,9 @@ export default async function SearchPage() {
     })),
   };
 
-  return <SearchClient data={searchData} />;
+  return (
+    <Suspense fallback={<div className="p-8 text-center text-zinc-500 font-mono text-sm">Loading search...</div>}>
+      <SearchClient data={searchData} />
+    </Suspense>
+  );
 }

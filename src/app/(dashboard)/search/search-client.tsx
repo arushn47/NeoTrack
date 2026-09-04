@@ -1,6 +1,7 @@
 'use client';
 
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import {
   Search as SearchIcon,
@@ -49,7 +50,61 @@ interface SearchClientProps {
 }
 
 export default function SearchClient({ data }: SearchClientProps) {
+  const router = useRouter();
+  const searchParams = useSearchParams();
   const [query, setQuery] = useState('');
+
+  // Restore query on mount from URL params or sessionStorage
+  useEffect(() => {
+    try {
+      const urlQ = searchParams.get('q') || searchParams.get('search');
+      const savedQ = urlQ !== null ? urlQ : sessionStorage.getItem('neotrack_global_search');
+      if (savedQ && !query) {
+        setQuery(savedQ);
+      }
+    } catch {}
+  }, []);
+
+  // Debounced URL and sessionStorage sync
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      try {
+        if (query.trim()) {
+          sessionStorage.setItem('neotrack_global_search', query.trim());
+        } else {
+          sessionStorage.removeItem('neotrack_global_search');
+        }
+      } catch {}
+
+      const params = new URLSearchParams(searchParams.toString());
+      const currentQ = params.get('q') || params.get('search') || '';
+      if (query.trim() !== currentQ.trim()) {
+        if (query.trim()) {
+          params.set('q', query.trim());
+          params.delete('search');
+        } else {
+          params.delete('q');
+          params.delete('search');
+        }
+        const qs = params.toString();
+        router.replace(qs ? `/search?${qs}` : '/search', { scroll: false });
+      }
+    }, 250);
+
+    return () => clearTimeout(timer);
+  }, [query]);
+
+  const handleClear = () => {
+    setQuery('');
+    try {
+      sessionStorage.removeItem('neotrack_global_search');
+    } catch {}
+    const params = new URLSearchParams(searchParams.toString());
+    params.delete('q');
+    params.delete('search');
+    const qs = params.toString();
+    router.replace(qs ? `/search?${qs}` : '/search', { scroll: false });
+  };
 
   const results = useMemo(() => {
     if (!query.trim()) {
@@ -122,7 +177,7 @@ export default function SearchClient({ data }: SearchClientProps) {
         />
         {query && (
           <button
-            onClick={() => setQuery('')}
+            onClick={handleClear}
             className="absolute right-4 top-1/2 -translate-y-1/2 p-1 rounded-lg text-zinc-500 hover:text-white hover:bg-zinc-800 transition-all"
           >
             <X className="w-4 h-4" />

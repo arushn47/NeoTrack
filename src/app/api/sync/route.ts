@@ -20,9 +20,16 @@ export async function POST() {
   const encoder = new TextEncoder();
   const stream = new ReadableStream({
     async start(controller) {
+      let isClosed = false;
       const sendEvent = (event: string, data: unknown) => {
-        const payload = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
-        controller.enqueue(encoder.encode(payload));
+        if (isClosed) return;
+        try {
+          const payload = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
+          controller.enqueue(encoder.encode(payload));
+        } catch {
+          // Stream was closed by the client (timeout / disconnect) — keep sync running silently
+          isClosed = true;
+        }
       };
 
       try {
