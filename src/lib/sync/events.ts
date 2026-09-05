@@ -525,6 +525,8 @@ function determineMode(
   text: string,
   venue: string | null
 ): 'online' | 'offline' | 'hybrid' | 'unknown' {
+  if (venue && /own\s*location/i.test(venue)) return 'online';
+  if (/own\s*location/i.test(text) && !/not\s+own\s+location/i.test(text)) return 'online';
   if (/not\s+online|physical|offline|in[\s-]person/i.test(text)) return 'offline';
   if (venue && /offline|lab|hall|room|building|prp|sjt|auditorium/i.test(venue)) return 'offline';
   if (venue && /online|virtual|teams|zoom|meet/i.test(venue)) return 'online';

@@ -137,9 +137,11 @@ export async function POST(request: Request) {
     }
 
     if (targetVenue) {
+      const isOwnLoc = /own\s*location/i.test(targetVenue) || /own\s*location/i.test(lowerMsg);
       const isOffline =
-        /offline|lab|campus|prp|sjt|hall|room|auditorium|physical/i.test(targetVenue) ||
-        /offline|physical|in[\s-]person/i.test(lowerMsg);
+        !isOwnLoc &&
+        (/offline|lab|campus|prp|sjt|hall|room|auditorium|physical/i.test(targetVenue) ||
+          /offline|physical|in[\s-]person/i.test(lowerMsg));
       const mode = isOffline ? 'offline' : 'online';
 
       // Find existing events for this company
@@ -322,9 +324,11 @@ export async function POST(request: Request) {
 
     const extractedVenue = extractVenue(message);
     const venue = extractedVenue || existingEvt?.venue || 'Campus / Offline';
+    const isOwnLoc = /own\s*location/i.test(venue) || /own\s*location/i.test(lowerMsg);
     const isOffline =
-      /offline|lab|campus|prp|sjt|hall|room|auditorium|audi|ab\s*\d+|physical/i.test(venue) ||
-      /offline|physical|in[\s-]person/i.test(lowerMsg);
+      !isOwnLoc &&
+      (/offline|lab|campus|prp|sjt|hall|room|auditorium|audi|ab\s*\d+|physical/i.test(venue) ||
+        /offline|physical|in[\s-]person/i.test(lowerMsg));
     const mode = isOffline ? 'offline' : 'online';
 
     let eventRecord;

@@ -375,15 +375,21 @@ export default function DashboardClient({
                             {EVENT_TYPE_LABELS[event.event_type as EventType]}
                           </span>
                         </div>
-                        <div className="flex flex-wrap items-center gap-1.5 text-xs text-zinc-400 mt-1">
-                          {cleanVenue && (
-                            <span className="truncate max-w-[220px] sm:max-w-xs">{cleanVenue}</span>
-                          )}
-                          {cleanVenue && event.mode && event.mode !== 'unknown' && <span>·</span>}
-                          {event.mode && event.mode !== 'unknown' && (
-                            <span className="capitalize">{event.mode}</span>
-                          )}
-                        </div>
+                        {(() => {
+                          const isOwnLoc = /own\s*location/i.test(cleanVenue || '');
+                          const displayMode = isOwnLoc ? 'online' : (event.mode && event.mode !== 'unknown' ? event.mode : null);
+                          return (
+                            <div className="flex flex-wrap items-center gap-1.5 text-xs text-zinc-400 mt-1">
+                              {cleanVenue && (
+                                <span className="truncate max-w-[220px] sm:max-w-xs">{cleanVenue}</span>
+                              )}
+                              {cleanVenue && displayMode && <span>·</span>}
+                              {displayMode && (
+                                <span className="capitalize">{displayMode}</span>
+                              )}
+                            </div>
+                          );
+                        })()}
                       </div>
                     </div>
 

@@ -111,12 +111,16 @@ function EventCard({ evt, onClose, showDate }: { evt: CalendarEvent; onClose?: (
             </span>
           )}
         </div>
-        {(evt.venue || evt.mode) && (
-          <div className="flex items-center gap-1.5 mt-1.5 text-[11px] text-zinc-400">
-            <MapPin className="w-3 h-3 text-emerald-400 flex-shrink-0" />
-            <span className="truncate">{[evt.venue, evt.mode !== 'unknown' ? evt.mode : null].filter(Boolean).join(' · ')}</span>
-          </div>
-        )}
+        {(evt.venue || evt.mode) && (() => {
+          const isOwnLoc = /own\s*location/i.test(evt.venue || '');
+          const displayMode = isOwnLoc ? 'online' : (evt.mode !== 'unknown' ? evt.mode : null);
+          return (
+            <div className="flex items-center gap-1.5 mt-1.5 text-[11px] text-zinc-400">
+              <MapPin className="w-3 h-3 text-emerald-400 flex-shrink-0" />
+              <span className="truncate">{[evt.venue, displayMode].filter(Boolean).join(' · ')}</span>
+            </div>
+          );
+        })()}
         <div className="flex items-center justify-between gap-2 mt-2.5 pt-2 border-t border-zinc-800/50">
           <Link
             href={`/companies/${evt.companyId}`}
