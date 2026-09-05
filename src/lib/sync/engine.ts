@@ -11,6 +11,7 @@ import {
   cleanCompanyName,
   extractCompanyName,
   normalizeCompanyName,
+  computeNormalizedKey,
   ENGLISH_STOPWORDS,
   type ClassificationResult,
 } from '@/lib/sync/classifier';
@@ -737,6 +738,17 @@ export function isFuzzyCompanyMatch(compName: string, targetName: string): boole
 
   if (cLower === tLower) return true;
 
+  // --- Step 1: Normalized-key match ---
+  // Strips legal words, removes spaces/punctuation, then compares.
+  // This catches: "goldmansachs" == "goldman sachs", "ExxonMobil" == "Exxon Mobil",
+  //               "HCL Tech" == "HCL Technologies", "Infosys BPM" == "Infosys"
+  const cKey = computeNormalizedKey(compName);
+  const tKey = computeNormalizedKey(targetName);
+  if (cKey.length >= 3 && tKey.length >= 3 && cKey === tKey) {
+    return true;
+  }
+
+  // --- Step 2: Distinctive token overlap (handles abbreviations / partial names) ---
   const cTokens = cLower
     .replace(/[^a-z0-9\s]/g, ' ')
     .split(/\s+/)
@@ -809,8 +821,11 @@ async function upsertCompany(
     return aliasMatch.id;
   }
 
-  // 3. Dynamic Token Match against existing user companies
-  // (e.g. "PlaySimple" in email matches existing "PlaySimple Games" registered from NeoPAT)
+  // 3. Dynamic matching against existing user companies.
+  // isFuzzyCompanyMatch checks (in order):
+  //   a. Track guard: never merge distinct tracks (SDET/SRE/Aerospace/Solutions Lab)
+  //   b. Normalized-key match: catches "goldmansachs" == "Goldman Sachs", "ExxonMobil" == "Exxon Mobil"
+  //   c. Token overlap: catches "PlaySimple" matching "PlaySimple Games"
   const { data: userCompanies } = await supabase
     .from('companies')
     .select('id, name')

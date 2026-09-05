@@ -10,6 +10,8 @@ export interface SyncCalendarEventParams {
   venue?: string | null;
   description?: string | null;
   mode?: string | null;
+  /** If provided, the existing GCal event will be updated in-place instead of searching/inserting. */
+  gcalEventId?: string | null;
 }
 
 /**
@@ -47,8 +49,10 @@ async function getCalendarOAuthClient(userId: string) {
 }
 
 /**
- * Pushes an event directly to the user's primary Google Calendar.
- * Automatically inserts or updates the event with IST timezone and phone/desktop popup reminders.
+ * Pushes an event to the user's primary Google Calendar.
+ * - If `gcalEventId` is provided, updates that specific event (no duplicates).
+ * - Otherwise falls back to a time-window fuzzy search, then inserts if no match found.
+ * Returns the canonical GCal event ID so callers can persist it.
  */
 export async function pushEventToGoogleCalendar(params: SyncCalendarEventParams): Promise<string | null> {
   try {
@@ -88,7 +92,27 @@ export async function pushEventToGoogleCalendar(params: SyncCalendarEventParams)
       },
     };
 
-    // Check for existing event around the same time window to update instead of duplicating
+    // --- Path 1: We have a stored GCal event ID — update directly, no search needed ---
+    if (params.gcalEventId) {
+      try {
+        const updateRes = await calendar.events.update({
+          calendarId: 'primary',
+          eventId: params.gcalEventId,
+          requestBody: eventPayload,
+        });
+        return updateRes.data.id || null;
+      } catch (updateErr: unknown) {
+        // If the event was manually deleted from GCal (404), fall through to insert
+        const status = (updateErr as { code?: number })?.code;
+        if (status !== 404 && status !== 410) {
+          console.error('Google Calendar update error:', updateErr);
+          return null;
+        }
+        // Event no longer exists — fall through to insert a fresh one
+      }
+    }
+
+    // --- Path 2: No stored ID — fuzzy search within ±4h window to avoid duplicates ---
     const timeMin = new Date(startDate.getTime() - 4 * 60 * 60 * 1000).toISOString();
     const timeMax = new Date(startDate.getTime() + 4 * 60 * 60 * 1000).toISOString();
     const companyPrefix = params.title.split(' - ')[0].trim();
@@ -117,6 +141,7 @@ export async function pushEventToGoogleCalendar(params: SyncCalendarEventParams)
       // List failed or search error — proceed to insert directly
     }
 
+    // --- Path 3: No existing event found — insert fresh ---
     const insertRes = await calendar.events.insert({
       calendarId: 'primary',
       requestBody: eventPayload,
@@ -130,11 +155,15 @@ export async function pushEventToGoogleCalendar(params: SyncCalendarEventParams)
 }
 
 /**
- * Removes an event from Google Calendar by company name
+ * Removes an event from Google Calendar.
+ * - If `eventId` is provided, deletes that specific event directly (preferred).
+ * - Falls back to name-based search only when no ID is available.
  */
 export async function deleteEventFromGoogleCalendar(params: {
   userId: string;
   companyName: string;
+  /** Preferred: direct GCal event ID. If provided, skips name-based search entirely. */
+  eventId?: string | null;
 }): Promise<boolean> {
   try {
     const auth = await getCalendarOAuthClient(params.userId);
@@ -142,6 +171,24 @@ export async function deleteEventFromGoogleCalendar(params: {
 
     const calendar = google.calendar({ version: 'v3', auth });
 
+    // --- Fast path: delete by stored event ID ---
+    if (params.eventId) {
+      try {
+        await calendar.events.delete({
+          calendarId: 'primary',
+          eventId: params.eventId,
+        });
+        return true;
+      } catch (err: unknown) {
+        const status = (err as { code?: number })?.code;
+        // 404/410 means it was already deleted from GCal — still consider it a success
+        if (status === 404 || status === 410) return true;
+        console.error('Google Calendar Delete (by ID) Error:', err);
+        return false;
+      }
+    }
+
+    // --- Fallback: name-based search (legacy path, used when gcal_event_id is missing) ---
     const searchRes = await calendar.events.list({
       calendarId: 'primary',
       q: params.companyName,

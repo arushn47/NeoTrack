@@ -55,6 +55,14 @@ const CLASSIFICATION_RULES: ClassificationRule[] = [
     reason: 'Non-placement marketing, entertainment, or personal newsletter sender',
   },
   {
+    classification: 'irrelevant',
+    confidence: 'high',
+    match: (s) =>
+      /\b(?:campus\s+connect\s+hackathon|hackathon|ideathon)\b/i.test(s) &&
+      !/hiring\s+event|recruitment\s+drive/i.test(s),
+    reason: 'Hackathon or competition announcement, not a placement drive',
+  },
+  {
     classification: 'general',
     confidence: 'high',
     match: (s) => /new learning contents?|practice.*tests?\s+added/i.test(s),
@@ -326,126 +334,56 @@ const COMPANY_NOISE_WORDS = [
 ];
 
 /**
- * Known company aliases to normalize different names to a single canonical name.
+ * Legal/geographic suffixes that are NEVER a distinctive part of a company name.
+ * Only strip words that are purely administrative noise, not brand/track words.
+ *
+ * Deliberately excluded (they CAN be distinctive):
+ *   technologies, solutions, lab, labs, analytics, digital, systems, software,
+ *   consulting, ventures — e.g. "Honeywell Technology Solutions Lab" vs "Honeywell Technologies"
  */
-export const COMPANY_ALIASES: Record<string, string> = {
-  'tcs': 'TCS',
-  'tata consultancy': 'TCS',
-  'tata consultancy services': 'TCS',
-  'infosys bpm': 'Infosys',
-  'hcl': 'HCL Technologies',
-  'hcl tech': 'HCL Technologies',
-  'kpmg': 'KPMG',
-  'ey sap': 'EY SAP',
-  'ey-sap': 'EY SAP',
-  'ey gds': 'EY GDS',
-  'ey global delivery services': 'EY GDS',
-  'ey-gds': 'EY GDS',
-  'ernst & young': 'EY GDS',
-  'ey (ernst & young)': 'EY GDS',
-  'pwc': 'PwC',
-  'pricewaterhousecoopers': 'PwC',
-  'apple sdet': 'Apple SDET',
-  'apple-sdet': 'Apple SDET',
-  'apple sre': 'Apple SRE',
-  'apple-sre': 'Apple SRE',
-  'eternal': 'Zomato',
-  'eternal (zomato)': 'Zomato',
-  'eternal zomato': 'Zomato',
-  'valuelabs llp': 'Value Labs',
-  'value labs llp': 'Value Labs',
-  'zluri sdet': 'Zluri SDET',
-  'cred': 'CRED',
-  'phonepe': 'PhonePe',
-  'ibm': 'IBM',
-  'byju': 'BYJU\'S',
-  'byjus': 'BYJU\'S',
-  'l&t': 'L&T',
-  'larsen': 'L&T',
-  'larsen & toubro': 'L&T',
-  'reliance jio': 'Jio',
-  'mindtree': 'LTIMindtree',
-  'ltimindtree': 'LTIMindtree',
-  'lti': 'LTIMindtree',
-  'mufg': 'MUFG',
-  'mitsubishi ufj': 'MUFG',
-  'mitsubishi ufj financial group': 'MUFG',
-  'mitsubishi': 'MUFG',
-  'nielsen': 'NielsenIQ',
-  'nielseniq': 'NielsenIQ',
-  'fischerjordan': 'FischerJordan',
-  'fischer jordan': 'FischerJordan',
-  'playsimple': 'PlaySimple Games',
-  'playsimple games': 'PlaySimple Games',
-  'play simple games': 'PlaySimple Games',
-  'idfc': 'IDFC First Bank',
-  'idfc bank': 'IDFC First Bank',
-  'idfc first bank': 'IDFC First Bank',
-  'ubs': 'UBS',
-  'blackrock': 'BlackRock',
-  'pallav': 'Pallav Technologies',
-  'pallav tech': 'Pallav Technologies',
-  'zs': 'ZS Associates',
-  'zs associates': 'ZS Associates',
-  'london stock exchange': 'London Stock Exchange Group (LSEG)',
-  'honeywell': 'Honeywell Technologies',
-  'honeywell technologies': 'Honeywell Technologies',
-  'honeywell aerospace': 'Honeywell Aerospace',
-  'honeywell technology solutions': 'Honeywell Technology Solutions Lab',
-  'honeywell technology solutions lab': 'Honeywell Technology Solutions Lab',
-  'valuelabs': 'Value Labs',
-  'cummins india': 'Cummins',
-  'tekion india': 'Tekion',
-  'pocket fm': 'Pocket FM',
-  'pocketfm': 'Pocket FM',
-  'intel india': 'Intel',
-  'lseg': 'London Stock Exchange Group (LSEG)',
-  'ion': 'ION Group',
-  'ion group': 'ION Group',
-  'eulermotors': 'Euler Motors',
-  'procdna': 'ProcDNA',
-  'blubridge': 'BluBridge Technologies',
-  'infosy': 'Infosys',
-  'infosy 2027 batch': 'Infosys',
-  'tredence': 'Tredence Analytics',
-  'tredence super dream': 'Tredence Analytics',
-  'unilever industries': 'Unilever',
-  'societe generale global solution centre': 'Societe Generale',
-  'sandisk device design centre': 'SanDisk',
-  'sandisk': 'SanDisk',
-  'amex': 'American Express',
-  'superjoin': 'Superjoin Finance',
-  'ethos': 'Ethos Technologies',
-  'ethos life': 'Ethos Technologies',
-  'futuresfirst': 'Futures First',
-  'jpmorgan': 'JPMorgan Chase',
-  'jpmorganchase': 'JPMorgan Chase',
-  'jpmorgan chase': 'JPMorgan Chase',
-  'jpmc': 'JPMorgan Chase',
-  'colgate': 'Colgate-Palmolive',
-  'colgate-palmolive': 'Colgate-Palmolive',
-  'colgate palmolive': 'Colgate-Palmolive',
-  'exxonmobil': 'ExxonMobil',
-  'exxon mobil': 'ExxonMobil',
-  'exxon': 'ExxonMobil',
-  'fractal': 'Fractal Analytics',
-  'palo alto': 'Palo Alto Networks',
-  'unthinkable': 'Unthinkable Solutions',
-  'unthikable': 'Unthinkable Solutions',
-  'veeva': 'Veeva Systems',
-  'winwire technologies': 'Winwire',
-  'workindia': 'WorkIndia',
-  'work india': 'WorkIndia',
-  'bottomline technologies': 'Bottomline',
-  'zensar technologies': 'Zensar',
-  'tresvista financial': 'Tresvista',
-  'tresvista financial services': 'Tresvista',
-  'rfpio': 'Responsive',
-  'rfpio india': 'Responsive',
-  'rfpio india pvt ltd': 'Responsive',
-  'rfp software': 'Responsive',
-  'responsive (rfp software)': 'Responsive',
-};
+const KEY_NOISE_WORDS = new Set([
+  // Legal entity suffixes
+  'pvt', 'ltd', 'limited', 'private', 'inc', 'corp', 'corporation', 'llc', 'llp',
+  // Overly generic relational/org words
+  'co', 'company', 'group',
+  // Geographic qualifiers that never distinguish a company
+  'india', 'global', 'international',
+  // Finance/services words only when pure suffix noise (e.g. "Tresvista Financial Services")
+  'financial', 'industries',
+]);
+
+/**
+ * Computes a canonical matching key for a company name.
+ * Strips legal/noise words, removes all spaces and punctuation, lowercases.
+ *
+ * This makes the following equivalent:
+ *   "Goldman Sachs"  → "goldmansachs"
+ *   "goldmansachs"   → "goldmansachs"  ← same key → same company
+ *   "HCL Technologies" → "hcl"
+ *   "HCL Tech"         → "hcl"          ← same key → same company
+ *   "Exxon Mobil"    → "exxonmobil"
+ *   "ExxonMobil"     → "exxonmobil"    ← same key → same company
+ *   "Infosys BPM"    → "infosys"
+ *   "Infosys"        → "infosys"       ← same key → same company
+ */
+export function computeNormalizedKey(name: string): string {
+  // 1. Lowercase
+  let str = name.toLowerCase();
+
+  // 2. Remove punctuation (dashes, dots, ampersands, parens, etc.) — treat as spaces
+  str = str.replace(/[^a-z0-9\s]/g, ' ');
+
+  // 3. Split into words, drop noise words
+  const words = str.split(/\s+/).filter((w) => w.length > 0 && !KEY_NOISE_WORDS.has(w));
+
+  // 4. Collapse — remove all remaining spaces so "goldman sachs" === "goldmansachs"
+  return words.join('');
+}
+
+// Removed: COMPANY_ALIASES (was a static lookup table that required manual maintenance).
+// De-duplication is now handled dynamically in upsertCompany via computeNormalizedKey.
+export const COMPANY_ALIASES: Record<string, string> = {}; // kept as empty export to avoid breaking any stale imports
+
 
 /**
  * Patterns commonly found in placement email subjects that help extract company names.
@@ -710,9 +648,9 @@ export function extractCompanyName(
 
       let score = sourceWeight;
 
-      // 1. Direct match in COMPANY_ALIASES (+100)
-      // e.g. "ey sap" or "ey gds" matches alias directly, beating bare "ey"
-      if (COMPANY_ALIASES[lowerClean] || COMPANY_ALIASES[lowerNorm]) {
+      // 1. Track / specialization tokens get a scoring boost (+100)
+      // e.g. "ey sap" or "ey gds" beats bare "ey" because it has a track token
+      if (/\b(?:sdet|sre|sap|gds|aerospace|technology\s+solutions)\b/i.test(lowerClean)) {
         score += 100;
       }
 
@@ -800,9 +738,10 @@ export function extractCompanyName(
   }
 
   // Disambiguate EY SAP vs EY GDS
+  // Only trigger on subject mention — body-only mentions are too broad and cause false positives
   const isEyEmail =
     /\b(?:ey|ernst\s*&\s*young|ernst\s+and\s+young)\b/i.test(lowerCleaned) ||
-    /\b(?:ey\s+sap|ey\s+gds|ey\s*\(ernst\s*&\s*young\))\b/i.test(lowerBody);
+    /\b(?:ey\s+sap|ey\s+gds|ey\s*\(ernst\s*&\s*young\))\b/i.test(lowerCleaned);
 
   if (isEyEmail) {
     if (lowerCleaned.includes('sap') || lowerBody.includes('ey sap')) {
@@ -814,36 +753,21 @@ export function extractCompanyName(
     return 'EY GDS';
   }
 
-  // Disambiguate Honeywell Aerospace vs Honeywell Technology Solutions Lab vs Honeywell Technologies
-  if (lowerCleaned.includes('honeywell') || lowerBody.includes('honeywell')) {
+  // Disambiguate Honeywell Aerospace vs Honeywell Technology Solutions Lab
+  // Note: "Honeywell Technologies Campus Connect Hackathon" is a hackathon, not a placement drive.
+  // ONLY trigger when the subject itself mentions "honeywell" — body-only mentions are passing
+  // references in forwarded threads (e.g. a WorkIndia email saying "exempt from Honeywell")
+  // and must NOT hijack the email's company assignment.
+  if (lowerCleaned.includes('honeywell')) {
+    if (/\b(?:hackathon|ideathon)\b/i.test(lowerCleaned)) {
+      return null;
+    }
     if (lowerCleaned.includes('aerospace') || lowerBody.includes('aerospace')) {
       return 'Honeywell Aerospace';
     }
-    if (
-      lowerCleaned.includes('technology solutions') ||
-      lowerCleaned.includes('solutions lab') ||
-      lowerBody.includes('technology solutions') ||
-      lowerBody.includes('solutions lab') ||
-      /pat-pl-2026-1135/i.test(lowerCleaned) ||
-      /pat-pl-2026-1135/i.test(lowerBody)
-    ) {
-      return 'Honeywell Technology Solutions Lab';
-    }
-    // July 27 - August 11 Super Dream Internship cycle is Honeywell Technology Solutions Lab
-    if (
-      (/super\s*dream/i.test(lowerCleaned) && !lowerCleaned.includes('aerospace')) ||
-      /ppt.*online\s+test.*sjt|next\s+round.*sjt717|alumni\s+mock/i.test(lowerCleaned) ||
-      /sarojini\s+naidu\s+gallery/i.test(lowerBody)
-    ) {
-      return 'Honeywell Technology Solutions Lab';
-    }
-    if (lowerCleaned.includes('technologies') || lowerBody.includes('technologies')) {
-      return 'Honeywell Technologies';
-    }
-    if (lowerCleaned.includes('dream internship')) {
-      return 'Honeywell Technologies';
-    }
-    return 'Honeywell Technologies';
+    // All other legitimate campus recruitment drives (Technology Solutions Lab, Dream/Super Dream Internship)
+    // belong to Honeywell Technology Solutions Lab
+    return 'Honeywell Technology Solutions Lab';
   }
 
   // Disambiguate Apple SDET vs Apple SRE
@@ -879,22 +803,15 @@ export function extractCompanyName(
   }
 
   // Disambiguate Zluri SWE vs Zluri SDET
-  if (lowerCleaned.includes('zluri') || lowerBody.includes('zluri')) {
+  // Only trigger on subject mention — same rationale as Honeywell block above
+  if (lowerCleaned.includes('zluri')) {
     if (lowerCleaned.includes('sdet') || lowerBody.includes('sdet')) {
       return 'Zluri SDET';
     }
     return 'Zluri';
   }
 
-  const sortedAliases = Object.keys(COMPANY_ALIASES).sort((a, b) => b.length - a.length);
-  for (const alias of sortedAliases) {
-    const canonical = COMPANY_ALIASES[alias];
-    const escaped = alias.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    const regex = new RegExp(`(?:^|[^a-z0-9])${escaped}(?:[^a-z0-9]|$)`, 'i');
-    if (regex.test(lowerCleaned)) {
-      return canonical;
-    }
-  }
+  // (Static alias table removed — dedup is handled dynamically in upsertCompany via computeNormalizedKey)
 
   // Try regex subject patterns
   for (const pattern of SUBJECT_COMPANY_PATTERNS) {
@@ -1015,36 +932,20 @@ export function cleanCompanyName(name: string): string {
 }
 
 /**
- * Normalizes a company name using the known aliases map.
+ * Normalizes a company name to a clean title-cased form for display.
+ * De-duplication matching is handled separately via computeNormalizedKey().
  */
 export function normalizeCompanyName(name: string): string {
   if (!name || isInvalidCompanyName(name)) {
     return '';
   }
 
-  const lower = name.toLowerCase().trim();
-
-  // Check exact alias match
-  if (COMPANY_ALIASES[lower]) {
-    return COMPANY_ALIASES[lower];
-  }
-
-  // Check if any alias key is contained in the name (longest key first)
-  const sortedAliases = Object.keys(COMPANY_ALIASES).sort((a, b) => b.length - a.length);
-  for (const alias of sortedAliases) {
-    const canonical = COMPANY_ALIASES[alias];
-    const escaped = alias.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    const regex = new RegExp(`(?:^|[^a-z0-9])${escaped}(?:[^a-z0-9]|$)`, 'i');
-    if (regex.test(lower)) {
-      return canonical;
-    }
-  }
-
-  // Title-case the name if no alias found
+  // Title-case: keep all-caps short tokens (abbreviations) as-is
   return name
+    .trim()
     .split(/\s+/)
     .map((word) => {
-      if (word.length <= 2 && word === word.toUpperCase()) return word; // Keep abbreviations
+      if (word.length <= 3 && word === word.toUpperCase()) return word; // Keep TCS, IBM, UBS, etc.
       return word.charAt(0).toUpperCase() + word.slice(1).toLowerCase();
     })
     .join(' ');

@@ -177,11 +177,20 @@ export async function processEmailForEventsAndStatus(
         matchType = 'xlsx_cell';
         matchDetail = gMatch.details;
         if (gMatch.eventDate) {
+          const isPpt = /ppt|pre[\s-]*placement/i.test(subjLower);
+          const isInterview = /interview/i.test(subjLower);
+          const eventType = isPpt ? 'ppt' : isInterview ? 'technical_interview' : 'online_test';
+          const title = isPpt
+            ? 'Pre-Placement Talk (PPT)'
+            : isInterview
+            ? 'Interview'
+            : `Online Assessment${gMatch.slot ? ` (${gMatch.slot})` : ''}`;
+
           const startTime = new Date(gMatch.eventDate);
           startTime.setHours(gMatch.slot && /slot\s*2/i.test(gMatch.slot) ? 14 : 9, 0, 0, 0);
           gsheetEventToAdd = {
-            eventType: 'online_test',
-            title: `Online Assessment${gMatch.slot ? ` (${gMatch.slot})` : ''}`,
+            eventType,
+            title,
             startTime,
             endTime: null,
             venue: 'Campus / Offline',
@@ -381,7 +390,16 @@ export async function processEmailForEventsAndStatus(
               endTime: event.endTime ? event.endTime.toISOString() : null,
               venue: event.venue,
               mode: event.mode,
-            }).catch((err) => console.error('Google Calendar auto-sync error:', err));
+            })
+              .then(async (gcalId) => {
+                if (gcalId) {
+                  await supabase
+                    .from('events')
+                    .update({ gcal_event_id: gcalId })
+                    .eq('id', insertedEvt.id);
+                }
+              })
+              .catch((err) => console.error('Google Calendar auto-sync error:', err));
           }
         }
       }
@@ -508,9 +526,9 @@ export async function processEmailForEventsAndStatus(
       newStatus = 'rejected';
     } else if (/final\s*selection|offer\s*(?:letter|release)|congratulations.*(?:final|offer)/i.test(subjLower) || (/selection\s*list/i.test(subjLower) && !/interview|ppt|test/i.test(subjLower))) {
       newStatus = 'selected';
-    } else if (/interview|next\s+round|selection\s+process/i.test(subjLower)) {
+    } else if (/interview|next\s+round/i.test(subjLower)) {
       newStatus = 'interview_scheduled';
-    } else if (/online\s+test|coding\s+test|assessment/i.test(subjLower) || matchDetail?.includes('Google Sheet')) {
+    } else if (/online\s+test|coding\s+test|assessment/i.test(subjLower) || (matchDetail?.includes('Google Sheet') && !/ppt|pre[\s-]*placement/i.test(subjLower))) {
       newStatus = 'test_scheduled';
     } else if (/ppt|pre[\s-]*placement/i.test(subjLower)) {
       newStatus = 'ppt_scheduled';
@@ -547,17 +565,20 @@ export async function processEmailForEventsAndStatus(
     const isPostTestRound =
       emailClass === 'interview' ||
       /interview\s+(?:is\s+)?scheduled|technical\s+interview|hr\s+interview|final\s+interview/i.test(subjLower) ||
-      /next\s+round\s+of\s+selection|next\s+round\s+is\s+scheduled/i.test(subjLower) ||
+      /next\s+round/i.test(subjLower) ||
       /selection\s+list|final\s+shortlist|congratulations.*(?:selection\s+list|selects)/i.test(subjLower) ||
       /interview\s+shortlist|shortlist\s+for\s+interview|next\s+round\s+shortlist|shortlisted\s+for\s+next\s+round/i.test(fullText);
 
-    if (['test_scheduled', 'interview_scheduled', 'shortlisted'].includes(currentStatus)) {
-      if (isPostTestRound) {
-        // User was shortlisted for test/interview and was eliminated in a subsequent round
+    if (isPostTestRound) {
+      if (['test_scheduled', 'interview_scheduled'].includes(currentStatus)) {
+        // User was in the test/interview and was eliminated in a subsequent round
         newStatus = 'rejected';
+      } else {
+        newStatus = 'not_shortlisted';
       }
-    } else if (['applied', 'ppt_scheduled'].includes(currentStatus)) {
-      // User was in screening and was not shortlisted in the released shortlist
+    } else {
+      // It is a test or screening shortlist email (e.g. initial test shortlist or updated test shortlist)
+      // If the candidate was not found in this shortlist, they did NOT qualify for the test!
       newStatus = 'not_shortlisted';
     }
   } else if (
@@ -657,7 +678,14 @@ export async function processEmailForEventsAndStatus(
     // AI review notes are already included in appUpdate.notes above (with travelReq), skip double-append
 
     // If candidate withdrew, declined, or was not shortlisted/rejected, purge scheduled events
-    if (['withdrawn', 'declined', 'rejected', 'not_shortlisted'].includes(newStatus)) {
+    if (newStatus === 'not_shortlisted') {
+      await supabase
+        .from('events')
+        .delete()
+        .eq('user_id', userId)
+        .eq('company_id', companyId)
+        .neq('event_type', 'ppt');
+    } else if (['withdrawn', 'declined', 'rejected'].includes(newStatus)) {
       await supabase.from('events').delete().eq('user_id', userId).eq('company_id', companyId);
     }
 

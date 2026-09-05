@@ -43,7 +43,7 @@ export async function POST(request: Request) {
 
     supabase
       .from('events')
-      .select('id, company_id, event_type, title, start_time, end_time, venue, mode')
+      .select('id, company_id, event_type, title, start_time, end_time, venue, mode, gcal_event_id')
       .eq('user_id', session.userId)
       .order('start_time', { ascending: true }),
   ]);
@@ -136,7 +136,7 @@ export async function POST(request: Request) {
           await supabase.from('events').delete().in('id', duplicateIds);
         }
 
-        // Push update to Google Calendar in background
+        // Push update to Google Calendar in background (update in-place if we have a stored ID)
         if (primaryEvent.start_time) {
           pushEventToGoogleCalendar({
             userId: session.userId,
@@ -145,7 +145,17 @@ export async function POST(request: Request) {
             endTime: primaryEvent.end_time,
             venue: targetVenue,
             mode,
-          }).catch((err) => console.error('Google Calendar auto-sync:', err));
+            gcalEventId: primaryEvent.gcal_event_id ?? null,
+          })
+            .then(async (gcalId) => {
+              if (gcalId && gcalId !== primaryEvent.gcal_event_id) {
+                await supabase
+                  .from('events')
+                  .update({ gcal_event_id: gcalId })
+                  .eq('id', primaryEvent.id);
+              }
+            })
+            .catch((err) => console.error('Google Calendar auto-sync:', err));
         }
 
         return NextResponse.json({
@@ -176,7 +186,16 @@ export async function POST(request: Request) {
             endTime: new Date(eventDate.getTime() + 3600000).toISOString(),
             venue: targetVenue,
             mode,
-          }).catch((err) => console.error('Google Calendar auto-sync:', err));
+          })
+            .then(async (gcalId) => {
+              if (gcalId) {
+                await supabase
+                  .from('events')
+                  .update({ gcal_event_id: gcalId })
+                  .eq('id', insertedEvt.id);
+              }
+            })
+            .catch((err) => console.error('Google Calendar auto-sync:', err));
         }
 
         return NextResponse.json({
@@ -343,7 +362,7 @@ export async function POST(request: Request) {
       { onConflict: 'user_id,company_id' }
     );
 
-    // Push to Google Calendar in background
+    // Push to Google Calendar (update in-place if the event record already has a gcal_event_id)
     pushEventToGoogleCalendar({
       userId: session.userId,
       title: `${targetComp.name} - ${eventLabel}`,
@@ -351,7 +370,17 @@ export async function POST(request: Request) {
       endTime: new Date(parsedDate.getTime() + 3600000).toISOString(),
       venue,
       mode,
-    }).catch((err) => console.error('Google Calendar auto-sync:', err));
+      gcalEventId: (eventRecord as { gcal_event_id?: string | null })?.gcal_event_id ?? null,
+    })
+      .then(async (gcalId) => {
+        if (gcalId && eventRecord) {
+          await supabase
+            .from('events')
+            .update({ gcal_event_id: gcalId })
+            .eq('id', (eventRecord as { id: string }).id);
+        }
+      })
+      .catch((err) => console.error('Google Calendar auto-sync:', err));
 
     const formatted = formatDateTime(parsedDate.toISOString());
     const actionWord = isReschedule ? 'Rescheduled' : 'Scheduled';
@@ -382,8 +411,17 @@ export async function POST(request: Request) {
         endTime: evt.end_time,
         venue: evt.venue,
         mode: evt.mode,
+        gcalEventId: (evt as { gcal_event_id?: string | null }).gcal_event_id ?? null,
       });
-      if (gid) count++;
+      if (gid) {
+        count++;
+        if (gid !== (evt as { gcal_event_id?: string | null }).gcal_event_id) {
+          await supabase
+            .from('events')
+            .update({ gcal_event_id: gid })
+            .eq('id', evt.id);
+        }
+      }
     }
 
     if (count > 0) {

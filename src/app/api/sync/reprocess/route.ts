@@ -325,39 +325,6 @@ export async function performReprocess(userId: string) {
     }
   }
 
-  // Register legitimate standalone circular drives (e.g. Honeywell Technologies 2027 Batch)
-  for (const email of collegeEmails) {
-    const subject = email.subject || '';
-    if (/honeywell\s+dream\s+internship\s+registration/i.test(subject)) {
-      const canonical = 'Honeywell Technologies';
-      let { data: existingComp } = await supabase
-        .from('companies')
-        .select('id, name')
-        .eq('user_id', userId)
-        .eq('name', canonical)
-        .single();
-
-      if (!existingComp) {
-        const { data: created } = await supabase
-          .from('companies')
-          .insert({
-            user_id: userId,
-            name: canonical,
-            aliases: [canonical.toLowerCase()],
-          })
-          .select('id')
-          .single();
-        if (created) existingComp = { id: created.id, name: canonical };
-      }
-
-      if (existingComp) {
-        const compObj = { id: existingComp.id, canonicalName: canonical, activeDriveDate: new Date(email.received_at || 0) };
-        validCompanyMap.set(canonical.toLowerCase(), compObj);
-        validCompanyIdSet.add(existingComp.id);
-      }
-    }
-  }
-
   // 4. Phase 2: Purge ANY Company in DB that is NOT in the Official NeoPAT List
   // This permanently removes Datagrokr, Google, PS Associate Engineer, and all non-NeoPAT broadcast drives.
   const { data: currentDbCompanies } = await supabase
@@ -508,10 +475,6 @@ export async function performReprocess(userId: string) {
   const applicationResults: Array<{ company: string; status: string; role?: string | null; ctc?: string | null }> = [];
 
   for (const comp of remainingCompanies || []) {
-    if (/honeywell/i.test(comp.name) && !/aerospace/i.test(comp.name) && comp.name !== 'Honeywell Technologies') {
-      await supabase.from('companies').update({ name: 'Honeywell Technologies' }).eq('id', comp.id);
-      comp.name = 'Honeywell Technologies';
-    }
     const { data: companyEmails } = await supabase
       .from('emails')
       .select('id, subject, body_snippet, classification, received_at')
@@ -568,11 +531,20 @@ export async function performReprocess(userId: string) {
           }
 
           if (gMatch.eventDate) {
+            const isPpt = /ppt|pre[\s-]*placement/i.test(email.subject || '');
+            const isInterview = /interview/i.test(email.subject || '');
+            const eventType = isPpt ? 'ppt' : isInterview ? 'technical_interview' : 'online_test';
+            const title = isPpt
+              ? 'Pre-Placement Talk (PPT)'
+              : isInterview
+              ? 'Interview'
+              : `Online Assessment${gMatch.slot ? ` (${gMatch.slot})` : ''}`;
+
             const startTime = new Date(gMatch.eventDate);
             startTime.setHours(gMatch.slot && /slot\s*2/i.test(gMatch.slot) ? 14 : 9, 0, 0, 0);
             gsheetEventsForCompany.push({
-              eventType: 'online_test',
-              title: `Online Assessment${gMatch.slot ? ` (${gMatch.slot})` : ''}`,
+              eventType,
+              title,
               startTime,
               venue: 'Campus / Offline',
               mode: 'online',
@@ -743,21 +715,25 @@ export async function performReprocess(userId: string) {
     );
 
     const nextRoundPattern =
-      /next\s+round\s+of\s+selection|next\s+round\s+is\s+scheduled|interview\s+(?:is\s+)?scheduled|technical\s+interview|hr\s+interview|final\s+interview|interview\s+shortlist|shortlist\s+for\s+interview|shortlisted\s+for\s+(?:the\s+)?interview/i;
+      /next\s+round|interview\s+(?:is\s+)?scheduled|technical\s+interview|hr\s+interview|final\s+interview|interview\s+shortlist|shortlist\s+for\s+interview|shortlisted\s+for\s+(?:the\s+)?interview/i;
     const nextRoundEmails = activeDriveEmails.filter((e) =>
-      isAfterRegistration(e) && nextRoundPattern.test(`${e.subject || ''} ${e.body_snippet || ''}`)
+      isAfterRegistration(e) && nextRoundPattern.test(e.subject || '')
     );
 
     const isInterviewOrSelectionEmail = (e: { subject?: string | null; body_snippet?: string | null }) => {
-      const full = `${e.subject || ''} ${e.body_snippet || ''}`;
-      return nextRoundPattern.test(full) || selectionListPattern.test(e.subject || '');
+      return nextRoundPattern.test(e.subject || '') || selectionListPattern.test(e.subject || '');
+    };
+
+    const isPptEmail = (e: { subject?: string | null }) => {
+      return /ppt|pre[\s-]*placement/i.test(e.subject || '');
     };
 
     const testShortlistPattern =
-      /test\s+shortlist|shortlist\s+for\s+(?:the\s+)?(?:test|assessment|exam)|shortlisted\s+for\s+(?:the\s+)?(?:online\s+)?(?:test|assessment)|candidate[s]?\s+shortlisted|shortlisted\s+(?:candidates|students)|shortlist\s+will\s+be\s+shared|only\s+shortlisted\s+students|attached\s+(?:updated\s+)?shortlist|\bneo\s+id\b|attached\s+(?:students?|candidates?)\s+list|find\s+the\s+attached\s+(?:students?|candidates?)\s+list/i;
+      /test\s+shortlist|shortlist\s+for\s+(?:the\s+)?(?:test|assessment|exam)|shortlisted\s+for\s+(?:the\s+)?(?:online\s+)?(?:test|assessment)|candidate[s]?\s+shortlisted|shortlisted\s+(?:candidates|students)|shortlist\s+will\s+be\s+shared|only\s+shortlisted\s+students|attached\s+(?:updated\s+)?(?:shortlist|shortlisted)|attached\s+.*shortlist|\bneo\s+id\b|attached\s+(?:students?|candidates?)\s+list|find\s+the\s+attached\s+(?:students?|candidates?)\s+list/i;
     const testShortlistEmails = activeDriveEmails.filter((e) => {
       if (!isAfterRegistration(e)) return false;
       if (isInterviewOrSelectionEmail(e)) return false; // Next round / interview is NOT a test shortlist!
+      if (isPptEmail(e)) return false; // PPT announcements with venue/seating lists are NOT test shortlists!
       if (e.classification === 'shortlist') return true;
       const full = `${e.subject || ''} ${e.body_snippet || ''}`;
       return testShortlistPattern.test(full);
@@ -766,7 +742,7 @@ export async function performReprocess(userId: string) {
     const testPattern =
       /online\s+test|coding\s+test|aptitude\s+test|assessment\s+test|assessment\s+is\s+scheduled|online\s+assessment|codility|hackerrank|mettl/i;
     const testEmails = activeDriveEmails.filter((e) =>
-      isAfterRegistration(e) && testPattern.test(`${e.subject || ''} ${e.body_snippet || ''}`)
+      isAfterRegistration(e) && !isPptEmail(e) && testPattern.test(`${e.subject || ''} ${e.body_snippet || ''}`)
     );
 
     // Differentiate matches in actual shortlists vs applied/opt-in lists
@@ -782,20 +758,47 @@ export async function performReprocess(userId: string) {
         .filter(Boolean)
     );
 
-    const isMatchedInSelectionList = selectionEmails.some((e) => matchedShortlistEmailIds.has(e.id));
-    const isMatchedInNextRound = nextRoundEmails.some((e) => matchedShortlistEmailIds.has(e.id));
+    // ── LATEST SHORTLIST EVALUATION ──
+    // Rule: When multiple shortlists or updates exist for a stage (e.g. initial applied list followed by
+    // an updated/final test shortlist), the LATEST shortlist for that stage is authoritative.
+    const sortedSelectionEmails = [...selectionEmails].sort(
+      (a, b) => (a.received_at ? new Date(a.received_at).getTime() : 0) - (b.received_at ? new Date(b.received_at).getTime() : 0)
+    );
+    const latestSelectionEmail = sortedSelectionEmails[sortedSelectionEmails.length - 1];
+    const isMatchedInSelectionList = latestSelectionEmail
+      ? matchedShortlistEmailIds.has(latestSelectionEmail.id)
+      : false;
+
+    const sortedNextRoundEmails = [...nextRoundEmails].sort(
+      (a, b) => (a.received_at ? new Date(a.received_at).getTime() : 0) - (b.received_at ? new Date(b.received_at).getTime() : 0)
+    );
+    const latestNextRoundEmail = sortedNextRoundEmails[sortedNextRoundEmails.length - 1];
+    const isMatchedInNextRound = latestNextRoundEmail
+      ? matchedShortlistEmailIds.has(latestNextRoundEmail.id)
+      : false;
+
     const hasCompanyCandidateMatch = activeDriveEmails.some((e) => matchedEmailIds.has(e.id));
 
     // Test Shortlists evaluation:
-    // Candidate wrote the test if:
-    // 1. Confirmed in Google Sheet assessment slots
-    // 2. OR matched in an actual test shortlist file / test announcement email (excluding applied/opt-in lists)
-    const isMatchedInActualTestShortlist = activeDriveEmails.some(
-      (e) => !isInterviewOrSelectionEmail(e) && matchedShortlistEmailIds.has(e.id)
+    // When updated test shortlists are published, ALWAYS check the latest one!
+    const sortedTestShortlists = [...testShortlistEmails].sort(
+      (a, b) => (a.received_at ? new Date(a.received_at).getTime() : 0) - (b.received_at ? new Date(b.received_at).getTime() : 0)
     );
 
-    // Only confirmed test rosters (Google Sheet slot or verified Excel shortlist) count as having written the test
-    const isMatchedInTest = gsheetEventsForCompany.length > 0 || isMatchedInActualTestShortlist;
+    let isMatchedInTest = false;
+    if (sortedTestShortlists.length > 0) {
+      const latestTestShortlistEmail = sortedTestShortlists[sortedTestShortlists.length - 1];
+      isMatchedInTest = matchedShortlistEmailIds.has(latestTestShortlistEmail.id);
+    } else if (testEmails.length > 0) {
+      // Open test with no restrictive shortlist (open to all registered candidates)
+      isMatchedInTest = hasConfirmedRegistration;
+    }
+
+    // Genuine assessment Google Sheet slot match (excluding PPT venue sheets)
+    const hasGSheetTestEvent = gsheetEventsForCompany.some((g) => g.eventType === 'online_test');
+    if (hasGSheetTestEvent && sortedTestShortlists.length === 0) {
+      isMatchedInTest = true;
+    }
 
     // Extract events
     const allExtractedEvents = activeDriveEmails.flatMap((e) =>
