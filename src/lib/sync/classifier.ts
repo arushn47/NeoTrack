@@ -406,7 +406,8 @@ const SUBJECT_COMPANY_PATTERNS: RegExp[] = [
   /(?:updated\s+)?optional\s+form\s+(?:available\s*)?[-–—:]\s*(?:m\/s\.?\s*)?([A-Za-z0-9&\s\-\.]+?)\s+drive/i,
   // "Confirmation: Euler Motors Drive Registration Update"
   // "Euler Motors Drive Registration Update"
-  /(?:confirmation:\s*)?([A-Za-z0-9&\s\-\.]+?)\s+drive\s+registration\s*(?:update|$)/i,
+  // "Confirmation: Responsive (RFP Software) Drive Registration Update"
+  /(?:confirmation:\s*)?((?:[A-Za-z0-9&\s\-\.]|\([^)]+\))+?)\s+drive\s+registration\s*(?:update|$)/i,
   // "Company Name - Drive Registration"
   /^([A-Za-z0-9&\s\-\.]+?)\s*[-–—]\s*drive\s+registration/i,
   // "Zluri Super Dream Internship Selection List..."

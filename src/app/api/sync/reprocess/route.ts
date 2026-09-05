@@ -698,12 +698,15 @@ export async function performReprocess(userId: string) {
       return Math.max(max, t);
     }, 0);
 
-    // ONLY considered withdrawn if the withdrawal occurred AFTER the latest registration confirmation!
-    const hasConfirmedRegistration = registrationEmails.length > 0 && latestRegistrationTime >= latestWithdrawalTime;
+    const hasRegistrationConfirmation = registrationEmails.length > 0;
+    const hasReRegisteredAfterWithdrawal = hasRegistrationConfirmation && latestRegistrationTime > latestWithdrawalTime;
 
-    // ONLY considered withdrawn if the withdrawal occurred AFTER the latest registration confirmation!
-    // And ONLY if the candidate actually registered (hasConfirmedRegistration).
-    const isWithdrawn = hasConfirmedRegistration && withdrawalEmails.length > 0 && latestWithdrawalTime > latestRegistrationTime;
+    // If candidate received a withdrawal confirmation email:
+    // They are withdrawn UNLESS they subsequently re-registered AFTER that withdrawal!
+    const isWithdrawn = withdrawalEmails.length > 0 && !hasReRegisteredAfterWithdrawal;
+
+    // Candidate has active confirmed registration if they registered and didn't withdraw (or re-registered after withdrawal)
+    const hasConfirmedRegistration = hasRegistrationConfirmation && !isWithdrawn;
 
     const isAfterRegistration = (e: { received_at: string | null }) => {
       if (!latestRegistrationTime) return true;
