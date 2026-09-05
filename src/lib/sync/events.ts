@@ -495,6 +495,15 @@ export function extractVenue(text: string): string | null {
     return atPlaceMatch[1].trim();
   }
 
+  // 4b. "in / at <academic block / audi / auditorium / hall / lab>"
+  const audiMatch = text.match(/\b(?:in|at)\s+([A-Za-z0-9\s,\-&/]+?(?:audi(?:torium)?|lab|hall|gallery|block|prp|sjt|mb|tt|smv|ab\s*\d+)(?:\s+and\s+[A-Za-z0-9\s,\-&/]+)?)/i);
+  if (audiMatch && audiMatch[1]) {
+    const raw = audiMatch[1].trim();
+    if (raw.length >= 3 && !isJobCity.test(raw)) {
+      return raw;
+    }
+  }
+
   if (/own\s+location/i.test(text) && !/not\s+own\s+location/i.test(text)) {
     return 'Own Location';
   }

@@ -85,9 +85,36 @@ export async function POST(request: Request) {
     }
     return null;
   };
-
   const targetComp = findMentionedCompany();
-  const parsedDate = parseDateTime(message);
+
+  // Determine fallback date from targetComp existing events if user only specifies time (e.g. "at 8.30 am")
+  let compFallbackDate: Date | null = null;
+  if (targetComp) {
+    const compEvts = (events || []).filter((e) => e.company_id === targetComp.id);
+    const isPpt = /ppt|pre[\s-]*placement/i.test(lowerMsg);
+    const isTest = /test|exam|assessment|code|coding/i.test(lowerMsg);
+    const isInterview = /interview|tech|hr/i.test(lowerMsg);
+    const existingPpt = compEvts.find((e) => e.event_type === 'ppt');
+    const existingTest = compEvts.find((e) => ['online_test', 'coding_test'].includes(e.event_type));
+    const existingInterview = compEvts.find((e) => ['technical_interview', 'hr_interview', 'interview'].includes(e.event_type));
+    const upcoming = compEvts.find((e) => e.start_time && new Date(e.start_time) >= new Date());
+
+    if (isPpt && existingTest?.start_time) {
+      compFallbackDate = new Date(existingTest.start_time);
+    } else if (isPpt && existingPpt?.start_time) {
+      compFallbackDate = new Date(existingPpt.start_time);
+    } else if (isTest && existingTest?.start_time) {
+      compFallbackDate = new Date(existingTest.start_time);
+    } else if (isInterview && existingInterview?.start_time) {
+      compFallbackDate = new Date(existingInterview.start_time);
+    } else if (upcoming?.start_time) {
+      compFallbackDate = new Date(upcoming.start_time);
+    } else if (compEvts.length > 0 && compEvts[0].start_time) {
+      compFallbackDate = new Date(compEvts[0].start_time);
+    }
+  }
+
+  const parsedDate = parseDateTime(message, compFallbackDate);
 
   // ═══════════════════════════════════════════════════════════════════════════
   // 1. COMMAND: Update Event Location / Venue / Mode
@@ -291,12 +318,12 @@ export async function POST(request: Request) {
     }
 
     const compEvents = (events || []).filter((e) => e.company_id === targetComp.id);
-    const existingEvt = compEvents.find((e) => e.event_type === eventType) || compEvents[0];
+    const existingEvt = compEvents.find((e) => e.event_type === eventType);
 
     const extractedVenue = extractVenue(message);
-    const venue = extractedVenue || existingEvt?.venue || 'Own Location / Online';
+    const venue = extractedVenue || existingEvt?.venue || 'Campus / Offline';
     const isOffline =
-      /offline|lab|campus|prp|sjt|hall|room|auditorium|physical/i.test(venue) ||
+      /offline|lab|campus|prp|sjt|hall|room|auditorium|audi|ab\s*\d+|physical/i.test(venue) ||
       /offline|physical|in[\s-]person/i.test(lowerMsg);
     const mode = isOffline ? 'offline' : 'online';
 
@@ -322,9 +349,9 @@ export async function POST(request: Request) {
 
       eventRecord = updated;
 
-      // Remove duplicate events for this company if any exist
-      if (compEvents.length > 1) {
-        const duplicateIds = compEvents.filter((e) => e.id !== existingEvt.id).map((e) => e.id);
+      // Remove duplicate events of the SAME event_type for this company if any exist
+      const duplicateIds = compEvents.filter((e) => e.id !== existingEvt.id && e.event_type === eventType).map((e) => e.id);
+      if (duplicateIds.length > 0) {
         await supabase.from('events').delete().in('id', duplicateIds);
       }
     } else {
@@ -348,19 +375,23 @@ export async function POST(request: Request) {
       eventRecord = insertedEvent;
     }
 
-    // Update application status to reflect the scheduled event
-    await supabase.from('applications').upsert(
-      {
-        user_id: session.userId,
-        company_id: targetComp.id,
-        status: appStatus,
-        status_source: 'ai_assistant_chat',
-        status_confidence: 'manual',
-        manual_override: true,
-        last_updated: new Date().toISOString(),
-      },
-      { onConflict: 'user_id,company_id' }
-    );
+    // Only update appStatus if current status is at an earlier stage in pipeline
+    const currentStatus = appMap.get(targetComp.id)?.status;
+    const isHigherStage = currentStatus && ['test_scheduled', 'interview_scheduled', 'selected'].includes(currentStatus);
+    if (!isHigherStage) {
+      await supabase.from('applications').upsert(
+        {
+          user_id: session.userId,
+          company_id: targetComp.id,
+          status: appStatus,
+          status_source: 'ai_assistant_chat',
+          status_confidence: 'manual',
+          manual_override: true,
+          last_updated: new Date().toISOString(),
+        },
+        { onConflict: 'user_id,company_id' }
+      );
+    }
 
     // Push to Google Calendar (update in-place if the event record already has a gcal_event_id)
     pushEventToGoogleCalendar({
