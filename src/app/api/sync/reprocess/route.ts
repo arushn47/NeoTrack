@@ -699,8 +699,11 @@ export async function performReprocess(userId: string) {
     }, 0);
 
     // ONLY considered withdrawn if the withdrawal occurred AFTER the latest registration confirmation!
-    const isWithdrawn = withdrawalEmails.length > 0 && latestWithdrawalTime > latestRegistrationTime;
     const hasConfirmedRegistration = registrationEmails.length > 0 && latestRegistrationTime >= latestWithdrawalTime;
+
+    // ONLY considered withdrawn if the withdrawal occurred AFTER the latest registration confirmation!
+    // And ONLY if the candidate actually registered (hasConfirmedRegistration).
+    const isWithdrawn = hasConfirmedRegistration && withdrawalEmails.length > 0 && latestWithdrawalTime > latestRegistrationTime;
 
     const isAfterRegistration = (e: { received_at: string | null }) => {
       if (!latestRegistrationTime) return true;
@@ -725,7 +728,8 @@ export async function performReprocess(userId: string) {
     };
 
     const isPptEmail = (e: { subject?: string | null }) => {
-      return /ppt|pre[\s-]*placement/i.test(e.subject || '');
+      const s = (e.subject || '').toLowerCase();
+      return /ppt|pre[\s-]*placement/i.test(s) && !/test|exam|assessment|coding|mettl|hackerrank/i.test(s);
     };
 
     const testShortlistPattern =
@@ -733,7 +737,7 @@ export async function performReprocess(userId: string) {
     const testShortlistEmails = activeDriveEmails.filter((e) => {
       if (!isAfterRegistration(e)) return false;
       if (isInterviewOrSelectionEmail(e)) return false; // Next round / interview is NOT a test shortlist!
-      if (isPptEmail(e)) return false; // PPT announcements with venue/seating lists are NOT test shortlists!
+      if (isPptEmail(e)) return false; // Pure PPT announcements with venue/seating lists are NOT test shortlists!
       if (e.classification === 'shortlist') return true;
       const full = `${e.subject || ''} ${e.body_snippet || ''}`;
       return testShortlistPattern.test(full);
@@ -764,18 +768,12 @@ export async function performReprocess(userId: string) {
     const sortedSelectionEmails = [...selectionEmails].sort(
       (a, b) => (a.received_at ? new Date(a.received_at).getTime() : 0) - (b.received_at ? new Date(b.received_at).getTime() : 0)
     );
-    const latestSelectionEmail = sortedSelectionEmails[sortedSelectionEmails.length - 1];
-    const isMatchedInSelectionList = latestSelectionEmail
-      ? matchedShortlistEmailIds.has(latestSelectionEmail.id)
-      : false;
+    const isMatchedInSelectionList = sortedSelectionEmails.some((e) => matchedShortlistEmailIds.has(e.id));
 
     const sortedNextRoundEmails = [...nextRoundEmails].sort(
       (a, b) => (a.received_at ? new Date(a.received_at).getTime() : 0) - (b.received_at ? new Date(b.received_at).getTime() : 0)
     );
-    const latestNextRoundEmail = sortedNextRoundEmails[sortedNextRoundEmails.length - 1];
-    const isMatchedInNextRound = latestNextRoundEmail
-      ? matchedShortlistEmailIds.has(latestNextRoundEmail.id)
-      : false;
+    const isMatchedInNextRound = sortedNextRoundEmails.some((e) => matchedShortlistEmailIds.has(e.id));
 
     const hasCompanyCandidateMatch = activeDriveEmails.some((e) => matchedEmailIds.has(e.id));
 
@@ -789,14 +787,16 @@ export async function performReprocess(userId: string) {
     if (sortedTestShortlists.length > 0) {
       const latestTestShortlistEmail = sortedTestShortlists[sortedTestShortlists.length - 1];
       isMatchedInTest = matchedShortlistEmailIds.has(latestTestShortlistEmail.id);
-    } else if (testEmails.length > 0) {
-      // Open test with no restrictive shortlist (open to all registered candidates)
-      isMatchedInTest = hasConfirmedRegistration;
+    }
+    if (!isMatchedInTest) {
+      isMatchedInTest =
+        testShortlistEmails.some((e) => matchedShortlistEmailIds.has(e.id)) ||
+        testEmails.some((e) => matchedShortlistEmailIds.has(e.id));
     }
 
     // Genuine assessment Google Sheet slot match (excluding PPT venue sheets)
     const hasGSheetTestEvent = gsheetEventsForCompany.some((g) => g.eventType === 'online_test');
-    if (hasGSheetTestEvent && sortedTestShortlists.length === 0) {
+    if (hasGSheetTestEvent) {
       isMatchedInTest = true;
     }
 
@@ -868,27 +868,19 @@ export async function performReprocess(userId: string) {
       } else {
         computedStatus = 'test_scheduled';
       }
-    } else if (
-      hasConfirmedRegistration ||
-      activeDriveEmails.some((e) => e.classification === 'registration' || /registration/i.test(e.subject || ''))
-    ) {
+    } else if (hasConfirmedRegistration) {
       // 3. Candidate registered / applied for this drive:
-      if (testShortlistEmails.length > 0 || selectionEmails.length > 0 || nextRoundEmails.length > 0) {
-        // A test shortlist, interview, or selection list was released, and candidate was not in the latest shortlist!
+      if (testShortlistEmails.length > 0 || selectionEmails.length > 0 || nextRoundEmails.length > 0 || testEmails.length > 0) {
+        // A test, interview, or selection list was released, and candidate was not in the shortlist!
         computedStatus = 'not_shortlisted';
-      } else if (testEmails.length > 0) {
-        // Open test announced for all registered students (no restrictive shortlist)
-        computedStatus = 'test_scheduled';
       } else if (hasPptEvent) {
         computedStatus = 'ppt_scheduled';
       } else {
         computedStatus = 'applied';
       }
     } else if (hasCompanyCandidateMatch) {
-      if (testShortlistEmails.length > 0 || selectionEmails.length > 0 || nextRoundEmails.length > 0) {
+      if (testShortlistEmails.length > 0 || selectionEmails.length > 0 || nextRoundEmails.length > 0 || testEmails.length > 0) {
         computedStatus = 'not_shortlisted';
-      } else if (testEmails.length > 0) {
-        computedStatus = 'test_scheduled';
       } else if (hasPptEvent) {
         computedStatus = 'ppt_scheduled';
       } else {
