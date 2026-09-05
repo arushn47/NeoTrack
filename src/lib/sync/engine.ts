@@ -722,8 +722,8 @@ const GENERIC_MATCH_TOKENS = new Set([
  * Prevents false matches (e.g. "Kinaxis Super Dream" matching "Superjoin Finance").
  */
 export function isFuzzyCompanyMatch(compName: string, targetName: string): boolean {
-  const cLower = compName.toLowerCase().trim();
-  const tLower = targetName.toLowerCase().trim();
+  let cLower = compName.toLowerCase().trim();
+  let tLower = targetName.toLowerCase().trim();
 
   // Guard: Never merge distinct role tracks or divisions (SDET, SRE, SAP, GDS, Aerospace, Solutions Lab, Technologies) with base company or each other
   const trackTokens = ['sdet', 'sre', 'sap', 'gds', 'aerospace', 'solutions lab', 'technologies'];
@@ -735,6 +735,10 @@ export function isFuzzyCompanyMatch(compName: string, targetName: string): boole
       return false;
     }
   }
+
+  // Normalize known typos
+  cLower = cLower.replace(/\bunthikable\b/g, 'unthinkable');
+  tLower = tLower.replace(/\bunthikable\b/g, 'unthinkable');
 
   if (cLower === tLower) return true;
 

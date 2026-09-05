@@ -370,6 +370,9 @@ export function computeNormalizedKey(name: string): string {
   // 1. Lowercase
   let str = name.toLowerCase();
 
+  // Fix known typos
+  str = str.replace(/\bunthikable\b/g, 'unthinkable');
+
   // 2. Remove punctuation (dashes, dots, ampersands, parens, etc.) — treat as spaces
   str = str.replace(/[^a-z0-9\s]/g, ' ');
 
@@ -885,6 +888,9 @@ function cleanSubjectNoise(subject: string): string {
 export function cleanCompanyName(name: string): string {
   let str = cleanSubjectNoise(name);
 
+  // Fix known CDC typos / misspellings in company names
+  str = str.replace(/\bunthikable\b/gi, 'Unthinkable');
+
   // Strip leading date change / update noise if any slipped through
   str = str.replace(/^(?:date\s+change\s+(?:for|:)?|rescheduled\s+(?:for|:)?)/i, '').trim();
 
@@ -941,8 +947,10 @@ export function normalizeCompanyName(name: string): string {
     return '';
   }
 
+  const corrected = name.replace(/\bunthikable\b/gi, 'Unthinkable');
+
   // Title-case: keep all-caps short tokens (abbreviations) as-is
-  return name
+  return corrected
     .trim()
     .split(/\s+/)
     .map((word) => {

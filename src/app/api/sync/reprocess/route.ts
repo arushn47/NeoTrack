@@ -756,9 +756,20 @@ export async function performReprocess(userId: string) {
     const matchedShortlistEmailIds = new Set(
       (candidateMatches || [])
         .filter((m) => {
-          if (m.match_type === 'xlsx_applied_list') return false;
+          const emailId = (m as unknown as { email_id: string }).email_id;
+          const emailForMatch = activeDriveEmails.find((e) => e.id === emailId);
+          const isTestEmail = !!(emailForMatch && !isPptEmail(emailForMatch) && testPattern.test(`${emailForMatch.subject || ''} ${emailForMatch.body_snippet || ''}`));
+
+          if (m.match_type === 'xlsx_applied_list') {
+            // If this applied/opt-in list was specifically attached to an online test announcement (and not a PPT),
+            // it represents the official test participant list!
+            return isTestEmail;
+          }
           const val = (m.matched_value || '').toLowerCase();
-          if (/applied[_\s-]*list|opt[_\s-]*in[_\s-]*list|opt_in|registration[_\s-]*list|applied[_\s-]*student|applied[_\s-]*candidate/i.test(val)) return false;
+          if (/applied[_\s-]*list|opt[_\s-]*in[_\s-]*list|opt_in|registration[_\s-]*list|applied[_\s-]*student|applied[_\s-]*candidate/i.test(val)) {
+            // Same rule: If this list is attached to an online test email, candidate is scheduled for the test!
+            return isTestEmail;
+          }
           return true;
         })
         .map((m) => (m as unknown as { email_id: string }).email_id)
