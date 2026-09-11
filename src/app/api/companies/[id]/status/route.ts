@@ -62,5 +62,13 @@ export async function PATCH(
     );
   }
 
+  // Trigger background Google Calendar reconciliation so status changes (withdrawn, rejected, shortlisted)
+  // are immediately reflected on the user's Google Calendar.
+  import('@/lib/calendar/google-sync').then(({ reconcileUserGoogleCalendar }) => {
+    reconcileUserGoogleCalendar(session.userId).catch((err) => {
+      console.warn('[GCal Status Sync] Background reconciliation error:', err);
+    });
+  });
+
   return NextResponse.json({ data: application, error: null });
 }

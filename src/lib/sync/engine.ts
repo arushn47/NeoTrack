@@ -12,6 +12,8 @@ import {
   extractCompanyName,
   normalizeCompanyName,
   computeNormalizedKey,
+  checkAcronymMatch,
+  extractCompanyAliases,
   ENGLISH_STOPWORDS,
   type ClassificationResult,
 } from '@/lib/sync/classifier';
@@ -90,13 +92,14 @@ export async function runSync(
   const hasPersonal = connectedAccounts.some((a) => a.account_type === 'personal');
   const hasCollege = connectedAccounts.some((a) => a.account_type === 'college');
 
-  // Fetch user's configured Neo ID
+  // Fetch user's configured Neo ID and email
   const { data: userData } = await supabase
     .from('users')
-    .select('neo_id')
+    .select('neo_id, email')
     .eq('id', userId)
     .single();
   const userNeoId = userData?.neo_id || null;
+  const userEmail = userData?.email || '';
 
   // RULE: Guard sync until user completes all 3 onboarding setup items
   if (!hasPersonal || !hasCollege || !userNeoId) {
@@ -645,7 +648,8 @@ export async function runSync(
               return (
                 cLower === norm ||
                 (c.aliases || []).includes(norm) ||
-                isFuzzyCompanyMatch(c.name, compName)
+                isFuzzyCompanyMatch(c.name, compName) ||
+                (c.aliases || []).some((a: string) => isFuzzyCompanyMatch(a, compName))
               );
             });
             if (matched) {
@@ -690,12 +694,54 @@ export async function runSync(
               set.add(matchedCompanyId);
               threadCompanyMap.set(email.thread_id, set);
             }
+
+            // Process reconciled circular for Events, CTC, and Roles
+            try {
+              const { processEmailForEventsAndStatus } = await import(
+                '@/lib/sync/status-engine'
+              );
+              await processEmailForEventsAndStatus(
+                supabase,
+                userId,
+                matchedCompanyId,
+                {
+                  gmailMessageId: email.id,
+                  threadId: email.thread_id,
+                  sender: email.sender || '',
+                  senderEmail: email.sender?.match(/<([^>]+)>/)?.[1] || email.sender || '',
+                  subject: email.subject || '',
+                  receivedAt: email.received_at ? new Date(email.received_at) : new Date(),
+                  bodySnippet: email.body_snippet || '',
+                  bodyPlain: email.body_snippet || '',
+                  bodyHtml: '',
+                  hasAttachments: false,
+                  attachments: [],
+                  labels: [],
+                },
+                email.id,
+                userNeoId,
+                userEmail
+              );
+            } catch (err) {
+              console.warn('Failed to process reconciled circular for events:', err);
+            }
           }
         }
       }
     }
   } catch (reconcileErr) {
     console.warn('Post-sync circular reconciliation non-critical error:', reconcileErr);
+  }
+
+  // 6. Automatic Google Calendar reconciliation:
+  // Ensures Google Calendar stays 100% in sync with the user's active placement schedule
+  // (removes stale/withdrawn/rejected events, updates changed times, inserts new eligible rounds)
+  try {
+    const { reconcileUserGoogleCalendar } = await import('@/lib/calendar/google-sync');
+    const calResult = await reconcileUserGoogleCalendar(userId);
+    console.log(`[Google Calendar Auto-Sync] User ${userId}: ${calResult.message}`);
+  } catch (calErr) {
+    console.warn('[Google Calendar Auto-Sync] Non-critical reconciliation error:', calErr);
   }
 
   return result;
@@ -749,6 +795,13 @@ export function isFuzzyCompanyMatch(compName: string, targetName: string): boole
   const cKey = computeNormalizedKey(compName);
   const tKey = computeNormalizedKey(targetName);
   if (cKey.length >= 3 && tKey.length >= 3 && cKey === tKey) {
+    return true;
+  }
+
+  // --- Step 1.5: Acronym / Initialism match ---
+  // Matches "WTW" ↔ "Willis Towers Watson", "TCS" ↔ "Tata Consultancy Services",
+  // parenthetical aliases "(WTW India)", known initialisms, etc.
+  if (checkAcronymMatch(cLower, tLower) || checkAcronymMatch(tLower, cLower)) {
     return true;
   }
 
@@ -829,15 +882,27 @@ async function upsertCompany(
   // isFuzzyCompanyMatch checks (in order):
   //   a. Track guard: never merge distinct tracks (SDET/SRE/Aerospace/Solutions Lab)
   //   b. Normalized-key match: catches "goldmansachs" == "Goldman Sachs", "ExxonMobil" == "Exxon Mobil"
-  //   c. Token overlap: catches "PlaySimple" matching "PlaySimple Games"
+  //   c. Acronym / Initialism match: catches "WTW" == "Willis Towers Watson", "TCS" == "Tata Consultancy Services"
+  //   d. Token overlap: catches "PlaySimple" matching "PlaySimple Games"
   const { data: userCompanies } = await supabase
     .from('companies')
-    .select('id, name')
+    .select('id, name, aliases')
     .eq('user_id', userId);
 
   if (userCompanies && userCompanies.length > 0) {
     for (const comp of userCompanies) {
-      if (isFuzzyCompanyMatch(comp.name, normalized)) {
+      const aliasMatch = (comp.aliases || []).some((a: string) => isFuzzyCompanyMatch(a, normalized));
+      if (isFuzzyCompanyMatch(comp.name, normalized) || aliasMatch) {
+        // Automatically persist new alias on the company if not already present
+        const existingAliases: string[] = comp.aliases || [];
+        const normLower = normalized.toLowerCase();
+        if (!existingAliases.includes(normLower)) {
+          const updatedAliases = [...existingAliases, normLower];
+          await supabase
+            .from('companies')
+            .update({ aliases: updatedAliases })
+            .eq('id', comp.id);
+        }
         return comp.id;
       }
     }
@@ -849,14 +914,13 @@ async function upsertCompany(
   }
 
   // 5. If no match found and allowCreate is true (Personal email), create new company
+  const generatedAliases = extractCompanyAliases(companyName, normalized);
   const { data: newCompany, error } = await supabase
     .from('companies')
     .insert({
       user_id: userId,
       name: normalized,
-      aliases: [normalized.toLowerCase(), companyName.toLowerCase()].filter(
-        (v, i, a) => a.indexOf(v) === i // Deduplicate
-      ),
+      aliases: generatedAliases,
     })
     .select('id')
     .single();

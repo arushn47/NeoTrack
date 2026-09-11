@@ -948,6 +948,27 @@ export function extractJobDetails(text: string): ExtractedJobDetails {
     }
   }
 
+  // 3. Fallback: match standalone profile header lines (e.g. "Graduate Analyst– Insurance Consulting & Technology")
+  if (!role) {
+    const titleMatch = cleanWithLines.match(
+      /(?:^|\n|\r)[ \t]*(?:[•*\-–—][ \t]*)?([A-Za-z0-9 \t–—\-&/]+?(?:Analyst|Engineer|Developer|Consultant|Scientist|Trainee|Specialist|Associate)(?:[ \t–—\-&/][A-Za-z0-9 \t–—\-&/]{0,50})?)(?:\r?\n|$)/i
+    );
+    if (titleMatch && titleMatch[1]) {
+      const candidateRole = titleMatch[1]
+        .replace(/^[*,\.\s>\-]+/, '')
+        .replace(/[*,\.\s>\-]+$/, '')
+        .replace(/\s+/g, ' ')
+        .trim();
+      if (
+        candidateRole.length >= 4 &&
+        candidateRole.length <= 80 &&
+        !/\byou\b|\bwe\b|\beligible\b|\bcongratulat\b|\bplacement\b|\bdrive\b|\binterview\b/i.test(candidateRole)
+      ) {
+        role = candidateRole;
+      }
+    }
+  }
+
   // NOTE: Category and Role are strictly separate!
   // Category is the CDC placement bracket (e.g. "Super Dream Offer").
   // Role is the engineering profile (e.g. "Associate Software Engineer").
@@ -960,8 +981,8 @@ export function extractJobDetails(text: string): ExtractedJobDetails {
     const rawLoc = locMatch[1]
       .replace(/^[:\-–—\s*\(s\)]+/, '')
       .replace(/[:\-–—\s*]+$/, '')
-      .replace(/\s*(?:Note|Eligibility|Registration|CTC|Stipend|Internship|Placement|Offer|Process|Website|Warm|Kind|Selection|Designation|Role|Job|JD|Position|Skills|Service|All\s+the|Joining|Work\s+Mode|Economy|On\s+Wed|For\s+more|PPO|About|Mandatory|depending\s+on|You\s+can|Write\s+from|Forwarded|Queries|LC\s*\d|PRP|SJT|Anna|Lab|Hall|Venue|---).*$/i, '')
-      .replace(/\b(?:internship|placement|drive|hiring|offer|job|role|any\s+honeywell\s+site)\b/gi, '')
+      .replace(/\s*(?:Start\s+Date|[•*]|Note|Eligibility|Registration|CTC|Stipend|Internship|Placement|Offer|Process|Website|Warm|Kind|Selection|Designation|Role|Job|JD|Position|Skills|Service|All\s+the|Joining|Work\s+Mode|Economy|On\s+Wed|For\s+more|PPO|About|Mandatory|depending\s+on|You\s+can|Write\s+from|Forwarded|Queries|LC\s*\d|PRP|SJT|Anna|Lab|Hall|Venue|---).*$/i, '')
+      .replace(/\b(?:internship|placement|drive|hiring|offer|job|role|any\s+honeywell\s+site|only|based|preferred)\b/gi, '')
       .replace(/^\s*(?:\(Core\):?|Core\):?)\s*/i, '')
       .replace(/[\.\,\:\-\(\)\–—]+$/, '')
       .replace(/^[\.\,\:\-\(\)\–—]+/, '')

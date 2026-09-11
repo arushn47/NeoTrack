@@ -180,6 +180,8 @@ export default function CalendarClient({ events }: CalendarClientProps) {
 
   useEffect(() => {
     setMounted(true);
+    // Automatically reconcile Google Calendar in the background whenever the user views the calendar
+    fetch('/api/calendar/push-all', { method: 'POST' }).catch(() => {});
   }, []);
 
   // Lock body scroll and listen for Escape key when modal is open
@@ -291,7 +293,7 @@ export default function CalendarClient({ events }: CalendarClientProps) {
             title="Push all scheduled placement events directly to Google Calendar"
           >
             <CalendarCheck className={cn('w-3.5 h-3.5 text-blue-400 shrink-0', syncingGcal && 'animate-spin')} />
-            <span>{syncingGcal ? 'Syncing...' : 'Sync Google Calender'}</span>
+            <span>{syncingGcal ? 'Syncing...' : 'Sync Google Calendar'}</span>
           </button>
           <div className="flex items-center bg-zinc-900 border border-zinc-800 rounded-xl p-1 gap-1 shrink-0">
             <button

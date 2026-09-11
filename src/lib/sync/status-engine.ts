@@ -266,6 +266,21 @@ export async function processEmailForEventsAndStatus(
 
   if (isWithdrawn) {
     // Delete any previously inserted events for this company if user has withdrawn
+    const { data: toDelete } = await supabase
+      .from('events')
+      .select('id, gcal_event_id')
+      .eq('user_id', userId)
+      .eq('company_id', companyId);
+
+    if (toDelete && toDelete.length > 0) {
+      const { deleteEventFromGoogleCalendar } = await import('@/lib/calendar/google-sync');
+      for (const ev of toDelete) {
+        if (ev.gcal_event_id) {
+          deleteEventFromGoogleCalendar({ userId, companyName: '', eventId: ev.gcal_event_id }).catch(() => {});
+        }
+      }
+    }
+
     await supabase.from('events').delete().eq('user_id', userId).eq('company_id', companyId);
   } else {
     for (const event of extractedEvents) {
@@ -366,7 +381,9 @@ export async function processEmailForEventsAndStatus(
           .select('id')
           .single();
 
-        // Trigger Event Scheduled Notification (Web Push + In-App) & Google Calendar Auto-Sync
+        // Trigger Event Scheduled Notification (Web Push + In-App)
+        // Note: Google Calendar reconciliation runs holistically after sync to guarantee
+        // only confirmed, eligible events are pushed and any cancelled/withdrawn events are purged.
         if (insertedEvt) {
           const { notifyEventScheduled } = await import('@/lib/notifications/service');
           const { data: comp } = await supabase.from('companies').select('name').eq('id', companyId).single();
@@ -380,27 +397,6 @@ export async function processEmailForEventsAndStatus(
             venue: event.venue,
             eventId: insertedEvt.id,
           });
-
-          if (startTimeIso) {
-            const { pushEventToGoogleCalendar } = await import('@/lib/calendar/google-sync');
-            pushEventToGoogleCalendar({
-              userId,
-              title: `${compName} - ${event.title}`,
-              startTime: startTimeIso,
-              endTime: event.endTime ? event.endTime.toISOString() : null,
-              venue: event.venue,
-              mode: event.mode,
-            })
-              .then(async (gcalId) => {
-                if (gcalId) {
-                  await supabase
-                    .from('events')
-                    .update({ gcal_event_id: gcalId })
-                    .eq('id', insertedEvt.id);
-                }
-              })
-              .catch((err) => console.error('Google Calendar auto-sync error:', err));
-          }
         }
       }
     }
@@ -677,8 +673,24 @@ export async function processEmailForEventsAndStatus(
     appUpdate.status_confidence = isAiFlaggedForReview ? 'low' : 'high';
     // AI review notes are already included in appUpdate.notes above (with travelReq), skip double-append
 
-    // If candidate withdrew, declined, or was not shortlisted/rejected, purge scheduled events
+    // If candidate withdrew, declined, or was not shortlisted/rejected, purge scheduled events from DB and Google Calendar
     if (newStatus === 'not_shortlisted') {
+      const { data: toDelete } = await supabase
+        .from('events')
+        .select('id, gcal_event_id')
+        .eq('user_id', userId)
+        .eq('company_id', companyId)
+        .neq('event_type', 'ppt');
+
+      if (toDelete && toDelete.length > 0) {
+        const { deleteEventFromGoogleCalendar } = await import('@/lib/calendar/google-sync');
+        for (const ev of toDelete) {
+          if (ev.gcal_event_id) {
+            deleteEventFromGoogleCalendar({ userId, companyName: '', eventId: ev.gcal_event_id }).catch(() => {});
+          }
+        }
+      }
+
       await supabase
         .from('events')
         .delete()
@@ -686,6 +698,21 @@ export async function processEmailForEventsAndStatus(
         .eq('company_id', companyId)
         .neq('event_type', 'ppt');
     } else if (['withdrawn', 'declined', 'rejected'].includes(newStatus)) {
+      const { data: toDelete } = await supabase
+        .from('events')
+        .select('id, gcal_event_id')
+        .eq('user_id', userId)
+        .eq('company_id', companyId);
+
+      if (toDelete && toDelete.length > 0) {
+        const { deleteEventFromGoogleCalendar } = await import('@/lib/calendar/google-sync');
+        for (const ev of toDelete) {
+          if (ev.gcal_event_id) {
+            deleteEventFromGoogleCalendar({ userId, companyName: '', eventId: ev.gcal_event_id }).catch(() => {});
+          }
+        }
+      }
+
       await supabase.from('events').delete().eq('user_id', userId).eq('company_id', companyId);
     }
 

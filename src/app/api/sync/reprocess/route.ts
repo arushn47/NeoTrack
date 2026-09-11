@@ -1,7 +1,14 @@
 import { NextResponse } from 'next/server';
 import { getSession } from '@/lib/auth';
 import { createAdminClient } from '@/lib/supabase/admin';
-import { classifyEmail, cleanCompanyName, extractCompanyName, normalizeCompanyName, isInvalidCompanyName } from '@/lib/sync/classifier';
+import {
+  classifyEmail,
+  cleanCompanyName,
+  extractCompanyName,
+  normalizeCompanyName,
+  isInvalidCompanyName,
+  extractCompanyAliases,
+} from '@/lib/sync/classifier';
 import { extractDriveNumber, extractEvents, extractJobDetails, extractTravelRequirement } from '@/lib/sync/events';
 import { isFuzzyCompanyMatch } from '@/lib/sync/engine';
 import {
@@ -272,12 +279,13 @@ export async function performReprocess(userId: string) {
               }
             } else {
               // Create new legitimate NeoPAT company
+              const generatedAliases = extractCompanyAliases(companyName, normalized);
               const { data: newComp } = await supabase
                 .from('companies')
                 .insert({
                   user_id: userId,
                   name: normalized,
-                  aliases: [normalized.toLowerCase(), companyName.toLowerCase()],
+                  aliases: generatedAliases,
                 })
                 .select('id')
                 .single();
@@ -302,6 +310,13 @@ export async function performReprocess(userId: string) {
           validCompanyMap.get(normalized.toLowerCase())?.id === comp.id
         ) {
           validCompanyMap.set(normalized.toLowerCase(), comp);
+        }
+        // Register all generated aliases into validCompanyMap for direct resolution
+        const aliases = extractCompanyAliases(companyName, comp.canonicalName);
+        for (const alias of aliases) {
+          if (!validCompanyMap.has(alias.toLowerCase())) {
+            validCompanyMap.set(alias.toLowerCase(), comp);
+          }
         }
         if (driveNumber) {
           driveNumberToCompanyMap.set(driveNumber, comp);

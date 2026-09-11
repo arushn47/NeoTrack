@@ -399,7 +399,7 @@ const SUBJECT_COMPANY_PATTERNS: RegExp[] = [
   /(?:congratulations!{1,3}\s*(?:you'?re\s+)?eligible\s+for\s+|confirmed:\s*(?:your\s+registration\s+for\s+)?)(?:m\/s\.?\s*)?([A-Za-z0-9&\s\-\.]+?)\s*(?:\([^)]+\))?\s+placement\s+drive/i,
   // "Congratulations!! Zluri Super Dream Internship Selection List - 2027 Batch"
   // "Congratulations!! Flipkart Super Dream Internship Selection list 2027 Batch"
-  /(?:congratulations!{1,3}\s*)(?:for\s+)?([A-Za-z0-9&\s\-\.]+?)\s*(?:\([^)]+\))?\s+(?:super\s+dream|dream|regular|summer)?\s*(?:internship|placement|ppo)?\s*(?:selection\s+list|shortlist)/i,
+  /(?:congratulations!{1,3}\s*)(?:for\s+)?([A-Za-z0-9&\s\-\.]+?)\s*(?:\([^)]+\))?\s+(?:super\s+dream|dream|regular|summer)?\s*(?:internship|placement|ppo|offer)?\s*(?:selection\s+list|shortlist)/i,
   // "Important: Date Change for Value Labs Placement Drive"
   // "Important: Date Change for Infosy 2027 batch Placement Drive"
   // "Important : Date change : Sandisk Device Design Centre Placement Drive"
@@ -414,7 +414,7 @@ const SUBJECT_COMPANY_PATTERNS: RegExp[] = [
   // "Company Name - Drive Registration"
   /^([A-Za-z0-9&\s\-\.]+?)\s*[-–—]\s*drive\s+registration/i,
   // "Zluri Super Dream Internship Selection List..."
-  /^([A-Za-z0-9&\s\-\.]+?)\s*(?:\([^)]+\))?\s+(?:super\s+dream|dream|regular)?\s*(?:internship|placement|ppo)?\s*(?:selection\s+list|shortlist)/i,
+  /^([A-Za-z0-9&\s\-\.]+?)\s*(?:\([^)]+\))?\s+(?:super\s+dream|dream|regular)?\s*(?:internship|placement|ppo|offer)?\s*(?:selection\s+list|shortlist)/i,
   // "M/s.Value Labs Placement Drive"
   /(?:m\/s\.?\s*)([A-Za-z0-9&\s\-\.]+?)\s+placement\s+drive/i,
   // "Company Name Placement Drive" / "Company Name Campus Drive"
@@ -428,8 +428,8 @@ const SUBJECT_COMPANY_PATTERNS: RegExp[] = [
   /^([A-Za-z0-9&\s\-\.]+?)\s*(?:\([^)]+\))?\s*[-–—]?\s*(?:online\s+test|assessment|coding\s+test|physical\s+selection|selection\s+process|next\s+round|ppt|interview|selection\s+list|application\s+registration|test\s+link|registration\s+link)/i,
   // "Thanks for taking the Assessment Goldman Sachs UG Summer Internship 2027 - Pooled STEM"
   /(?:thanks\s+for\s+taking\s+(?:the\s+)?assessment|assessment\s+completed)\s+([A-Za-z0-9&\s\-\.]+?)\s+(?:ug|summer|internship|placement|drive|pooled)/i,
-  // "Company Name Super Dream Internship..."
-  /^([A-Za-z0-9&\s\-\.]+?)\s+(?:super\s+dream|dream|regular)\s+(?:internship|placement)/i,
+  // "Company Name Super Dream Internship..." / "WTW Dream Offer..."
+  /^([A-Za-z0-9&\s\-\.]+?)\s+(?:super\s+dream|dream|regular)\s+(?:internship|placement|offer|drive|hiring)/i,
   // "Report Immediately : MUFG PPT"
   /report\s+immediately\s*:\s*([A-Za-z0-9&\s\-\.]+?)\s+(?:ppt|test|drive)/i,
   // "Reminder : ProcDNA Analytics Pvt. Ltd's Next round..."
@@ -577,6 +577,154 @@ export function isInvalidCompanyName(name: string): boolean {
 }
 
 /**
+ * Known corporate initialisms and acronym mappings.
+ */
+export const KNOWN_ACRONYMS: Record<string, string[]> = {
+  wtw: ['willis towers watson'],
+  tcs: ['tata consultancy services'],
+  jpmc: ['jpmorgan chase', 'jp morgan chase', 'jpmorgan'],
+  pwc: ['pricewaterhousecoopers', 'price waterhouse coopers'],
+  baml: ['bank of america merrill lynch', 'bank of america'],
+  mufg: ['mitsubishi ufj financial group', 'mitsubishi ufj'],
+  bny: ['bny mellon', 'bank of new york mellon'],
+  lti: ['larsen & toubro infotech', 'l&t infotech'],
+  cts: ['cognizant technology solutions', 'cognizant'],
+};
+
+/**
+ * Checks whether shortStr is an acronym/initialism for longStr (or vice versa).
+ * Handles both algorithmic initialism extraction and parenthetical aliases.
+ */
+export function checkAcronymMatch(shortStr: string, longStr: string): boolean {
+  const candidate = shortStr.toLowerCase().replace(/[^a-z0-9]/g, '');
+  if (candidate.length < 2 || candidate.length > 6) return false;
+  if (ENGLISH_STOPWORDS.has(candidate) || isInvalidCompanyName(candidate)) return false;
+
+  const longLower = longStr.toLowerCase();
+
+  // 1. Fast path: Known acronym dictionary
+  if (KNOWN_ACRONYMS[candidate]) {
+    for (const fullName of KNOWN_ACRONYMS[candidate]) {
+      if (longLower.includes(fullName) || fullName.includes(longLower)) {
+        return true;
+      }
+    }
+  }
+
+  // 2. Parenthetical check: e.g. "Willis Towers Watson (WTW India)" matching "WTW"
+  const parenMatches = Array.from(longStr.matchAll(/\(([^)]+)\)/g)).map((m) => m[1].toLowerCase());
+  for (const p of parenMatches) {
+    const pClean = p.replace(/[^a-z0-9\s]/g, ' ');
+    const pWords = pClean.split(/\s+/).filter(Boolean);
+    if (pWords.includes(candidate)) return true;
+
+    // Check initials of parenthetical phrase
+    if (pWords.length >= 2) {
+      const pInitials = pWords.map((w) => w[0]).join('');
+      if (pInitials === candidate) return true;
+    }
+  }
+
+  // 3. Algorithmic initials matching from substantive words in base company name
+  // Strip parenthetical content first so "(WTW India)" doesn't pollute base words
+  const baseStr = longLower.replace(/\([^)]*\)/g, ' ').replace(/[^a-z0-9\s]/g, ' ');
+  const rawWords = baseStr.split(/\s+/).filter(Boolean);
+  if (rawWords.length < 2) return false;
+
+  const connectorWords = new Set(['of', 'and', 'for', 'in', 'the', 'at', 'on', 'to', 'a', 'an']);
+  const meaningfulWords = rawWords.filter((w) => !connectorWords.has(w));
+  if (meaningfulWords.length < 2) return false;
+
+  // A. All meaningful words' initials (e.g. "Willis Towers Watson" -> "wtw", "Tata Consultancy Services" -> "tcs")
+  const initialsAll = meaningfulWords.map((w) => w[0]).join('');
+  if (initialsAll === candidate) return true;
+
+  // B. Initials excluding legal/country noise words (e.g. "Willis Towers Watson India" -> "wtw")
+  const legalWords = new Set([
+    'india', 'pvt', 'ltd', 'limited', 'private', 'inc', 'corp', 'corporation',
+    'llc', 'tech', 'technologies', 'technology', 'solutions'
+  ]);
+  const withoutLegal = meaningfulWords.filter((w) => !legalWords.has(w));
+  if (withoutLegal.length >= 2 && withoutLegal.length < meaningfulWords.length) {
+    const initialsCore = withoutLegal.map((w) => w[0]).join('');
+    if (initialsCore === candidate) return true;
+  }
+
+  return false;
+}
+
+/**
+ * Extracts all relevant aliases for a company from its raw name and canonical name.
+ * Captures parenthetical abbreviations, algorithmic acronyms, and known corporate nicknames.
+ */
+export function extractCompanyAliases(rawName: string, canonicalName: string): string[] {
+  const aliases = new Set<string>();
+
+  const add = (str: string) => {
+    if (!str) return;
+    const clean = str.trim().toLowerCase();
+    if (clean.length >= 2 && !isInvalidCompanyName(clean)) {
+      aliases.add(clean);
+    }
+  };
+
+  add(canonicalName);
+  add(rawName);
+
+  // 1. Parenthetical extraction: e.g. "Willis Towers Watson (WTW India)" -> "wtw india", "wtw"
+  const parenMatches = Array.from(rawName.matchAll(/\(([^)]+)\)/g)).map((m) => m[1].trim());
+  for (const p of parenMatches) {
+    add(p);
+    const pWords = p.split(/\s+/).filter(Boolean);
+    for (const w of pWords) {
+      if (w.length >= 2 && w.length <= 6 && !ENGLISH_STOPWORDS.has(w.toLowerCase())) {
+        add(w);
+      }
+    }
+    if (pWords.length >= 2) {
+      const pInitials = pWords.map((w) => w[0]).join('').toLowerCase();
+      if (pInitials.length >= 2 && !ENGLISH_STOPWORDS.has(pInitials)) {
+        add(pInitials);
+      }
+    }
+  }
+
+  // 2. Multi-word acronym generation: e.g. "Willis Towers Watson" -> "wtw"
+  const base = canonicalName.replace(/\([^)]*\)/g, ' ').replace(/[^a-zA-Z0-9\s]/g, ' ');
+  const words = base.split(/\s+/).filter(Boolean);
+  if (words.length >= 2) {
+    const connectors = new Set(['of', 'and', 'for', 'in', 'the', 'at', 'on', 'to']);
+    const meaningful = words.filter((w) => !connectors.has(w.toLowerCase()));
+    if (meaningful.length >= 2 && meaningful.length <= 6) {
+      const acronym = meaningful.map((w) => w[0]).join('').toLowerCase();
+      if (acronym.length >= 2 && !ENGLISH_STOPWORDS.has(acronym)) {
+        add(acronym);
+      }
+    }
+
+    const legalWords = new Set(['india', 'pvt', 'ltd', 'limited', 'private', 'inc', 'corp', 'corporation', 'llc', 'tech', 'technologies']);
+    const withoutLegal = meaningful.filter((w) => !legalWords.has(w.toLowerCase()));
+    if (withoutLegal.length >= 2 && withoutLegal.length < meaningful.length) {
+      const acronymCore = withoutLegal.map((w) => w[0]).join('').toLowerCase();
+      if (acronymCore.length >= 2 && !ENGLISH_STOPWORDS.has(acronymCore)) {
+        add(acronymCore);
+      }
+    }
+  }
+
+  // 3. Known acronym map additions
+  const cLower = canonicalName.toLowerCase();
+  for (const [acro, fullNames] of Object.entries(KNOWN_ACRONYMS)) {
+    if (cLower === acro || fullNames.some((f) => cLower.includes(f) || f.includes(cLower))) {
+      add(acro);
+      fullNames.forEach((f) => add(f));
+    }
+  }
+
+  return Array.from(aliases);
+}
+
+/**
  * Extracts and normalizes a company name from the email subject.
  */
 export function extractCompanyName(
@@ -671,28 +819,20 @@ export function extractCompanyName(
       candidates.push({ raw, cleaned: candidateClean, normalized, score });
     };
 
-    // 1. Company: <Name>
+    // 1. Company: <Name> / Name of the Company: <Name>
     const companyMatch = bodySnippet.match(
-      /(?:^|\s|\n|\r)company\s*[:\-–—]\s*([A-Za-z0-9&\s\-\.()]+?)(?:\s+(?:drive\s+name|drive\s+number|new\s+drive\s+date|category|date\s+of\s+visit|eligibility|eligible|ctc|role|stipend|\n|\r|\*))/i
+      /(?:^|\s|\n|\r)(?:name\s+of\s+the\s+company|company\s+name|company)\s*[:\-–—*]*\s*([A-Za-z0-9&\s\-\.()]+?)(?:\s+(?:drive\s+name|drive\s+number|new\s+drive\s+date|category|date\s+of\s+visit|eligibility|eligible|ctc|role|stipend|please|log\s+in|\n|\r|\*|$))/i
     );
     if (companyMatch && companyMatch[1]) {
-      addCandidate(companyMatch[1], 10);
+      addCandidate(companyMatch[1], 25);
     }
 
     // 2. Drive Name: <Name>
     const driveNameMatch = bodySnippet.match(
-      /(?:drive\s+name|name\s+of\s+the\s+drive)\s*[:\-*]*\s*([A-Za-z0-9&\s\-\.()]+?)(?:\s+(?:drive\s+number|new\s+drive\s+date|category|date\s+of\s+visit|eligibility|eligible|ctc|role|stipend|\n|\r|\*))/i
+      /(?:drive\s+name|name\s+of\s+the\s+drive)\s*[:\-*]*\s*([A-Za-z0-9&\s\-\.()]+?)(?:\s+(?:drive\s+number|new\s+drive\s+date|category|date\s+of\s+visit|eligibility|eligible|ctc|role|stipend|company|\n|\r|\*|$))/i
     );
     if (driveNameMatch && driveNameMatch[1]) {
       addCandidate(driveNameMatch[1], 15);
-    }
-
-    // 3. Name of the Company / Company Name: <Name>
-    const bodyCompMatch = bodySnippet.match(
-      /(?:name\s+of\s+the\s+company|company\s+name)\s*[:\-*]*\s*([A-Za-z0-9&\s\-\.()]+?)(?:\s+(?:category|date\s+of\s+visit|eligibility|eligible|ctc|role|stipend|\n|\r|\*))/i
-    );
-    if (bodyCompMatch && bodyCompMatch[1]) {
-      addCandidate(bodyCompMatch[1], 10);
     }
 
     if (candidates.length > 0) {

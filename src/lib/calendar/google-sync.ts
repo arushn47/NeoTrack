@@ -64,9 +64,14 @@ export async function pushEventToGoogleCalendar(params: SyncCalendarEventParams)
     const startDate = new Date(params.startTime);
     if (isNaN(startDate.getTime())) return null;
 
-    const endDate = params.endTime && !isNaN(new Date(params.endTime).getTime())
+    let endDate = params.endTime && !isNaN(new Date(params.endTime).getTime())
       ? new Date(params.endTime)
       : new Date(startDate.getTime() + 60 * 60 * 1000); // 1 hour default
+
+    // Guard: Enforce positive duration if parsed endTime <= startTime
+    if (endDate.getTime() <= startDate.getTime()) {
+      endDate = new Date(startDate.getTime() + 60 * 60 * 1000);
+    }
 
     const eventPayload = {
       summary: params.title,
@@ -210,4 +215,316 @@ export async function deleteEventFromGoogleCalendar(params: {
     console.error('Google Calendar Delete Error:', err);
     return false;
   }
+}
+
+export interface ReconcileCalendarResult {
+  success: boolean;
+  message: string;
+  updatedCount: number;
+  insertedCount: number;
+  deletedCount: number;
+  totalEligible: number;
+  error?: string;
+}
+
+const EVENT_STAGE: Record<string, number> = {
+  ppt: 1,
+  online_test: 2,
+  coding_test: 2,
+  aptitude_test: 2,
+  group_discussion: 2,
+  technical_interview: 3,
+  hr_interview: 3,
+  interview: 3,
+  final_interview: 4,
+  offer: 5,
+};
+
+const STATUS_MAX_STAGE: Record<string, number> = {
+  applied: 2,
+  ppt_scheduled: 2,
+  shortlisted: 2,
+  test_scheduled: 2,
+  interview_scheduled: 3,
+  selected: 5,
+  offer_received: 5,
+  rejected: 0,
+  not_shortlisted: 0,
+  not_applied: 0,
+  declined: 0,
+  withdrawn: 0,
+};
+
+/**
+ * Reconciles the user's primary Google Calendar with their active placement schedule.
+ * - Enforces identical eligibility filters as the NeoTrack calendar view.
+ * - Deletes stale, duplicate, withdrawn, rejected, and deadline events.
+ * - Updates changed events in-place.
+ * - Inserts missing eligible events and links their gcal_event_id.
+ */
+export async function reconcileUserGoogleCalendar(userId: string): Promise<ReconcileCalendarResult> {
+  const supabase = createAdminClient();
+
+  // 1. Fetch user's eligible site events and pipeline status
+  const [
+    { data: events },
+    { data: companies },
+    { data: applications },
+  ] = await Promise.all([
+    supabase
+      .from('events')
+      .select('id, company_id, event_type, title, start_time, end_time, venue, mode, manual_override, gcal_event_id')
+      .eq('user_id', userId)
+      .order('start_time', { ascending: true }),
+
+    supabase
+      .from('companies')
+      .select('id, name')
+      .eq('user_id', userId),
+
+    supabase
+      .from('applications')
+      .select('company_id, status')
+      .eq('user_id', userId),
+  ]);
+
+  const companyMap = new Map((companies || []).map((c) => [c.id, c.name]));
+  const appStatusMap = new Map((applications || []).map((a) => [a.company_id, a.status]));
+
+  const seenKeys = new Set<string>();
+  const eligibleEvents: Array<{
+    id: string;
+    companyId: string;
+    companyName: string;
+    eventType: string;
+    title: string;
+    startTime: string;
+    endTime?: string | null;
+    venue?: string | null;
+    mode?: string | null;
+    gcalEventId?: string | null;
+  }> = [];
+
+  for (const evt of events || []) {
+    // NEVER sync registration deadlines to Google Calendar
+    if (evt.event_type === 'registration_deadline') continue;
+    if (!evt.start_time) continue;
+
+    const status = appStatusMap.get(evt.company_id) || 'not_applied';
+    const isManual = (evt as unknown as { manual_override?: boolean }).manual_override;
+
+    // Filter out inactive/eliminated/withdrawn companies unless manually scheduled
+    if (['not_shortlisted', 'rejected', 'not_applied', 'withdrawn', 'declined'].includes(status) && !isManual) {
+      continue;
+    }
+
+    // Filter out stages beyond candidate's current progress
+    if (!isManual) {
+      const maxStage = STATUS_MAX_STAGE[status] ?? 2;
+      const evtStage = EVENT_STAGE[evt.event_type] ?? 2;
+      if (evtStage > maxStage) continue;
+    }
+
+    // Deduplicate identical company + event_type
+    const key = `${evt.company_id}:${evt.event_type}`;
+    if (!seenKeys.has(key)) {
+      seenKeys.add(key);
+      eligibleEvents.push({
+        id: evt.id,
+        companyId: evt.company_id,
+        companyName: companyMap.get(evt.company_id) || 'Placement Drive',
+        eventType: evt.event_type,
+        title: evt.title || `${companyMap.get(evt.company_id) || 'Placement'} - ${evt.event_type}`,
+        startTime: evt.start_time,
+        endTime: evt.end_time,
+        venue: evt.venue,
+        mode: evt.mode,
+        gcalEventId: evt.gcal_event_id,
+      });
+    }
+  }
+
+  // 2. Fetch Google Calendar credentials
+  const auth = await getCalendarOAuthClient(userId);
+  if (!auth) {
+    return {
+      success: false,
+      message: 'No personal Google account linked with Calendar permissions',
+      updatedCount: 0,
+      insertedCount: 0,
+      deletedCount: 0,
+      totalEligible: eligibleEvents.length,
+      error: 'no_calendar_auth',
+    };
+  }
+
+  const calendar = google.calendar({ version: 'v3', auth });
+
+  // 3. Dynamic season window: 60 days in past to 180 days in future
+  const now = Date.now();
+  const timeMin = new Date(now - 60 * 24 * 60 * 60 * 1000).toISOString();
+  const timeMax = new Date(now + 180 * 24 * 60 * 60 * 1000).toISOString();
+
+  const allGcalItems: any[] = [];
+  let pageToken: string | undefined = undefined;
+  do {
+    try {
+      const res: any = await calendar.events.list({
+        calendarId: 'primary',
+        timeMin,
+        timeMax,
+        maxResults: 250,
+        singleEvents: true,
+        pageToken,
+      });
+      allGcalItems.push(...(res.data.items || []));
+      pageToken = res.data.nextPageToken;
+    } catch (listErr) {
+      console.error('Google Calendar list error during reconcile:', listErr);
+      break;
+    }
+  } while (pageToken);
+
+  // ONLY touch events created by NeoTrack (safe guard for personal events)
+  const neoTrackGcalEvents = allGcalItems.filter(
+    (item) => item.description?.includes('tracked by NeoTrack') || item.description?.includes('NeoTrack')
+  );
+
+  let deletedCount = 0;
+  let updatedCount = 0;
+  let insertedCount = 0;
+
+  const matchedAppEventIds = new Set<string>();
+
+  // 4. Reconcile existing GCal events: Update valid active ones, delete duplicates & stale ones
+  for (const gItem of neoTrackGcalEvents) {
+    const gStart = gItem.start?.dateTime ? new Date(gItem.start.dateTime).getTime() : 0;
+    const gSummary = (gItem.summary || '').toLowerCase();
+
+    // Match by stored gcalEventId or by company name + round type on same day
+    const match = eligibleEvents.find((e) => {
+      if (matchedAppEventIds.has(e.id)) return false; // Already claimed by another GCal event
+      if (e.gcalEventId && e.gcalEventId === gItem.id) return true;
+
+      const eStart = new Date(e.startTime).getTime();
+      const sameDay = Math.abs(eStart - gStart) < 24 * 60 * 60 * 1000;
+      const compLower = e.companyName.toLowerCase();
+      const compMatch = gSummary.includes(compLower);
+
+      const isPptE = e.eventType === 'ppt';
+      const isPptG = /ppt|talk|pre[\s-]*placement/i.test(gSummary);
+      const isTestE = /test|assessment|coding|aptitude/i.test(e.eventType);
+      const isTestG = /test|assessment|coding|assessment/i.test(gSummary);
+      const isInterviewE = /interview/i.test(e.eventType);
+      const isInterviewG = /interview/i.test(gSummary);
+
+      return sameDay && compMatch && ((isPptE && isPptG) || (isTestE && isTestG) || (isInterviewE && isInterviewG));
+    });
+
+    if (match) {
+      // Valid event -> Update in place
+      matchedAppEventIds.add(match.id);
+      const startDate = new Date(match.startTime);
+      let endDate = match.endTime && !isNaN(new Date(match.endTime).getTime())
+        ? new Date(match.endTime)
+        : new Date(startDate.getTime() + 60 * 60 * 1000);
+
+      // Guard: Enforce positive duration if parsed endTime <= startTime
+      if (endDate.getTime() <= startDate.getTime()) {
+        endDate = new Date(startDate.getTime() + 60 * 60 * 1000);
+      }
+
+      try {
+        await calendar.events.update({
+          calendarId: 'primary',
+          eventId: gItem.id,
+          requestBody: {
+            summary: match.title,
+            location: match.venue || 'Campus / Online',
+            description: `Placement Assessment / Event tracked by NeoTrack.\nMode: ${match.mode || 'Offline'}\nVenue: ${match.venue || 'Campus / Online'}`,
+            start: { dateTime: startDate.toISOString(), timeZone: 'Asia/Kolkata' },
+            end: { dateTime: endDate.toISOString(), timeZone: 'Asia/Kolkata' },
+            reminders: {
+              useDefault: false,
+              overrides: [
+                { method: 'popup', minutes: 30 },
+                { method: 'popup', minutes: 120 },
+                { method: 'email', minutes: 1440 },
+              ],
+            },
+          },
+        });
+
+        // Update gcal_event_id in Supabase if not yet stored
+        if (match.gcalEventId !== gItem.id) {
+          await supabase.from('events').update({ gcal_event_id: gItem.id }).eq('id', match.id);
+        }
+        updatedCount++;
+      } catch (updErr) {
+        console.error(`Failed to update GCal event ${gItem.id}:`, updErr);
+      }
+    } else {
+      // Stale, duplicate, or dead event -> DELETE from GCal!
+      try {
+        await calendar.events.delete({
+          calendarId: 'primary',
+          eventId: gItem.id,
+        });
+        deletedCount++;
+      } catch (delErr) {
+        console.error(`Failed to delete GCal event ${gItem.id}:`, delErr);
+      }
+    }
+  }
+
+  // 5. Insert any eligible events not yet present in GCal
+  const toInsert = eligibleEvents.filter((e) => !matchedAppEventIds.has(e.id));
+  for (const ins of toInsert) {
+    const startDate = new Date(ins.startTime);
+    let endDate = ins.endTime && !isNaN(new Date(ins.endTime).getTime())
+      ? new Date(ins.endTime)
+      : new Date(startDate.getTime() + 60 * 60 * 1000);
+
+    // Guard: Enforce positive duration if parsed endTime <= startTime
+    if (endDate.getTime() <= startDate.getTime()) {
+      endDate = new Date(startDate.getTime() + 60 * 60 * 1000);
+    }
+
+    try {
+      const created = await calendar.events.insert({
+        calendarId: 'primary',
+        requestBody: {
+          summary: ins.title,
+          location: ins.venue || 'Campus / Online',
+          description: `Placement Assessment / Event tracked by NeoTrack.\nMode: ${ins.mode || 'Offline'}\nVenue: ${ins.venue || 'Campus / Online'}`,
+          start: { dateTime: startDate.toISOString(), timeZone: 'Asia/Kolkata' },
+          end: { dateTime: endDate.toISOString(), timeZone: 'Asia/Kolkata' },
+          reminders: {
+            useDefault: false,
+            overrides: [
+              { method: 'popup', minutes: 30 },
+              { method: 'popup', minutes: 120 },
+              { method: 'email', minutes: 1440 },
+            ],
+          },
+        },
+      });
+
+      if (created.data.id) {
+        await supabase.from('events').update({ gcal_event_id: created.data.id }).eq('id', ins.id);
+        insertedCount++;
+      }
+    } catch (insErr) {
+      console.error(`Failed to insert GCal event for ${ins.companyName}:`, insErr);
+    }
+  }
+
+  return {
+    success: true,
+    message: `Google Calendar synced: ${updatedCount} updated, ${insertedCount} inserted, ${deletedCount} stale events removed.`,
+    updatedCount,
+    insertedCount,
+    deletedCount,
+    totalEligible: eligibleEvents.length,
+  };
 }
