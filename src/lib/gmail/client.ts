@@ -60,7 +60,7 @@ export function getPlacementSearchQuery(
       : ' after:2026/07/01';
 
     // College accounts — STRICTLY official placement office and batch placement group
-    return `(from:placementoffice@vitbhopal.ac.in OR from:vitlions2027@vitbhopal.ac.in OR to:vitlions2027@vitbhopal.ac.in)${collegeDateFilter} -category:promotions -category:social`;
+    return `(from:placementoffice@vitbhopal.ac.in OR from:vitlions2027@vitbhopal.ac.in)${collegeDateFilter} -category:promotions -category:social`;
   }
 
   // Personal accounts — STRICTLY official NeoPAT / CDC emails from vitstudent.ac.in starting July 2026
