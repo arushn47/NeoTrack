@@ -285,13 +285,17 @@ export default function LoginClient() {
 
       {/* Footer */}
       <footer className="relative z-10 w-full max-w-7xl mx-auto px-6 py-6 border-t border-zinc-800/60 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-zinc-500">
-        <p>© 2026 NeoTrack · Engineered for VIT Campus Placements</p>
-        <div className="flex items-center gap-4 text-zinc-400">
-          <span>End-to-End Encrypted</span>
+        <p>© {new Date().getFullYear()} NeoTrack · Engineered for VIT Campus Placements</p>
+        <div className="flex items-center gap-4">
+          <Link href="/privacy" className="text-zinc-400 hover:text-indigo-300 transition-colors">
+            Privacy Policy
+          </Link>
           <span>·</span>
-          <span>Google OAuth 2.0 Verified</span>
+          <Link href="/terms" className="text-zinc-400 hover:text-indigo-300 transition-colors">
+            Terms of Service
+          </Link>
           <span>·</span>
-          <span>FastAPI Microservice</span>
+          <span className="text-zinc-500">Google OAuth 2.0</span>
         </div>
       </footer>
     </div>

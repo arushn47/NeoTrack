@@ -1,14 +1,67 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
   <defs>
+    <!-- Dark background gradient -->
     <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#18181b" />
-      <stop offset="100%" stop-color="#09090b" />
+      <stop offset="0%" stop-color="#12121f" />
+      <stop offset="100%" stop-color="#0a0a14" />
     </linearGradient>
+    <!-- Primary indigo-violet accent -->
     <linearGradient id="accentGrad" x1="0%" y1="0%" x2="100%" y2="100%">
       <stop offset="0%" stop-color="#818cf8" />
-      <stop offset="100%" stop-color="#6366f1" />
+      <stop offset="50%" stop-color="#6366f1" />
+      <stop offset="100%" stop-color="#8b5cf6" />
     </linearGradient>
+    <!-- Cyan accent for tracking line -->
+    <linearGradient id="cyanGrad" x1="0%" y1="100%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#22d3ee" />
+      <stop offset="100%" stop-color="#a78bfa" />
+    </linearGradient>
+    <!-- Glow filter -->
+    <filter id="glow" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="6" result="coloredBlur" />
+      <feMerge>
+        <feMergeNode in="coloredBlur" />
+        <feMergeNode in="SourceGraphic" />
+      </feMerge>
+    </filter>
+    <filter id="softGlow" x="-10%" y="-10%" width="120%" height="120%">
+      <feGaussianBlur stdDeviation="3" result="coloredBlur" />
+      <feMerge>
+        <feMergeNode in="coloredBlur" />
+        <feMergeNode in="SourceGraphic" />
+      </feMerge>
+    </filter>
   </defs>
-  <rect width="512" height="512" rx="128" fill="url(#bgGrad)" stroke="#27272a" stroke-width="8" />
-  <path d="M160 368V144H208L304 296V144H352V368H304L208 216V368H160Z" fill="url(#accentGrad)" />
+
+  <!-- Background rounded rect -->
+  <rect width="512" height="512" rx="120" fill="url(#bgGrad)" />
+
+  <!-- Subtle grid lines for tech feel -->
+  <g opacity="0.06" stroke="#818cf8" stroke-width="1">
+    <line x1="0" y1="128" x2="512" y2="128" />
+    <line x1="0" y1="256" x2="512" y2="256" />
+    <line x1="0" y1="384" x2="512" y2="384" />
+    <line x1="128" y1="0" x2="128" y2="512" />
+    <line x1="256" y1="0" x2="256" y2="512" />
+    <line x1="384" y1="0" x2="384" y2="512" />
+  </g>
+
+  <!-- Outer ring accent (top arc) -->
+  <circle cx="256" cy="256" r="190" fill="none" stroke="url(#accentGrad)" stroke-width="2.5" stroke-dasharray="8 6" opacity="0.25" />
+
+  <!-- N letterform — bold, modern, placement tracking feel -->
+  <!-- Left vertical bar -->
+  <rect x="140" y="148" width="52" height="216" rx="10" fill="url(#accentGrad)" filter="url(#softGlow)" />
+  <!-- Right vertical bar -->
+  <rect x="320" y="148" width="52" height="216" rx="10" fill="url(#accentGrad)" filter="url(#softGlow)" />
+  <!-- Diagonal stroke of the N -->
+  <polygon points="140,148 192,148 372,364 320,364" fill="url(#accentGrad)" filter="url(#softGlow)" />
+
+  <!-- Tracking pulse dot — bottom right of the N (the "signal" metaphor) -->
+  <circle cx="372" cy="168" r="18" fill="#22d3ee" opacity="0.9" filter="url(#glow)" />
+  <circle cx="372" cy="168" r="10" fill="white" opacity="0.95" />
+
+  <!-- Small decorative accent nodes on the tracking arc -->
+  <circle cx="148" cy="370" r="7" fill="url(#cyanGrad)" opacity="0.7" filter="url(#softGlow)" />
+  <circle cx="256" cy="96" r="5" fill="url(#accentGrad)" opacity="0.5" />
 </svg>
