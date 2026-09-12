@@ -8,8 +8,12 @@ export const maxDuration = 300; // 5 min — handles multi-user sync on Vercel P
 async function executeBackgroundSync(userIds: string[]) {
   for (const userId of userIds) {
     try {
-      await runSync(userId);
-      console.log(`[Cron Sync] Successfully synced user ${userId}`);
+      const res = await runSync(userId);
+      if (res?.alreadyRunning) {
+        console.log(`[Cron Sync] User ${userId} is currently syncing. Skipped concurrent run.`);
+      } else {
+        console.log(`[Cron Sync] Successfully synced user ${userId}`);
+      }
     } catch (err: any) {
       console.error(`[Cron Sync] Failed for user ${userId}:`, err);
     }
@@ -64,7 +68,11 @@ export async function GET(req: NextRequest) {
       for (const userId of userIds) {
         try {
           const result = await runSync(userId);
-          syncResults.push({ userId, status: 'success', result });
+          if (result?.alreadyRunning) {
+            syncResults.push({ userId, status: 'skipped_already_running', message: 'Sync already in progress' });
+          } else {
+            syncResults.push({ userId, status: 'success', result });
+          }
         } catch (err: any) {
           console.error(`[Cron Sync] Failed for user ${userId}:`, err);
           syncResults.push({ userId, status: 'error', error: err.message });

@@ -25,6 +25,7 @@ interface SyncProgress {
   skippedDuplicates: number;
   errors: string[];
   currentSubject?: string;
+  isInitialSync?: boolean;
 }
 
 export default function Topbar({ userName, userAvatar, lastSyncAt }: TopbarProps) {
@@ -32,6 +33,7 @@ export default function Topbar({ userName, userAvatar, lastSyncAt }: TopbarProps
   const [isSyncing, setIsSyncing] = useState(false);
   const isSyncingRef = useRef(false);
   const hasMountedAutoSyncRef = useRef(false);
+  const pollIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
   const [showUserMenu, setShowUserMenu] = useState(false);
   const [mounted, setMounted] = useState(false);
@@ -48,6 +50,66 @@ export default function Topbar({ userName, userAvatar, lastSyncAt }: TopbarProps
   useEffect(() => {
     setMounted(true);
   }, []);
+
+  const stopPolling = useCallback(() => {
+    if (pollIntervalRef.current) {
+      clearInterval(pollIntervalRef.current);
+      pollIntervalRef.current = null;
+    }
+  }, []);
+
+  const startPolling = useCallback(() => {
+    if (pollIntervalRef.current) return;
+
+    pollIntervalRef.current = setInterval(async () => {
+      try {
+        const res = await fetch('/api/sync/status');
+        if (!res.ok) return;
+        const data = await res.json();
+
+        if (data.isSyncing) {
+          setIsSyncing(true);
+          isSyncingRef.current = true;
+          if (data.progress) {
+            setSyncProgress(data.progress);
+          }
+        } else {
+          // Sync has finished or is idle
+          stopPolling();
+          isSyncingRef.current = false;
+          setIsSyncing(false);
+
+          if (data.progress && data.phase === 'complete') {
+            setSyncProgress({
+              ...data.progress,
+              phase: 'complete',
+            });
+            setTimeout(() => {
+              setSyncProgress(null);
+              setSyncResult({
+                show: true,
+                success: true,
+                message: 'Placement sync complete',
+                newEmails: data.progress.newEmails || 0,
+                newCompanies: data.progress.newCompanies || 0,
+              });
+              router.refresh();
+              setTimeout(() => setSyncResult(null), 5000);
+            }, 1200);
+          } else {
+            setSyncProgress(null);
+          }
+        }
+      } catch {
+        // Ignore polling errors
+      }
+    }, 2500);
+  }, [router, stopPolling]);
+
+  // Clean up polling interval on unmount
+  useEffect(() => {
+    return () => stopPolling();
+  }, [stopPolling]);
 
   // Close profile dropdown when clicking outside or pressing Escape
   useEffect(() => {
@@ -149,20 +211,33 @@ export default function Topbar({ userName, userAvatar, lastSyncAt }: TopbarProps
             try {
               const parsed = JSON.parse(currentData);
 
+              if (currentEvent === 'sync_active' || currentEvent === 'active') {
+                // A background sync (e.g. from 15-min cron) is already actively running
+                startPolling();
+                return;
+              }
+
               if ((currentEvent === 'progress' || currentEvent === 'sync_progress') && !silent) {
                 setSyncProgress(parsed);
               } else if (currentEvent === 'complete' || currentEvent === 'sync_complete') {
-                setSyncProgress(null);
-                setSyncResult({
-                  show: true,
-                  success: true,
-                  message: 'Placement sync complete',
-                  newEmails: parsed.newEmails ?? parsed.result?.newEmails ?? 0,
-                  newCompanies: parsed.newCompanies ?? parsed.result?.newCompanies ?? 0,
-                });
-                router.refresh();
-                setTimeout(() => setSyncResult(null), 5000);
+                stopPolling();
+                // Smooth transition: show 100% completion in banner briefly before toast
+                setSyncProgress((prev) => (prev ? { ...prev, phase: 'complete' } : null));
+
+                setTimeout(() => {
+                  setSyncProgress(null);
+                  setSyncResult({
+                    show: true,
+                    success: true,
+                    message: 'Placement sync complete',
+                    newEmails: parsed.newEmails ?? parsed.result?.newEmails ?? 0,
+                    newCompanies: parsed.newCompanies ?? parsed.result?.newCompanies ?? 0,
+                  });
+                  router.refresh();
+                  setTimeout(() => setSyncResult(null), 5000);
+                }, 1000);
               } else if (currentEvent === 'error' || currentEvent === 'sync_error') {
+                stopPolling();
                 setSyncProgress(null);
                 setSyncResult({
                   show: true,
@@ -180,6 +255,7 @@ export default function Topbar({ userName, userAvatar, lastSyncAt }: TopbarProps
         }
       }
     } catch (err) {
+      stopPolling();
       setSyncProgress(null);
       setSyncResult({
         show: true,
@@ -190,35 +266,39 @@ export default function Topbar({ userName, userAvatar, lastSyncAt }: TopbarProps
       });
       setTimeout(() => setSyncResult(null), 8000);
     } finally {
-      setSyncProgress(null);
       isSyncingRef.current = false;
       setIsSyncing(false);
     }
-  }, [router]);
+  }, [router, startPolling, stopPolling]);
 
   const handleLogout = async () => {
     await fetch('/api/auth/disconnect', { method: 'DELETE' });
     window.location.href = '/login';
   };
 
-  // Auto-sync on initial mount (runs strictly once)
+  // On mount: check if a sync is currently active (e.g. after page reload or triggered by 15-min background cron)
   useEffect(() => {
     if (hasMountedAutoSyncRef.current) return;
     hasMountedAutoSyncRef.current = true;
 
-    if (!lastSyncAt || Date.now() - new Date(lastSyncAt).getTime() > 5 * 60 * 1000) {
-      handleSync(true);
-    }
-  }, [lastSyncAt, handleSync]);
-
-  // Periodic interval sync every 5 minutes
-  useEffect(() => {
-    const interval = setInterval(() => {
-      handleSync(true);
-    }, 5 * 60 * 1000);
-
-    return () => clearInterval(interval);
-  }, [handleSync]);
+    fetch('/api/sync/status')
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.isSyncing) {
+          setIsSyncing(true);
+          isSyncingRef.current = true;
+          if (data.progress) {
+            setSyncProgress(data.progress);
+          }
+          startPolling();
+        } else if (!lastSyncAt || Date.now() - new Date(lastSyncAt).getTime() > 60 * 60 * 1000) {
+          // Only trigger silent sync on mount if it hasn't synced in over 1 hour
+          // (cron-job.org handles background sync every 15 minutes)
+          handleSync(true);
+        }
+      })
+      .catch(() => {});
+  }, [lastSyncAt, handleSync, startPolling]);
 
   // Progress percentage
   const progressPercent =
@@ -381,40 +461,77 @@ export default function Topbar({ userName, userAvatar, lastSyncAt }: TopbarProps
 
       {/* Sync Progress Bar Banner */}
       {syncProgress && (
-        <div className="sticky top-16 z-30 bg-[#0e0e18]/95 backdrop-blur-xl border-b border-indigo-500/20 px-6 py-3 animate-fade-in shadow-lg shadow-black/40">
-          <div className="flex items-center justify-between mb-2">
+        <div className="sticky top-16 z-30 bg-[#0e0e18]/95 backdrop-blur-xl border-b border-indigo-500/20 px-4 sm:px-6 py-3 animate-fade-in shadow-lg shadow-black/40">
+          <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
             <div className="flex items-center gap-2">
-              <RefreshCw className="w-3.5 h-3.5 text-indigo-400 animate-spin" />
+              <RefreshCw className="w-3.5 h-3.5 text-indigo-400 animate-spin flex-shrink-0" />
               <span className="text-xs font-semibold text-zinc-200">
-                {syncProgress.phase === 'initializing' && 'Initializing Placement Stream...'}
-                {syncProgress.phase === 'fetching' && `Fetching messages from ${syncProgress.accountEmail}...`}
-                {syncProgress.phase === 'processing' && (
+                {syncProgress.phase === 'initializing' && 'Connecting to placement mailboxes...'}
+                {syncProgress.phase === 'fetching' && (
                   <>
-                    Processing {syncProgress.processedMessages}/{syncProgress.totalMessages}
-                    {syncProgress.accountType === 'college' ? ' (College CDC)' : ' (Personal)'}
+                    Scanning messages from{' '}
+                    <span className="text-indigo-300 font-mono text-[11px]">
+                      {syncProgress.accountEmail || 'Gmail'}
+                    </span>
+                    ...
                   </>
                 )}
+                {syncProgress.phase === 'processing' && (
+                  <>
+                    Processing{' '}
+                    <span className="text-indigo-300 font-mono">
+                      {syncProgress.processedMessages}
+                    </span>{' '}
+                    of{' '}
+                    <span className="text-zinc-300 font-mono">
+                      {syncProgress.totalMessages}
+                    </span>{' '}
+                    emails ({progressPercent}%)
+                    {syncProgress.accountType === 'college' ? ' · College CDC' : ' · Personal NeoPAT'}
+                  </>
+                )}
+                {syncProgress.phase === 'complete' && 'Sync complete! Finalizing updates...'}
+                {syncProgress.phase === 'error' && 'Sync encountered an error'}
               </span>
             </div>
-            <span className="text-xs text-zinc-400 font-mono">
-              {syncProgress.newEmails} new · {syncProgress.newCompanies} companies
-            </span>
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-zinc-400 font-mono bg-zinc-900/80 px-2 py-0.5 rounded-md border border-zinc-800">
+                {syncProgress.newEmails} new updates · {syncProgress.newCompanies} companies
+              </span>
+            </div>
           </div>
 
           {/* Progress bar */}
-          <div className="w-full h-1.5 bg-zinc-900 rounded-full overflow-hidden">
-            <div
-              className="h-full bg-gradient-to-r from-indigo-500 via-purple-500 to-cyan-400 rounded-full transition-all duration-300 ease-out"
-              style={{ width: `${progressPercent}%` }}
-            />
+          <div className="w-full h-1.5 bg-zinc-900 rounded-full overflow-hidden relative">
+            {syncProgress.totalMessages > 0 ? (
+              <div
+                className="h-full bg-gradient-to-r from-indigo-500 via-purple-500 to-cyan-400 rounded-full transition-all duration-300 ease-out"
+                style={{ width: `${Math.max(progressPercent, 2)}%` }}
+              />
+            ) : (
+              <div className="h-full bg-gradient-to-r from-indigo-500 via-purple-500 to-cyan-400 rounded-full animate-pulse w-full" />
+            )}
           </div>
 
-          {/* Current email subject */}
-          {syncProgress.currentSubject && (
-            <p className="text-[10px] text-zinc-400 mt-1.5 truncate font-mono">
-              📧 {syncProgress.currentSubject}
-            </p>
-          )}
+          {/* Context details: Current email and First-time sync guidance */}
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1 mt-1.5">
+            {syncProgress.currentSubject ? (
+              <p className="text-[10px] text-zinc-400 truncate font-mono flex-1">
+                📧 {syncProgress.currentSubject}
+              </p>
+            ) : (
+              <p className="text-[10px] text-zinc-500 font-mono">
+                {syncProgress.phase === 'fetching' ? 'Indexing message headers...' : 'Analyzing emails...'}
+              </p>
+            )}
+
+            {syncProgress.isInitialSync && (
+              <span className="text-[10px] text-amber-400/90 font-medium bg-amber-500/10 border border-amber-500/20 px-2 py-0.5 rounded-full inline-flex items-center gap-1 self-start sm:self-auto">
+                <span>⚡ First-time sync:</span>
+                <span className="text-zinc-400">Scanning 6 months of emails (~15–30 min). Future syncs are fast.</span>
+              </span>
+            )}
+          </div>
         </div>
       )}
 

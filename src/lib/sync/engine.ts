@@ -40,6 +40,7 @@ export interface SyncProgress {
   skippedDuplicates: number;
   errors: string[];
   currentSubject?: string;
+  isInitialSync?: boolean;
 }
 
 export interface SyncResult {
@@ -49,6 +50,7 @@ export interface SyncResult {
   newCompanies: number;
   skippedDuplicates: number;
   errors: string[];
+  alreadyRunning?: boolean;
   accounts: {
     email: string;
     accountType: string;
@@ -57,6 +59,18 @@ export interface SyncResult {
     newEmails: number;
     newCompanies: number;
   }[];
+}
+
+// In-memory active sync trackers (active within current Node.js server process)
+const activeSyncMap = new Map<string, SyncProgress>();
+const activeSyncLocks = new Set<string>();
+
+export function getActiveSyncProgress(userId: string): SyncProgress | null {
+  return activeSyncMap.get(userId) || null;
+}
+
+export function isUserSyncActive(userId: string): boolean {
+  return activeSyncLocks.has(userId);
 }
 
 // ============================================
@@ -113,6 +127,58 @@ export async function runSync(
     );
   }
 
+  // 0. Concurrency Guard: In-memory lock (protects within same process)
+  if (activeSyncLocks.has(userId)) {
+    console.log(`[Sync Engine] In-memory sync lock active for user ${userId}. Gracefully skipping concurrent request.`);
+    return {
+      totalEmailsFetched: 0,
+      totalEmailsProcessed: 0,
+      newEmails: 0,
+      newCompanies: 0,
+      skippedDuplicates: 0,
+      errors: [],
+      alreadyRunning: true,
+      accounts: [],
+    };
+  }
+
+  // Check Supabase sync_state table (protects across processes & external 15-min cron)
+  try {
+    const { data: dbLock } = await supabase
+      .from('sync_state')
+      .select('is_syncing, updated_at, phase')
+      .eq('user_id', userId)
+      .single();
+
+    if (dbLock?.is_syncing) {
+      const lastUpdated = new Date(dbLock.updated_at || 0).getTime();
+      const isStale = Date.now() - lastUpdated > 15 * 60 * 1000; // 15 min lock timeout
+      if (!isStale) {
+        console.log(`[Sync Engine] User ${userId} sync is already active in database (phase: ${dbLock.phase}, updated: ${dbLock.updated_at}). Gracefully skipping concurrent invocation.`);
+        return {
+          totalEmailsFetched: 0,
+          totalEmailsProcessed: 0,
+          newEmails: 0,
+          newCompanies: 0,
+          skippedDuplicates: 0,
+          errors: [],
+          alreadyRunning: true,
+          accounts: [],
+        };
+      } else {
+        console.warn(`[Sync Engine] Stale sync lock found for user ${userId} (>15m old). Overriding lock.`);
+      }
+    }
+  } catch {
+    // If sync_state table not yet created in Supabase, proceed with in-memory lock
+  }
+
+  // Acquire active lock
+  activeSyncLocks.add(userId);
+
+  // Determine if this is an initial discovery sync across any connected account
+  const isInitialSync = connectedAccounts.some((a) => !a.last_history_id);
+
   // Sort accounts so 'personal' is processed FIRST
   // This allows official NeoPAT emails to establish master company records first
   const sortedAccounts = connectedAccounts.sort((a, b) => {
@@ -131,117 +197,171 @@ export async function runSync(
     accounts: [],
   };
 
-  // Load pre-resolved drive mappings
-  const persistedResolutions = await loadAllDriveResolutions(supabase);
-  const driveResolutionsMap = new Map<string, string>();
-  for (const [dNum, r] of persistedResolutions.entries()) {
-    driveResolutionsMap.set(dNum, r.resolvedCompanyName);
-  }
+  let latestProgress: SyncProgress = {
+    phase: 'initializing',
+    accountEmail: '',
+    accountType: '',
+    totalMessages: 0,
+    processedMessages: 0,
+    newEmails: 0,
+    newCompanies: 0,
+    skippedDuplicates: 0,
+    errors: [],
+    isInitialSync,
+  };
+  activeSyncMap.set(userId, latestProgress);
 
-  // Pre-fetch stored college circulars to seed catalog for timing correlation
-  const { data: storedCirculars } = await supabase
-    .from('emails')
-    .select('id, subject, sender, body_snippet, received_at')
-    .eq('user_id', userId)
-    .not('sender', 'ilike', '%noreply.cdcinfo@vitstudent.ac.in%');
-
-  const circularCatalog = buildCircularCatalog(storedCirculars || []);
-
-  // 2. Process each account
-  for (const account of sortedAccounts) {
-    const accountResult = {
-      email: account.email,
-      accountType: account.account_type,
-      emailsFetched: 0,
-      emailsProcessed: 0,
-      newEmails: 0,
-      newCompanies: 0,
-    };
-
-    const progress: SyncProgress = {
-      phase: 'initializing',
-      accountEmail: account.email,
-      accountType: account.account_type,
-      totalMessages: 0,
-      processedMessages: 0,
-      newEmails: 0,
-      newCompanies: 0,
-      skippedDuplicates: 0,
-      errors: [],
-    };
-
-    onProgress?.(progress);
-
+  let lastDbWriteTime = 0;
+  const persistProgressToDb = async (p: SyncProgress, force = false) => {
+    activeSyncMap.set(userId, p);
+    const now = Date.now();
+    if (!force && now - lastDbWriteTime < 1500) return;
+    lastDbWriteTime = now;
     try {
-      // Create authenticated Gmail client
-      const { gmail } = await createGmailClient(account);
-      const { fetchHistoryChanges, getProfileHistoryId } = await import('@/lib/gmail/history');
-      const { fetchMessageMetadata } = await import('@/lib/gmail/client');
+      await supabase.from('sync_state').upsert({
+        user_id: userId,
+        is_syncing: p.phase !== 'complete' && p.phase !== 'error',
+        phase: p.phase,
+        account_email: p.accountEmail,
+        account_type: p.accountType,
+        total_messages: p.totalMessages,
+        processed_messages: p.processedMessages,
+        new_emails: p.newEmails,
+        new_companies: p.newCompanies,
+        skipped_duplicates: p.skippedDuplicates,
+        current_subject: p.currentSubject || null,
+        is_initial_sync: isInitialSync,
+        updated_at: new Date().toISOString(),
+        completed_at: p.phase === 'complete' ? new Date().toISOString() : null,
+        last_error: p.errors.length > 0 ? p.errors[p.errors.length - 1] : null,
+      });
+    } catch {
+      // Gracefully ignore if sync_state table not yet created
+    }
+  };
 
-      let messageIds: string[] = [];
-      let nextHistoryId: string | null = null;
+  const notifyProgress = (p: SyncProgress, forceDb = false) => {
+    latestProgress = p;
+    p.isInitialSync = isInitialSync;
+    onProgress?.(p);
+    persistProgressToDb(p, forceDb);
+  };
 
-      // Tier 2: Incremental Sync via history.list if last_history_id exists
-      if (account.last_history_id) {
-        progress.phase = 'fetching';
-        onProgress?.(progress);
+  notifyProgress(latestProgress, true);
 
-        const historyResult = await fetchHistoryChanges(gmail, account.last_history_id);
-        if (!historyResult.historyExpired) {
-          messageIds = historyResult.messageIds;
-          nextHistoryId = historyResult.latestHistoryId;
+  try {
+    // Load pre-resolved drive mappings
+    const persistedResolutions = await loadAllDriveResolutions(supabase);
+    const driveResolutionsMap = new Map<string, string>();
+    for (const [dNum, r] of persistedResolutions.entries()) {
+      driveResolutionsMap.set(dNum, r.resolvedCompanyName);
+    }
+
+    // Pre-fetch stored college circulars to seed catalog for timing correlation
+    const { data: storedCirculars } = await supabase
+      .from('emails')
+      .select('id, subject, sender, body_snippet, received_at')
+      .eq('user_id', userId)
+      .not('sender', 'ilike', '%noreply.cdcinfo@vitstudent.ac.in%');
+
+    const circularCatalog = buildCircularCatalog(storedCirculars || []);
+
+    // 2. Process each account
+    for (const account of sortedAccounts) {
+      const accountResult = {
+        email: account.email,
+        accountType: account.account_type,
+        emailsFetched: 0,
+        emailsProcessed: 0,
+        newEmails: 0,
+        newCompanies: 0,
+      };
+
+      const progress: SyncProgress = {
+        phase: 'initializing',
+        accountEmail: account.email,
+        accountType: account.account_type,
+        totalMessages: 0,
+        processedMessages: 0,
+        newEmails: 0,
+        newCompanies: 0,
+        skippedDuplicates: 0,
+        errors: [],
+        isInitialSync,
+      };
+
+      notifyProgress(progress, true);
+
+      try {
+        // Create authenticated Gmail client
+        const { gmail } = await createGmailClient(account);
+        const { fetchHistoryChanges, getProfileHistoryId } = await import('@/lib/gmail/history');
+        const { fetchMessageMetadata } = await import('@/lib/gmail/client');
+
+        let messageIds: string[] = [];
+        let nextHistoryId: string | null = null;
+
+        // Tier 2: Incremental Sync via history.list if last_history_id exists
+        if (account.last_history_id) {
+          progress.phase = 'fetching';
+          notifyProgress(progress);
+
+          const historyResult = await fetchHistoryChanges(gmail, account.last_history_id);
+          if (!historyResult.historyExpired) {
+            messageIds = historyResult.messageIds;
+            nextHistoryId = historyResult.latestHistoryId;
+          } else {
+            // Fall back to targeted search if history expired (>30 days)
+            const afterDate = account.last_sync_at ? new Date(account.last_sync_at) : undefined;
+            const query = getPlacementSearchQuery(account.account_type as 'personal' | 'college', afterDate);
+            const maxLimit = account.account_type === 'personal' ? 1000 : 2500;
+            messageIds = await fetchMessageIds(gmail, query, maxLimit);
+            nextHistoryId = historyResult.latestHistoryId || (await getProfileHistoryId(gmail));
+          }
         } else {
-          // Fall back to targeted search if history expired (>30 days)
+          // Tier 1: Initial Discovery Sync
+          progress.phase = 'fetching';
+          notifyProgress(progress);
+
           const afterDate = account.last_sync_at ? new Date(account.last_sync_at) : undefined;
           const query = getPlacementSearchQuery(account.account_type as 'personal' | 'college', afterDate);
-          const maxLimit = account.account_type === 'personal' ? 1000 : 2500;
+          const maxLimit = account.account_type === 'personal' ? 2500 : 5000;
           messageIds = await fetchMessageIds(gmail, query, maxLimit);
-          nextHistoryId = historyResult.latestHistoryId || (await getProfileHistoryId(gmail));
+          nextHistoryId = await getProfileHistoryId(gmail);
         }
-      } else {
-        // Tier 1: Initial Discovery Sync
-        progress.phase = 'fetching';
-        onProgress?.(progress);
 
-        const afterDate = account.last_sync_at ? new Date(account.last_sync_at) : undefined;
-        const query = getPlacementSearchQuery(account.account_type as 'personal' | 'college', afterDate);
-        const maxLimit = account.account_type === 'personal' ? 2500 : 5000;
-        messageIds = await fetchMessageIds(gmail, query, maxLimit);
-        nextHistoryId = await getProfileHistoryId(gmail);
-      }
+        accountResult.emailsFetched = messageIds.length;
 
-      accountResult.emailsFetched = messageIds.length;
+        // Fast Pre-Check: Fetch all existing gmail_message_ids for this account in ONE DB call
+        const { data: existingRows } = await supabase
+          .from('emails')
+          .select('gmail_message_id')
+          .eq('gmail_account_id', account.id);
 
-      // Fast Pre-Check: Fetch all existing gmail_message_ids for this account in ONE DB call
-      const { data: existingRows } = await supabase
-        .from('emails')
-        .select('gmail_message_id')
-        .eq('gmail_account_id', account.id);
+        const existingSet = new Set((existingRows || []).map((r) => r.gmail_message_id));
+        const newMsgIds = messageIds.filter((id) => !existingSet.has(id));
+        const skippedCount = messageIds.length - newMsgIds.length;
 
-      const existingSet = new Set((existingRows || []).map((r) => r.gmail_message_id));
-      const newMsgIds = messageIds.filter((id) => !existingSet.has(id));
-      const skippedCount = messageIds.length - newMsgIds.length;
+        // Ensure messages are processed in chronological order (oldest to newest)
+        // Gmail messages.list returns newest first, so reversing gives chronological order.
+        const chronoSortedMsgIds = [...newMsgIds].reverse();
 
-      // Ensure messages are processed in chronological order (oldest to newest)
-      // Gmail messages.list returns newest first, so reversing gives chronological order.
-      const chronoSortedMsgIds = [...newMsgIds].reverse();
+        progress.skippedDuplicates += skippedCount;
+        result.skippedDuplicates += skippedCount;
+        progress.totalMessages = chronoSortedMsgIds.length;
+        progress.processedMessages = 0;
+        notifyProgress(progress, true);
 
-      progress.skippedDuplicates += skippedCount;
-      result.skippedDuplicates += skippedCount;
-      progress.totalMessages = chronoSortedMsgIds.length;
-      progress.processedMessages = 0;
-      onProgress?.(progress);
-
-      // 3. Process each NEW message in controlled concurrency batches
-      progress.phase = 'processing';
-      onProgress?.(progress);
+        // 3. Process each NEW message in controlled concurrency batches
+        progress.phase = 'processing';
+        notifyProgress(progress, true);
 
       const isPersonal = account.account_type === 'personal';
       // Use smaller batches on initial syncs (no history_id = thousands of messages)
-      const isInitialSync = !account.last_history_id;
-      const BATCH_SIZE = isInitialSync ? 3 : 5;
+      const isAccountInitialSync = !account.last_history_id;
+      const BATCH_SIZE = isAccountInitialSync ? 3 : 5;
       // Inter-batch delay: throttle during large initial syncs to avoid quota exhaustion
-      const INTER_BATCH_DELAY_MS = isInitialSync ? 500 : 0;
+      const INTER_BATCH_DELAY_MS = isAccountInitialSync ? 500 : 0;
 
       // Retry a Gmail API call with exponential backoff on quota/rate-limit errors
       async function withQuotaBackoff<T>(fn: () => Promise<T>, maxRetries = 3): Promise<T> {
@@ -317,6 +437,7 @@ export async function runSync(
               // Stage 2: Full message detail & attachments
               const parsedEmail = await withQuotaBackoff(() => fetchMessageDetail(gmail, msgId));
               progress.currentSubject = parsedEmail.subject.slice(0, 80);
+              notifyProgress(progress);
 
               const fullEmailText = `${parsedEmail.subject}\n${parsedEmail.bodyPlain || parsedEmail.bodySnippet || ''}`;
               const driveNumber = extractDriveNumber(fullEmailText);
@@ -546,7 +667,7 @@ export async function runSync(
         }
 
         progress.processedMessages = Math.min(i + batch.length, chronoSortedMsgIds.length);
-        onProgress?.(progress);
+        notifyProgress(progress);
 
         // Throttle between batches on large initial syncs to stay within Gmail quota
         if (INTER_BATCH_DELAY_MS > 0 && i + BATCH_SIZE < chronoSortedMsgIds.length) {
@@ -570,7 +691,7 @@ export async function runSync(
       progress.phase = 'error';
       progress.errors.push(errMsg);
       result.errors.push(`Account ${account.email}: ${errMsg}`);
-      onProgress?.(progress);
+      notifyProgress(progress, true);
     }
 
     result.totalEmailsFetched += accountResult.emailsFetched;
@@ -745,6 +866,29 @@ export async function runSync(
   }
 
   return result;
+} finally {
+  activeSyncLocks.delete(userId);
+  activeSyncMap.delete(userId);
+  try {
+    const isError = result.errors.length > 0 && result.totalEmailsProcessed === 0;
+    await supabase.from('sync_state').upsert({
+      user_id: userId,
+      is_syncing: false,
+      phase: isError ? 'error' : 'complete',
+      total_messages: latestProgress.totalMessages,
+      processed_messages: latestProgress.processedMessages,
+      new_emails: result.newEmails,
+      new_companies: result.newCompanies,
+      skipped_duplicates: result.skippedDuplicates,
+      is_initial_sync: isInitialSync,
+      completed_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+      last_error: result.errors.length > 0 ? result.errors[result.errors.length - 1] : null,
+    });
+  } catch {
+    // Ignore if sync_state table not yet created
+  }
+}
 }
 
 // ============================================

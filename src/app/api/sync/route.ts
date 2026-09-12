@@ -46,6 +46,18 @@ export async function POST() {
           }
         );
 
+        if (result.alreadyRunning) {
+          sendEvent('sync_active', {
+            message: 'A sync is already actively running in the background.',
+            alreadyRunning: true,
+          });
+          sendEvent('active', {
+            message: 'A sync is already actively running in the background.',
+            alreadyRunning: true,
+          });
+          return;
+        }
+
         sendEvent('sync_complete', {
           message: 'Sync complete!',
           result,
