@@ -429,7 +429,6 @@ export async function processPage(
                 status: 'not_applied',
                 status_source: isPersonal ? 'neopat_personal_email' : 'college_email_announcement',
                 status_confidence: 'high',
-                applied_at: parsedEmail.receivedAt.toISOString(),
                 status_source_email_at: parsedEmail.receivedAt.toISOString(),
                 last_updated: new Date().toISOString(),
               });
