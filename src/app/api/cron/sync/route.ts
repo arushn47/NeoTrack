@@ -8,7 +8,7 @@ export const maxDuration = 300; // 5 min — handles multi-user sync on Vercel P
 async function executeBackgroundSync(userIds: string[]) {
   for (const userId of userIds) {
     try {
-      const res = await runSync(userId);
+      const res = await runSync(userId, undefined, { isBackgroundCron: true });
       if (res?.alreadyRunning) {
         console.log(`[Cron Sync] User ${userId} is currently syncing. Skipped concurrent run.`);
       } else {
@@ -67,7 +67,7 @@ export async function GET(req: NextRequest) {
       const syncResults = [];
       for (const userId of userIds) {
         try {
-          const result = await runSync(userId);
+          const result = await runSync(userId, undefined, { isBackgroundCron: true });
           if (result?.alreadyRunning) {
             syncResults.push({ userId, status: 'skipped_already_running', message: 'Sync already in progress' });
           } else {

@@ -29,6 +29,9 @@ interface SyncProgress {
   errors: string[];
   currentSubject?: string;
   isInitialSync?: boolean;
+  currentPageIndex?: number;
+  totalPagesCount?: number;
+  isPage0Complete?: boolean;
 }
 
 export default function Topbar({ userName, userAvatar, lastSyncAt }: TopbarProps) {
@@ -481,15 +484,39 @@ export default function Topbar({ userName, userAvatar, lastSyncAt }: TopbarProps
                 )}
                 {syncProgress.phase === 'processing' && (
                   <>
-                    Processing{' '}
-                    <span className="text-indigo-300 font-mono">
-                      {syncProgress.processedMessages}
-                    </span>{' '}
-                    of{' '}
-                    <span className="text-zinc-300 font-mono">
-                      {syncProgress.totalMessages}
-                    </span>{' '}
-                    emails ({progressPercent}%)
+                    {syncProgress.currentPageIndex === 0 ? (
+                      <>
+                        Processing recent emails (Page 1 of {syncProgress.totalPagesCount || 1}):{' '}
+                        <span className="text-indigo-300 font-mono">
+                          {syncProgress.processedMessages}
+                        </span>{' '}
+                        of{' '}
+                        <span className="text-zinc-300 font-mono">
+                          {syncProgress.totalMessages}
+                        </span>{' '}
+                        ({progressPercent}%)
+                      </>
+                    ) : syncProgress.currentPageIndex !== undefined && syncProgress.totalPagesCount ? (
+                      <>
+                        Processing archive: page{' '}
+                        <span className="text-indigo-300 font-mono">
+                          {syncProgress.currentPageIndex + 1} of {syncProgress.totalPagesCount}
+                        </span>{' '}
+                        ({syncProgress.processedMessages}/{syncProgress.totalMessages})
+                      </>
+                    ) : (
+                      <>
+                        Processing{' '}
+                        <span className="text-indigo-300 font-mono">
+                          {syncProgress.processedMessages}
+                        </span>{' '}
+                        of{' '}
+                        <span className="text-zinc-300 font-mono">
+                          {syncProgress.totalMessages}
+                        </span>{' '}
+                        emails ({progressPercent}%)
+                      </>
+                    )}
                     {syncProgress.remainingMessages !== undefined && syncProgress.remainingMessages > 0 && (
                       <span className="text-zinc-400 text-[11px] font-mono ml-1">
                         · {syncProgress.remainingMessages} remaining
@@ -540,10 +567,15 @@ export default function Topbar({ userName, userAvatar, lastSyncAt }: TopbarProps
                 <span className="text-zinc-300">{syncProgress.alreadyIndexed} emails already saved</span>
                 <span className="text-zinc-400 font-mono">({syncProgress.remainingMessages} remaining)</span>
               </span>
+            ) : syncProgress.currentPageIndex === 0 ? (
+              <span className="text-[10px] text-cyan-400/90 font-medium bg-cyan-500/10 border border-cyan-500/20 px-2 py-0.5 rounded-full inline-flex items-center gap-1 self-start sm:self-auto">
+                <span>⚡ Recency-First:</span>
+                <span className="text-zinc-400">Syncing latest circulars & shortlists first. Archive syncs in background.</span>
+              </span>
             ) : syncProgress.isInitialSync ? (
               <span className="text-[10px] text-amber-400/90 font-medium bg-amber-500/10 border border-amber-500/20 px-2 py-0.5 rounded-full inline-flex items-center gap-1 self-start sm:self-auto">
-                <span>⚡ First-time sync:</span>
-                <span className="text-zinc-400">Scanning placement emails from July 1st. Future syncs are fast.</span>
+                <span>⚡ Archive Sync:</span>
+                <span className="text-zinc-400">Scanning historical circulars in background. You can safely close this tab.</span>
               </span>
             ) : null}
           </div>

@@ -221,7 +221,7 @@ export async function processEmailForEventsAndStatus(
   // Check existing application status from DB
   const { data: existingApp } = await supabase
     .from('applications')
-    .select('status, manual_override, applied_at, location, ctc, notes')
+    .select('status, manual_override, applied_at, location, ctc, role, stipend, notes, status_source_email_at')
     .eq('user_id', userId)
     .eq('company_id', companyId)
     .single();
@@ -589,6 +589,23 @@ export async function processEmailForEventsAndStatus(
   }
 
 
+  // ─── RECENCY GUARD FOR OUT-OF-ORDER PAGES ──────────────────────────────────
+  // If an older page processes an email received EARLIER than the email that established
+  // the current application status, do NOT allow the older email to overwrite status!
+  // This guarantees that Page 0 (recent) is never corrupted by background passes of Pages 1, 2, etc.
+  const currentStatusSourceTime = existingApp?.status_source_email_at
+    ? new Date(existingApp.status_source_email_at).getTime()
+    : null;
+  const thisEmailTime = email.receivedAt ? new Date(email.receivedAt).getTime() : null;
+  const isOlderThanCurrentStatus = Boolean(
+    currentStatusSourceTime && thisEmailTime && thisEmailTime < currentStatusSourceTime
+  );
+
+  if (newStatus && isOlderThanCurrentStatus) {
+    // Suppress status updates from older historical emails
+    newStatus = null;
+  }
+
   // ─── STATUS PRIORITY GUARD ──────────────────────────────────────────────────
   // Never allow a weaker status signal to overwrite a stronger existing status.
   // e.g. a "registration" broadcast email must not flip "shortlisted" → "applied"
@@ -645,10 +662,11 @@ export async function processEmailForEventsAndStatus(
     resolvedLocation = null;
   }
 
-  if (jobDetails.role) appUpdate.role = jobDetails.role;
-  if (jobDetails.ctc) appUpdate.ctc = jobDetails.ctc;
-  if (jobDetails.stipend) appUpdate.stipend = jobDetails.stipend;
-  if (resolvedLocation) appUpdate.location = resolvedLocation;
+  // Only update fields from older emails if not already populated on existingApp
+  if (jobDetails.role && (!existingApp?.role || !isOlderThanCurrentStatus)) appUpdate.role = jobDetails.role;
+  if (jobDetails.ctc && (!existingApp?.ctc || !isOlderThanCurrentStatus)) appUpdate.ctc = jobDetails.ctc;
+  if (jobDetails.stipend && (!existingApp?.stipend || !isOlderThanCurrentStatus)) appUpdate.stipend = jobDetails.stipend;
+  if (resolvedLocation && (!existingApp?.location || !isOlderThanCurrentStatus)) appUpdate.location = resolvedLocation;
 
   // Accumulate notes: travel requirement + AI review flags occupy the same column.
   // Build them separately and join so neither overwrites the other.
@@ -667,6 +685,7 @@ export async function processEmailForEventsAndStatus(
 
   if (newStatus) {
     appUpdate.status = newStatus;
+    appUpdate.status_source_email_at = email.receivedAt ? new Date(email.receivedAt).toISOString() : new Date().toISOString();
     if (newStatus === 'applied' && !existingApp?.applied_at) {
       appUpdate.applied_at = email.receivedAt ? new Date(email.receivedAt).toISOString() : new Date().toISOString();
     }

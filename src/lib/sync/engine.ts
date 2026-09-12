@@ -26,8 +26,31 @@ import {
 import { createAdminClient } from '@/lib/supabase/admin';
 
 // ============================================
-// Sync Progress Types
+// Sync Progress Types & Constants
 // ============================================
+
+export const PAGE_SIZE = 150;
+
+export interface SyncPageRow {
+  id: string;
+  user_id: string;
+  gmail_account_id: string;
+  page_index: number;
+  message_ids: string[];
+  next_offset: number;
+  status: 'pending' | 'in_progress' | 'complete';
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface ProcessPageResult {
+  completed: boolean;
+  emailsProcessed: number;
+  newEmails: number;
+  newCompanies: number;
+  skippedDuplicates: number;
+  errors: string[];
+}
 
 export interface SyncProgress {
   phase: 'initializing' | 'fetching' | 'processing' | 'complete' | 'error';
@@ -44,6 +67,9 @@ export interface SyncProgress {
   errors: string[];
   currentSubject?: string;
   isInitialSync?: boolean;
+  currentPageIndex?: number;
+  totalPagesCount?: number;
+  isPage0Complete?: boolean;
 }
 
 export interface SyncResult {
@@ -54,6 +80,10 @@ export interface SyncResult {
   skippedDuplicates: number;
   errors: string[];
   alreadyRunning?: boolean;
+  currentPageIndex?: number;
+  totalPagesCount?: number;
+  isPage0Complete?: boolean;
+  hasMorePagesPending?: boolean;
   accounts: {
     email: string;
     accountType: string;
@@ -62,6 +92,441 @@ export interface SyncResult {
     newEmails: number;
     newCompanies: number;
   }[];
+}
+
+// Known NeoPAT/CDC senders that always pass (no keyword check needed)
+export const TRUSTED_PLACEMENT_SENDERS = [
+  'noreply.cdcinfo@vitstudent.ac.in',
+  'cdcinfo@vitstudent.ac.in',
+  'vitlions2027@vitbhopal.ac.in',
+  'placementoffice@vitbhopal.ac.in',
+];
+
+// Known non-placement senders to always skip (Google, Microsoft notifications, social media, etc.)
+export const BLOCKED_SENDERS = /noreply-accounts@google|no-reply@accounts\.google|noreply@github|notifications@github|@linkedin\.com|@facebookmail|@discord|@slack|noreply@medium|noreply@.*\.zoom\.us|security-noreply|account-security|password.*reset|verify.*email|do-not-reply@|mailer-daemon/i;
+
+export const isTrustedSender = (senderEmail: string, isPersonal: boolean) =>
+  isPersonal
+    ? /@vitstudent\.ac\.in$/i.test(senderEmail)
+    : TRUSTED_PLACEMENT_SENDERS.includes(senderEmail.toLowerCase());
+
+// Retry a Gmail API call with exponential backoff on quota/rate-limit errors
+export async function withQuotaBackoff<T>(fn: () => Promise<T>, maxRetries = 3): Promise<T> {
+  const BACKOFF_DELAYS = [10_000, 30_000, 90_000]; // 10s, 30s, 90s
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      return await fn();
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      const isQuota = /quota exceeded|rate.?limit|units.?per.?minute|rateLimitExceeded/i.test(msg);
+      if (isQuota && attempt < maxRetries) {
+        const delay = BACKOFF_DELAYS[attempt] ?? 90_000;
+        console.warn(`Gmail quota hit — backing off ${delay / 1000}s (attempt ${attempt + 1}/${maxRetries})`);
+        await new Promise((r) => setTimeout(r, delay));
+        continue;
+      }
+      throw err;
+    }
+  }
+  throw new Error('withQuotaBackoff: unreachable');
+}
+
+/**
+ * Plans count-based sync pages for an account.
+ * Slices already-deduped newMsgIds (newest-first, straight from Gmail)
+ * into fixed pages of PAGE_SIZE.
+ */
+export async function planSyncPages(
+  supabase: ReturnType<typeof createAdminClient>,
+  userId: string,
+  account: GmailAccount,
+  newMsgIds: string[]
+): Promise<SyncPageRow[]> {
+  // Check if active (pending or in_progress) pages already exist for this account
+  const { data: existingPages } = await supabase
+    .from('sync_pages')
+    .select('*')
+    .eq('gmail_account_id', account.id)
+    .order('page_index', { ascending: true });
+
+  const pendingOrActive = (existingPages || []).filter((p) => p.status !== 'complete');
+  if (pendingOrActive.length > 0) {
+    return existingPages as SyncPageRow[];
+  }
+
+  if (!newMsgIds || newMsgIds.length === 0) {
+    return [];
+  }
+
+  // Slice newMsgIds (newest-first, straight from Gmail) into chunks of PAGE_SIZE
+  const pagesToInsert: {
+    user_id: string;
+    gmail_account_id: string;
+    page_index: number;
+    message_ids: string[];
+    next_offset: number;
+    status: 'pending';
+  }[] = [];
+
+  for (let i = 0; i < newMsgIds.length; i += PAGE_SIZE) {
+    const pageIndex = Math.floor(i / PAGE_SIZE);
+    const slice = newMsgIds.slice(i, i + PAGE_SIZE);
+    pagesToInsert.push({
+      user_id: userId,
+      gmail_account_id: account.id,
+      page_index: pageIndex,
+      message_ids: slice,
+      next_offset: 0,
+      status: 'pending',
+    });
+  }
+
+  // Delete any old completed pages for this account before inserting new season plan
+  await supabase.from('sync_pages').delete().eq('gmail_account_id', account.id);
+
+  const { data: inserted, error } = await supabase
+    .from('sync_pages')
+    .insert(pagesToInsert)
+    .select('*')
+    .order('page_index', { ascending: true });
+
+  if (error) {
+    console.error('[planSyncPages] Failed to insert sync pages:', error);
+    throw new Error(`Failed to plan sync pages: ${error.message}`);
+  }
+
+  return (inserted || []) as SyncPageRow[];
+}
+
+/**
+ * Processes a single sync page.
+ * Reverses ONLY this page's message_ids (giving oldest-to-newest chronological order within this page),
+ * preserves per-message processing logic, and respects timeBudgetMs.
+ */
+export async function processPage(
+  supabase: ReturnType<typeof createAdminClient>,
+  userId: string,
+  account: GmailAccount,
+  page: SyncPageRow,
+  timeBudgetMs: number,
+  deps: {
+    userNeoId: string | null;
+    userEmail: string;
+    circularCatalog: Map<string, any[]>;
+    persistedResolutions: Map<string, any>;
+    driveResolutionsMap: Map<string, string>;
+  },
+  onProgress?: (progress: SyncProgress) => void
+): Promise<ProcessPageResult> {
+  // Mark page in_progress
+  await supabase
+    .from('sync_pages')
+    .update({ status: 'in_progress', updated_at: new Date().toISOString() })
+    .eq('id', page.id);
+
+  // Reverse ONLY this page's slice (oldest to newest within this page)
+  const chronoSortedMsgIds = [...page.message_ids].reverse();
+  const startIndex = page.next_offset || 0;
+  const startTime = Date.now();
+
+  const isPersonal = account.account_type === 'personal';
+  const isAccountInitialSync = !account.last_history_id;
+  const BATCH_SIZE = isAccountInitialSync ? 3 : 5;
+  const INTER_BATCH_DELAY_MS = isAccountInitialSync ? 500 : 0;
+
+  const { gmail } = await createGmailClient(account);
+  const { fetchMessageMetadata } = await import('@/lib/gmail/client');
+
+  // Pre-check: IDs in this page already in emails table
+  const { data: existingRows } = await supabase
+    .from('emails')
+    .select('gmail_message_id')
+    .eq('gmail_account_id', account.id)
+    .in('gmail_message_id', chronoSortedMsgIds);
+
+  const existingInDb = new Set((existingRows || []).map((r) => r.gmail_message_id));
+
+  let emailsProcessedCount = 0;
+  let newEmailsCount = 0;
+  let newCompaniesCount = 0;
+  let skippedDuplicatesCount = 0;
+  const errorsList: string[] = [];
+  let currentIndex = startIndex;
+
+  for (let i = startIndex; i < chronoSortedMsgIds.length; i += BATCH_SIZE) {
+    const elapsed = Date.now() - startTime;
+    // Check if time budget exceeded before processing next batch
+    if (elapsed >= timeBudgetMs && i > startIndex) {
+      console.log(`[processPage] Time budget (${timeBudgetMs}ms) reached for page ${page.page_index} at offset ${i}/${chronoSortedMsgIds.length}. Pausing page.`);
+      await supabase
+        .from('sync_pages')
+        .update({
+          next_offset: i,
+          status: 'pending',
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', page.id);
+
+      return {
+        completed: false,
+        emailsProcessed: emailsProcessedCount,
+        newEmails: newEmailsCount,
+        newCompanies: newCompaniesCount,
+        skippedDuplicates: skippedDuplicatesCount,
+        errors: errorsList,
+      };
+    }
+
+    const batch = chronoSortedMsgIds.slice(i, i + BATCH_SIZE);
+
+    for (const msgId of batch) {
+      currentIndex++;
+
+      if (existingInDb.has(msgId)) {
+        skippedDuplicatesCount++;
+        continue;
+      }
+
+      try {
+        // Stage 1: Cheap metadata inspection
+        let shouldFetchFull = true;
+        const metadata = await withQuotaBackoff(() => fetchMessageMetadata(gmail, msgId));
+        const subj = metadata.subject.toLowerCase();
+        const senderLower = metadata.senderEmail.toLowerCase();
+
+        // A. Always block known non-placement senders
+        if (BLOCKED_SENDERS.test(senderLower)) {
+          shouldFetchFull = false;
+        }
+        // B. Always allow trusted CDC/NeoPAT senders
+        else if (isTrustedSender(senderLower, isPersonal)) {
+          shouldFetchFull = true;
+        }
+        // C. For all other senders, require placement keywords in subject
+        else {
+          const isPlacementRelevant =
+            /shortlist|selection|online\s+test|coding\s+test|assessment|interview|ppt|pre-placement|super\s+dream|dream\s+core|registration|internship|placement\s+drive|campus\s+drive|hiring|cdc\s+info|candidate\s+information|offer|joining|onboarding/i.test(
+              subj
+            );
+          if (!isPlacementRelevant) {
+            shouldFetchFull = false;
+          }
+        }
+
+        if (!shouldFetchFull) {
+          continue;
+        }
+
+        // Stage 2: Full message detail & attachments
+        const parsedEmail = await withQuotaBackoff(() => fetchMessageDetail(gmail, msgId));
+
+        onProgress?.({
+          phase: 'processing',
+          accountEmail: account.email,
+          accountType: account.account_type,
+          totalMessages: chronoSortedMsgIds.length,
+          processedMessages: currentIndex,
+          currentPageIndex: page.page_index,
+          currentSubject: parsedEmail.subject.slice(0, 80),
+          newEmails: newEmailsCount,
+          newCompanies: newCompaniesCount,
+          skippedDuplicates: skippedDuplicatesCount,
+          errors: errorsList,
+        });
+
+        const fullEmailText = `${parsedEmail.subject}\n${parsedEmail.bodyPlain || parsedEmail.bodySnippet || ''}`;
+        const driveNumber = extractDriveNumber(fullEmailText);
+
+        // Classify the email with resolved drive numbers
+        const classification = classifyEmail(parsedEmail, deps.driveResolutionsMap);
+        let companyName = classification.companyName;
+
+        // Timing correlation
+        if (isPersonal && driveNumber && companyName) {
+          const baseClean = cleanCompanyName(companyName);
+          if (['Apple', 'Honeywell', 'Zluri', 'EY'].some((b) => b.toLowerCase() === baseClean.toLowerCase())) {
+            const resolution = await resolveDriveByTimingCorrelation(
+              supabase,
+              driveNumber,
+              baseClean,
+              parsedEmail.receivedAt,
+              deps.circularCatalog,
+              deps.persistedResolutions
+            );
+            if (resolution) {
+              companyName = resolution.resolvedCompanyName;
+              deps.driveResolutionsMap.set(driveNumber, resolution.resolvedCompanyName);
+            }
+          }
+        }
+
+        // College role cataloging
+        if (!isPersonal) {
+          const baseCompanies = ['Apple', 'Honeywell', 'Zluri', 'EY'];
+          for (const base of baseCompanies) {
+            if (new RegExp(`\\b${base}\\b`, 'i').test(parsedEmail.subject) || new RegExp(`\\b${base}\\b`, 'i').test(parsedEmail.bodyPlain || parsedEmail.bodySnippet || '')) {
+              const { extractTrackOrRole } = await import('@/lib/sync/drive-correlator');
+              const trackInfo = extractTrackOrRole(fullEmailText, base);
+              if (trackInfo) {
+                const key = base.toLowerCase();
+                if (!deps.circularCatalog.has(key)) deps.circularCatalog.set(key, []);
+                deps.circularCatalog.get(key)!.push({
+                  emailId: parsedEmail.gmailMessageId,
+                  companyBaseName: base,
+                  role: trackInfo.role,
+                  track: trackInfo.track,
+                  resolvedCompanyName: trackInfo.resolvedCompanyName,
+                  sourceDate: parsedEmail.receivedAt,
+                  subject: parsedEmail.subject,
+                });
+              }
+            }
+          }
+        }
+
+        let companyId: string | null = null;
+        const isPlacementClassification = !['irrelevant', 'unclassified', 'general'].includes(
+          classification.classification
+        );
+
+        if (companyName && isPlacementClassification) {
+          const isNeoPatEmail =
+            isPersonal &&
+            /noreply\.cdcinfo@vitstudent\.ac\.in/i.test(
+              parsedEmail.senderEmail || parsedEmail.sender
+            );
+
+          companyId = await upsertCompany(supabase, userId, companyName, isNeoPatEmail);
+
+          if (companyId) {
+            // Check if newly created company
+            const { count } = await supabase
+              .from('emails')
+              .select('id', { count: 'exact', head: true })
+              .eq('company_id', companyId);
+
+            if (count === 0) {
+              newCompaniesCount++;
+            }
+
+            // DUAL-WRITE FIX: Baseline initialization only!
+            // Do NOT overwrite status with 'withdrawn' or keywords here.
+            // Leave all status evaluation, withdrawals, opt-outs, and promotions
+            // strictly to processEmailForEventsAndStatus!
+            const { data: currentApp } = await supabase
+              .from('applications')
+              .select('id')
+              .eq('user_id', userId)
+              .eq('company_id', companyId)
+              .single();
+
+            if (!currentApp) {
+              await supabase.from('applications').insert({
+                user_id: userId,
+                company_id: companyId,
+                status: 'not_applied',
+                status_source: isPersonal ? 'neopat_personal_email' : 'college_email_announcement',
+                status_confidence: 'high',
+                applied_at: parsedEmail.receivedAt.toISOString(),
+                status_source_email_at: parsedEmail.receivedAt.toISOString(),
+                last_updated: new Date().toISOString(),
+              });
+            }
+          }
+        }
+
+        // Insert email into DB
+        const { data: insertedEmail, error: insertError } = await supabase
+          .from('emails')
+          .insert({
+            user_id: userId,
+            gmail_account_id: account.id,
+            company_id: companyId,
+            gmail_message_id: parsedEmail.gmailMessageId,
+            thread_id: parsedEmail.threadId,
+            subject: parsedEmail.subject,
+            sender: parsedEmail.sender,
+            received_at: parsedEmail.receivedAt.toISOString(),
+            body_snippet: (parsedEmail.bodyPlain || parsedEmail.bodySnippet || '').slice(
+              0,
+              !isPersonal && isTrustedSender(parsedEmail.senderEmail || parsedEmail.sender, isPersonal) ? 50000 : 10000
+            ),
+            classification: classification.classification,
+            is_processed: true,
+            is_relevant: classification.classification !== 'irrelevant',
+            processed_at: new Date().toISOString(),
+          })
+          .select('id')
+          .single();
+
+        if (insertError) {
+          if (insertError.code === '23505') {
+            skippedDuplicatesCount++;
+          } else {
+            errorsList.push(insertError.message);
+          }
+        } else {
+          newEmailsCount++;
+
+          if (companyId && insertedEmail) {
+            const { processEmailForEventsAndStatus } = await import(
+              '@/lib/sync/status-engine'
+            );
+            await processEmailForEventsAndStatus(
+              supabase,
+              userId,
+              companyId,
+              parsedEmail,
+              insertedEmail.id,
+              deps.userNeoId,
+              account.email,
+              gmail
+            );
+          }
+        }
+
+        emailsProcessedCount++;
+      } catch (emailErr) {
+        const errMsg = emailErr instanceof Error ? emailErr.message : String(emailErr);
+        const isQuota = /quota exceeded|rate.?limit|units.?per.?minute/i.test(errMsg);
+        if (!isQuota) {
+          errorsList.push(errMsg);
+        }
+      }
+    }
+
+    // Persist checkpoint after each batch to survive sudden shutdowns
+    await supabase
+      .from('sync_pages')
+      .update({
+        next_offset: currentIndex,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', page.id);
+
+    if (INTER_BATCH_DELAY_MS > 0 && i + BATCH_SIZE < chronoSortedMsgIds.length) {
+      await new Promise((r) => setTimeout(r, INTER_BATCH_DELAY_MS));
+    }
+  }
+
+  // Page exhausted! Mark complete
+  await supabase
+    .from('sync_pages')
+    .update({
+      next_offset: chronoSortedMsgIds.length,
+      status: 'complete',
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', page.id);
+
+  return {
+    completed: true,
+    emailsProcessed: emailsProcessedCount,
+    newEmails: newEmailsCount,
+    newCompanies: newCompaniesCount,
+    skippedDuplicates: skippedDuplicatesCount,
+    errors: errorsList,
+  };
 }
 
 // In-memory active sync trackers (active within current Node.js server process)
@@ -90,7 +555,11 @@ export function isUserSyncActive(userId: string): boolean {
  */
 export async function runSync(
   userId: string,
-  onProgress?: (progress: SyncProgress) => void
+  onProgress?: (progress: SyncProgress) => void,
+  options?: {
+    isBackgroundCron?: boolean;
+    timeBudgetMs?: number;
+  }
 ): Promise<SyncResult> {
   const supabase = createAdminClient();
 
@@ -235,6 +704,8 @@ export async function runSync(
         skipped_duplicates: p.skippedDuplicates,
         current_subject: p.currentSubject || null,
         is_initial_sync: isInitialSync,
+        current_page_index: p.currentPageIndex ?? 0,
+        total_pages: p.totalPagesCount ?? 1,
         updated_at: new Date().toISOString(),
         completed_at: p.phase === 'complete' ? new Date().toISOString() : null,
         last_error: p.errors.length > 0 ? p.errors[p.errors.length - 1] : null,
@@ -270,7 +741,7 @@ export async function runSync(
 
     const circularCatalog = buildCircularCatalog(storedCirculars || []);
 
-    // 2. Process each account
+    // 2. Process each account using count-based, resumable pages
     for (const account of sortedAccounts) {
       const accountResult = {
         email: account.email,
@@ -297,423 +768,164 @@ export async function runSync(
       notifyProgress(progress, true);
 
       try {
-        // Create authenticated Gmail client
         const { gmail } = await createGmailClient(account);
         const { fetchHistoryChanges, getProfileHistoryId } = await import('@/lib/gmail/history');
-        const { fetchMessageMetadata } = await import('@/lib/gmail/client');
 
-        let messageIds: string[] = [];
-        let nextHistoryId: string | null = null;
+        // Check for active or pending pages for this account
+        const { data: existingPages } = await supabase
+          .from('sync_pages')
+          .select('*')
+          .eq('gmail_account_id', account.id)
+          .order('page_index', { ascending: true });
 
-        // Tier 2: Incremental Sync via history.list if last_history_id exists
-        if (account.last_history_id) {
+        let pages: SyncPageRow[] = (existingPages || []) as SyncPageRow[];
+        let pendingPages = pages.filter((p) => p.status !== 'complete');
+
+        // If no pending pages exist, check Gmail for new messages and plan pages
+        if (pendingPages.length === 0) {
           progress.phase = 'fetching';
           notifyProgress(progress);
 
-          const historyResult = await fetchHistoryChanges(gmail, account.last_history_id);
-          if (!historyResult.historyExpired) {
-            messageIds = historyResult.messageIds;
-            nextHistoryId = historyResult.latestHistoryId;
+          let messageIds: string[] = [];
+          let nextHistoryId: string | null = null;
+
+          if (account.last_history_id) {
+            const historyResult = await fetchHistoryChanges(gmail, account.last_history_id);
+            if (!historyResult.historyExpired) {
+              messageIds = historyResult.messageIds;
+              nextHistoryId = historyResult.latestHistoryId;
+            } else {
+              const afterDate = account.last_sync_at ? new Date(account.last_sync_at) : undefined;
+              const query = getPlacementSearchQuery(account.account_type as 'personal' | 'college', afterDate);
+              const maxLimit = account.account_type === 'personal' ? 1000 : 2500;
+              messageIds = await fetchMessageIds(gmail, query, maxLimit);
+              nextHistoryId = historyResult.latestHistoryId || (await getProfileHistoryId(gmail));
+            }
           } else {
-            // Fall back to targeted search if history expired (>30 days)
             const afterDate = account.last_sync_at ? new Date(account.last_sync_at) : undefined;
             const query = getPlacementSearchQuery(account.account_type as 'personal' | 'college', afterDate);
-            const maxLimit = account.account_type === 'personal' ? 1000 : 2500;
+            const maxLimit = account.account_type === 'personal' ? 2500 : 5000;
             messageIds = await fetchMessageIds(gmail, query, maxLimit);
-            nextHistoryId = historyResult.latestHistoryId || (await getProfileHistoryId(gmail));
+            nextHistoryId = await getProfileHistoryId(gmail);
           }
-        } else {
-          // Tier 1: Initial Discovery Sync
-          progress.phase = 'fetching';
-          notifyProgress(progress);
 
-          const afterDate = account.last_sync_at ? new Date(account.last_sync_at) : undefined;
-          const query = getPlacementSearchQuery(account.account_type as 'personal' | 'college', afterDate);
-          const maxLimit = account.account_type === 'personal' ? 2500 : 5000;
-          messageIds = await fetchMessageIds(gmail, query, maxLimit);
-          nextHistoryId = await getProfileHistoryId(gmail);
-        }
+          accountResult.emailsFetched = messageIds.length;
 
-        accountResult.emailsFetched = messageIds.length;
+          // Fast Pre-Check: Filter out emails already in DB
+          const { data: existingRows } = await supabase
+            .from('emails')
+            .select('gmail_message_id')
+            .eq('gmail_account_id', account.id);
 
-        // Fast Pre-Check: Fetch all existing gmail_message_ids for this account in ONE DB call
-        const { data: existingRows } = await supabase
-          .from('emails')
-          .select('gmail_message_id')
-          .eq('gmail_account_id', account.id);
+          const existingSet = new Set((existingRows || []).map((r) => r.gmail_message_id));
+          const newMsgIds = messageIds.filter((id) => !existingSet.has(id));
+          const skippedCount = messageIds.length - newMsgIds.length;
 
-        const existingSet = new Set((existingRows || []).map((r) => r.gmail_message_id));
-        const newMsgIds = messageIds.filter((id) => !existingSet.has(id));
-        const skippedCount = messageIds.length - newMsgIds.length;
+          progress.skippedDuplicates += skippedCount;
+          result.skippedDuplicates += skippedCount;
 
-        // Ensure messages are processed in chronological order (oldest to newest)
-        // Gmail messages.list returns newest first, so reversing gives chronological order.
-        const chronoSortedMsgIds = [...newMsgIds].reverse();
-
-        const totalMailboxCount = messageIds.length;
-        const alreadyIndexedCount = skippedCount;
-        const remainingCount = chronoSortedMsgIds.length;
-        const isResuming = alreadyIndexedCount > 0 && remainingCount > 0;
-
-        progress.skippedDuplicates += skippedCount;
-        result.skippedDuplicates += skippedCount;
-        progress.totalMessages = totalMailboxCount;
-        progress.processedMessages = alreadyIndexedCount;
-        progress.alreadyIndexed = alreadyIndexedCount;
-        progress.remainingMessages = remainingCount;
-        progress.isResuming = isResuming;
-        notifyProgress(progress, true);
-
-        // 3. Process each NEW message in controlled concurrency batches
-        progress.phase = 'processing';
-        notifyProgress(progress, true);
-
-      const isPersonal = account.account_type === 'personal';
-      // Use smaller batches on initial syncs (no history_id = thousands of messages)
-      const isAccountInitialSync = !account.last_history_id;
-      const BATCH_SIZE = isAccountInitialSync ? 3 : 5;
-      // Inter-batch delay: throttle during large initial syncs to avoid quota exhaustion
-      const INTER_BATCH_DELAY_MS = isAccountInitialSync ? 500 : 0;
-
-      // Retry a Gmail API call with exponential backoff on quota/rate-limit errors
-      async function withQuotaBackoff<T>(fn: () => Promise<T>, maxRetries = 3): Promise<T> {
-        const BACKOFF_DELAYS = [10_000, 30_000, 90_000]; // 10s, 30s, 90s
-        for (let attempt = 0; attempt <= maxRetries; attempt++) {
-          try {
-            return await fn();
-          } catch (err: unknown) {
-            const msg = err instanceof Error ? err.message : String(err);
-            const isQuota = /quota exceeded|rate.?limit|units.?per.?minute|rateLimitExceeded/i.test(msg);
-            if (isQuota && attempt < maxRetries) {
-              const delay = BACKOFF_DELAYS[attempt] ?? 90_000;
-              console.warn(`Gmail quota hit — backing off ${delay / 1000}s (attempt ${attempt + 1}/${maxRetries})`);
-              await new Promise((r) => setTimeout(r, delay));
-              continue;
-            }
-            throw err;
+          if (newMsgIds.length > 0) {
+            pages = await planSyncPages(supabase, userId, account, newMsgIds);
+            pendingPages = pages.filter((p) => p.status !== 'complete');
+          } else {
+            // No new emails to process
+            await supabase
+              .from('gmail_accounts')
+              .update({
+                last_sync_at: new Date().toISOString(),
+                last_history_id: nextHistoryId || account.last_history_id,
+              })
+              .eq('id', account.id);
           }
         }
-        throw new Error('withQuotaBackoff: unreachable');
-      }
 
-      // Known NeoPAT/CDC senders that always pass (no keyword check needed)
-      const TRUSTED_PLACEMENT_SENDERS = [
-        'noreply.cdcinfo@vitstudent.ac.in',
-        'cdcinfo@vitstudent.ac.in',
-        'vitlions2027@vitbhopal.ac.in',
-        'placementoffice@vitbhopal.ac.in',
-      ];
-      // Trust entire @vitstudent.ac.in domain on personal accounts — these are all CDC/NeoPAT
-      const isTrustedSender = (senderEmail: string) =>
-        isPersonal
-          ? /@vitstudent\.ac\.in$/i.test(senderEmail)
-          : TRUSTED_PLACEMENT_SENDERS.includes(senderEmail.toLowerCase());
+        // If there are pending pages, process the appropriate page
+        if (pendingPages.length > 0) {
+          // Foreground: ALWAYS target Page 0 if pending (most recent ~150 emails).
+          // If Page 0 is already complete, target the lowest pending page.
+          // Background cron: target lowest pending page.
+          let targetPage = pendingPages.find((p) => p.page_index === 0);
+          if (!targetPage || (options?.isBackgroundCron && targetPage.status === 'complete')) {
+            targetPage = pendingPages[0];
+          }
 
-      // Known non-placement senders to always skip (Google, Microsoft notifications, social media, etc.)
-      const BLOCKED_SENDERS = /noreply-accounts@google|no-reply@accounts\.google|noreply@github|notifications@github|@linkedin\.com|@facebookmail|@discord|@slack|noreply@medium|noreply@.*\.zoom\.us|security-noreply|account-security|password.*reset|verify.*email|do-not-reply@|mailer-daemon/i;
+          const totalPagesCount = pages.length;
+          const targetIndex = targetPage.page_index;
+          progress.phase = 'processing';
+          progress.currentPageIndex = targetIndex;
+          progress.totalPagesCount = totalPagesCount;
+          progress.totalMessages = targetPage.message_ids.length;
+          progress.processedMessages = targetPage.next_offset || 0;
+          notifyProgress(progress, true);
 
-      for (let i = 0; i < chronoSortedMsgIds.length; i += BATCH_SIZE) {
-        const batch = chronoSortedMsgIds.slice(i, i + BATCH_SIZE);
+          const timeBudgetMs = options?.timeBudgetMs || (options?.isBackgroundCron ? 45_000 : 40_000);
 
-        for (const msgId of batch) {
-            try {
-              // Stage 1: Cheap metadata inspection
-              let shouldFetchFull = true;
-              const metadata = await withQuotaBackoff(() => fetchMessageMetadata(gmail, msgId));
-              const subj = metadata.subject.toLowerCase();
-              const senderLower = metadata.senderEmail.toLowerCase();
-
-              // A. Always block known non-placement senders
-              if (BLOCKED_SENDERS.test(senderLower)) {
-                shouldFetchFull = false;
-              }
-              // B. Always allow trusted CDC/NeoPAT senders
-              else if (isTrustedSender(senderLower)) {
-                shouldFetchFull = true;
-              }
-              // C. For all other senders, require placement keywords in subject
-              else {
-                const isPlacementRelevant =
-                  /shortlist|selection|online\s+test|coding\s+test|assessment|interview|ppt|pre-placement|super\s+dream|dream\s+core|registration|internship|placement\s+drive|campus\s+drive|hiring|cdc\s+info|candidate\s+information|offer|joining|onboarding/i.test(
-                    subj
-                  );
-                if (!isPlacementRelevant) {
-                  shouldFetchFull = false;
-                }
-              }
-
-              if (!shouldFetchFull) {
-                continue;
-              }
-
-              // Stage 2: Full message detail & attachments
-              const parsedEmail = await withQuotaBackoff(() => fetchMessageDetail(gmail, msgId));
-              const batchOffset = batch.indexOf(msgId);
-              progress.processedMessages = alreadyIndexedCount + i + (batchOffset >= 0 ? batchOffset : 0);
-              progress.remainingMessages = Math.max(0, chronoSortedMsgIds.length - (i + (batchOffset >= 0 ? batchOffset : 0)));
-              progress.currentSubject = parsedEmail.subject.slice(0, 80);
-              notifyProgress(progress);
-
-              const fullEmailText = `${parsedEmail.subject}\n${parsedEmail.bodyPlain || parsedEmail.bodySnippet || ''}`;
-              const driveNumber = extractDriveNumber(fullEmailText);
-
-              // Classify the email with resolved drive numbers
-              const classification = classifyEmail(parsedEmail, driveResolutionsMap);
-              let companyName = classification.companyName;
-
-              // If this NeoPAT email has a drive number and was identified with a base company,
-              // run timing correlation against circular catalog to resolve specific track (e.g. Apple SDET vs Apple SRE)
-              if (isPersonal && driveNumber && companyName) {
-                const baseClean = cleanCompanyName(companyName);
-                if (['Apple', 'Honeywell', 'Zluri', 'EY'].some((b) => b.toLowerCase() === baseClean.toLowerCase())) {
-                  const resolution = await resolveDriveByTimingCorrelation(
-                    supabase,
-                    driveNumber,
-                    baseClean,
-                    parsedEmail.receivedAt,
-                    circularCatalog,
-                    persistedResolutions
-                  );
-                  if (resolution) {
-                    companyName = resolution.resolvedCompanyName;
-                    driveResolutionsMap.set(driveNumber, resolution.resolvedCompanyName);
-                  }
-                }
-              }
-
-              // If this is a college email with explicit role text, also index it into the catalog
-              if (!isPersonal) {
-                const baseCompanies = ['Apple', 'Honeywell', 'Zluri', 'EY'];
-                for (const base of baseCompanies) {
-                  if (new RegExp(`\\b${base}\\b`, 'i').test(parsedEmail.subject) || new RegExp(`\\b${base}\\b`, 'i').test(parsedEmail.bodyPlain || parsedEmail.bodySnippet || '')) {
-                    const { extractTrackOrRole } = await import('@/lib/sync/drive-correlator');
-                    const trackInfo = extractTrackOrRole(fullEmailText, base);
-                    if (trackInfo) {
-                      const key = base.toLowerCase();
-                      if (!circularCatalog.has(key)) circularCatalog.set(key, []);
-                      circularCatalog.get(key)!.push({
-                        emailId: parsedEmail.gmailMessageId,
-                        companyBaseName: base,
-                        role: trackInfo.role,
-                        track: trackInfo.track,
-                        resolvedCompanyName: trackInfo.resolvedCompanyName,
-                        sourceDate: parsedEmail.receivedAt,
-                        subject: parsedEmail.subject,
-                      });
-                    }
-                  }
-                }
-              }
-
-              // Extract/create company
-              // GUARD: Don't create companies from irrelevant/unclassified/general emails.
-              let companyId: string | null = null;
-              const isPlacementClassification = !['irrelevant', 'unclassified', 'general'].includes(
-                classification.classification
-              );
-
-              if (companyName && isPlacementClassification) {
-                // RULE: ONLY emails from noreply.cdcinfo@vitstudent.ac.in (the official NeoPAT sender)
-                // on the personal account are allowed to create new companies.
-                const isNeoPatEmail =
-                  isPersonal &&
-                  /noreply\.cdcinfo@vitstudent\.ac\.in/i.test(
-                    parsedEmail.senderEmail || parsedEmail.sender
-                  );
-                const allowCreate = isNeoPatEmail;
-
-                companyId = await upsertCompany(
-                  supabase,
-                  userId,
-                  companyName,
-                  allowCreate
-                );
-
-                if (companyId) {
-                  // Check if this is a newly created company
-                  const { count } = await supabase
-                    .from('emails')
-                    .select('id', { count: 'exact', head: true })
-                    .eq('company_id', companyId);
-
-                  if (count === 0) {
-                    progress.newCompanies++;
-                    accountResult.newCompanies++;
-                    result.newCompanies++;
-                  }
-
-                  // Check current application status first
-                  const { data: currentApp } = await supabase
-                    .from('applications')
-                    .select('status, applied_at')
-                    .eq('user_id', userId)
-                    .eq('company_id', companyId)
-                    .single();
-
-                  // Determine the correct default status for NEW companies:
-                  // - Registration/JD emails → 'not_applied' (just announced, not yet applied)
-                  // - Registration confirmations → 'applied' (confirmed participation)
-                  // - Existing apps keep their current status
-                  const isConfirmation =
-                    classification.classification === 'registration_confirmation' ||
-                    /registration\s+confirm|successfully\s+register|application\s+received|you\s+have\s+registered/i.test(
-                      (parsedEmail.bodyPlain || parsedEmail.bodySnippet || '')
-                    );
-
-                  let targetStatus = currentApp?.status || (isConfirmation ? 'applied' : 'not_applied');
-                  const text = (
-                    parsedEmail.subject +
-                    ' ' +
-                    (parsedEmail.bodyPlain || parsedEmail.bodySnippet || '')
-                  ).toLowerCase();
-
-                  if (
-                    text.includes('decline') ||
-                    text.includes('opted out') ||
-                    text.includes('opt-out') ||
-                    text.includes('withdrawn') ||
-                    text.includes('withdraw')
-                  ) {
-                    targetStatus = 'withdrawn';
-                  } else if (
-                    currentApp?.status === 'withdrawn' ||
-                    currentApp?.status === 'declined'
-                  ) {
-                    targetStatus = currentApp.status; // Keep withdrawn!
-                  } else if (
-                    text.includes('not eligible') ||
-                    text.includes('ineligible')
-                  ) {
-                    targetStatus = 'not_applied';
-                  } else if (isConfirmation) {
-                    targetStatus = 'applied';
-                  }
-
-                  await supabase.from('applications').upsert(
-                    {
-                      user_id: userId,
-                      company_id: companyId,
-                      status: targetStatus,
-                      status_source: isPersonal ? 'neopat_personal_email' : 'college_email_announcement',
-                      status_confidence: 'high',
-                      applied_at: currentApp?.applied_at || parsedEmail.receivedAt.toISOString(),
-                      last_updated: new Date().toISOString(),
-                    },
-                    { onConflict: 'user_id,company_id' }
-                  );
-                }
-              }
-
-              // Insert email into DB
-              const { data: insertedEmail, error: insertError } = await supabase
-                .from('emails')
-                .insert({
-                  user_id: userId,
-                  gmail_account_id: account.id,
-                  company_id: companyId,
-                  gmail_message_id: parsedEmail.gmailMessageId,
-                  thread_id: parsedEmail.threadId,
-                  subject: parsedEmail.subject,
-                  sender: parsedEmail.sender,
-                  received_at: parsedEmail.receivedAt.toISOString(),
-                  // College CDC circulars contain full JD tables (role, CTC, eligibility) deep in HTML bodies.
-                  // Store up to 50,000 chars for trusted college senders so extractJobDetails() reaches the CTC.
-                  // Personal NeoPAT emails are short plain-text — 10,000 is sufficient.
-                  body_snippet: (parsedEmail.bodyPlain || parsedEmail.bodySnippet || '').slice(
-                    0,
-                    !isPersonal && isTrustedSender(parsedEmail.senderEmail || parsedEmail.sender) ? 50000 : 10000
-                  ),
-                  classification: classification.classification,
-                  is_processed: true,
-                  is_relevant: classification.classification !== 'irrelevant',
-                  processed_at: new Date().toISOString(),
-                })
-                .select('id')
-                .single();
-
-              if (insertError) {
-                if (insertError.code === '23505') {
-                  progress.skippedDuplicates++;
-                  result.skippedDuplicates++;
-                } else {
-                  console.error(`Failed to insert email ${msgId}:`, insertError);
-                  progress.errors.push(
-                    `Failed to store email: ${parsedEmail.subject.slice(0, 50)}`
-                  );
-                  result.errors.push(insertError.message);
-                }
-              } else {
-                progress.newEmails++;
-                accountResult.newEmails++;
-                result.newEmails++;
-
-                // Process for Events, CTC, Roles, and Neo ID matching if linked to a company
-                if (companyId && insertedEmail) {
-                  const { processEmailForEventsAndStatus } = await import(
-                    '@/lib/sync/status-engine'
-                  );
-                  await processEmailForEventsAndStatus(
-                    supabase,
-                    userId,
-                    companyId,
-                    parsedEmail,
-                    insertedEmail.id,
-                    userNeoId,
-                    account.email,
-                    gmail
-                  );
-                }
-              }
-
-              accountResult.emailsProcessed++;
-              result.totalEmailsProcessed++;
-            } catch (emailErr) {
-              const errMsg = emailErr instanceof Error ? emailErr.message : String(emailErr);
-              // Don't surface quota errors as user-facing failures — they were already retried
-              const isQuota = /quota exceeded|rate.?limit|units.?per.?minute/i.test(errMsg);
-              if (!isQuota) {
-                console.error(`Error processing message ${msgId}:`, errMsg);
-                progress.errors.push(`Error processing message: ${errMsg.slice(0, 80)}`);
-                result.errors.push(errMsg);
-              } else {
-                console.warn(`Quota error skipping message ${msgId} after all retries`);
-              }
+          const pageRes = await processPage(
+            supabase,
+            userId,
+            account,
+            targetPage,
+            timeBudgetMs,
+            {
+              userNeoId,
+              userEmail,
+              circularCatalog,
+              persistedResolutions,
+              driveResolutionsMap,
+            },
+            (pageProg) => {
+              pageProg.currentPageIndex = targetIndex;
+              pageProg.totalPagesCount = totalPagesCount;
+              notifyProgress(pageProg);
             }
-        }
+          );
 
-        progress.processedMessages = alreadyIndexedCount + Math.min(i + batch.length, chronoSortedMsgIds.length);
-        progress.remainingMessages = Math.max(0, chronoSortedMsgIds.length - (i + batch.length));
-        notifyProgress(progress);
+          accountResult.emailsProcessed += pageRes.emailsProcessed;
+          accountResult.newEmails += pageRes.newEmails;
+          accountResult.newCompanies += pageRes.newCompanies;
+          result.newEmails += pageRes.newEmails;
+          result.newCompanies += pageRes.newCompanies;
+          result.skippedDuplicates += pageRes.skippedDuplicates;
+          result.errors.push(...pageRes.errors);
 
-        // Throttle between batches on large initial syncs to stay within Gmail quota
-        if (INTER_BATCH_DELAY_MS > 0 && i + BATCH_SIZE < chronoSortedMsgIds.length) {
-          await new Promise((r) => setTimeout(r, INTER_BATCH_DELAY_MS));
+          // Check if all pages for this account are now complete
+          const { data: refreshedPages } = await supabase
+            .from('sync_pages')
+            .select('status')
+            .eq('gmail_account_id', account.id);
+
+          const allDone = refreshedPages && refreshedPages.length > 0 && refreshedPages.every((p) => p.status === 'complete');
+          if (allDone) {
+            const nextHistId = await getProfileHistoryId(gmail).catch(() => null);
+            await supabase
+              .from('gmail_accounts')
+              .update({
+                last_sync_at: new Date().toISOString(),
+                last_history_id: nextHistId || account.last_history_id,
+              })
+              .eq('id', account.id);
+          }
+
+          // Update result flags
+          result.currentPageIndex = targetIndex;
+          result.totalPagesCount = totalPagesCount;
+          result.isPage0Complete = targetIndex === 0 && pageRes.completed;
+          result.hasMorePagesPending = !allDone;
         }
+      } catch (accountErr) {
+        const errMsg =
+          accountErr instanceof Error ? accountErr.message : String(accountErr);
+        console.error(`Sync failed for account ${account.email}:`, errMsg);
+        progress.phase = 'error';
+        progress.errors.push(errMsg);
+        result.errors.push(`Account ${account.email}: ${errMsg}`);
+        notifyProgress(progress, true);
       }
 
-      // 4. Update last_sync_at and last_history_id
-      await supabase
-        .from('gmail_accounts')
-        .update({
-          last_sync_at: new Date().toISOString(),
-          last_history_id: nextHistoryId || account.last_history_id,
-        })
-        .eq('id', account.id);
-
-    } catch (accountErr) {
-      const errMsg =
-        accountErr instanceof Error ? accountErr.message : String(accountErr);
-      console.error(`Sync failed for account ${account.email}:`, errMsg);
-      progress.phase = 'error';
-      progress.errors.push(errMsg);
-      result.errors.push(`Account ${account.email}: ${errMsg}`);
-      notifyProgress(progress, true);
+      result.totalEmailsFetched += accountResult.emailsFetched;
+      result.totalEmailsProcessed += accountResult.emailsProcessed;
+      result.accounts.push(accountResult);
     }
-
-    result.totalEmailsFetched += accountResult.emailsFetched;
-    result.totalEmailsProcessed += accountResult.emailsProcessed;
-    result.accounts.push(accountResult);
-  }
 
   // 5. Unconditional circular reconciliation: reconcile unlinked college circulars against user companies
   try {
@@ -897,6 +1109,8 @@ export async function runSync(
       new_companies: result.newCompanies,
       skipped_duplicates: result.skippedDuplicates,
       is_initial_sync: isInitialSync,
+      current_page_index: latestProgress.currentPageIndex ?? 0,
+      total_pages: latestProgress.totalPagesCount ?? 1,
       completed_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
       last_error: result.errors.length > 0 ? result.errors[result.errors.length - 1] : null,

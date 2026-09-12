@@ -81,6 +81,8 @@ export async function GET() {
           errors: dbSyncState.last_error ? [dbSyncState.last_error] : [],
           currentSubject: dbSyncState.current_subject,
           isInitialSync: dbSyncState.is_initial_sync,
+          currentPageIndex: dbSyncState.current_page_index ?? 0,
+          totalPagesCount: dbSyncState.total_pages ?? 1,
         },
         lastSyncAt,
       });
