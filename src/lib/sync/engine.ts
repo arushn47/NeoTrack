@@ -35,6 +35,9 @@ export interface SyncProgress {
   accountType: string;
   totalMessages: number;
   processedMessages: number;
+  alreadyIndexed?: number;
+  remainingMessages?: number;
+  isResuming?: boolean;
   newEmails: number;
   newCompanies: number;
   skippedDuplicates: number;
@@ -152,7 +155,8 @@ export async function runSync(
 
     if (dbLock?.is_syncing) {
       const lastUpdated = new Date(dbLock.updated_at || 0).getTime();
-      const isStale = Date.now() - lastUpdated > 15 * 60 * 1000; // 15 min lock timeout
+      // Active syncs touch updated_at every ~1.5s. If untouched for > 2.5 min, the process died (e.g. laptop shut down)
+      const isStale = Date.now() - lastUpdated > 150 * 1000;
       if (!isStale) {
         console.log(`[Sync Engine] User ${userId} sync is already active in database (phase: ${dbLock.phase}, updated: ${dbLock.updated_at}). Gracefully skipping concurrent invocation.`);
         return {
@@ -166,7 +170,7 @@ export async function runSync(
           accounts: [],
         };
       } else {
-        console.warn(`[Sync Engine] Stale sync lock found for user ${userId} (>15m old). Overriding lock.`);
+        console.warn(`[Sync Engine] Stale sync lock found for user ${userId} (>2.5m untouched, likely crash/shutdown). Overriding lock.`);
       }
     }
   } catch {
@@ -346,10 +350,18 @@ export async function runSync(
         // Gmail messages.list returns newest first, so reversing gives chronological order.
         const chronoSortedMsgIds = [...newMsgIds].reverse();
 
+        const totalMailboxCount = messageIds.length;
+        const alreadyIndexedCount = skippedCount;
+        const remainingCount = chronoSortedMsgIds.length;
+        const isResuming = alreadyIndexedCount > 0 && remainingCount > 0;
+
         progress.skippedDuplicates += skippedCount;
         result.skippedDuplicates += skippedCount;
-        progress.totalMessages = chronoSortedMsgIds.length;
-        progress.processedMessages = 0;
+        progress.totalMessages = totalMailboxCount;
+        progress.processedMessages = alreadyIndexedCount;
+        progress.alreadyIndexed = alreadyIndexedCount;
+        progress.remainingMessages = remainingCount;
+        progress.isResuming = isResuming;
         notifyProgress(progress, true);
 
         // 3. Process each NEW message in controlled concurrency batches
@@ -436,6 +448,9 @@ export async function runSync(
 
               // Stage 2: Full message detail & attachments
               const parsedEmail = await withQuotaBackoff(() => fetchMessageDetail(gmail, msgId));
+              const batchOffset = batch.indexOf(msgId);
+              progress.processedMessages = alreadyIndexedCount + i + (batchOffset >= 0 ? batchOffset : 0);
+              progress.remainingMessages = Math.max(0, chronoSortedMsgIds.length - (i + (batchOffset >= 0 ? batchOffset : 0)));
               progress.currentSubject = parsedEmail.subject.slice(0, 80);
               notifyProgress(progress);
 
@@ -666,7 +681,8 @@ export async function runSync(
             }
         }
 
-        progress.processedMessages = Math.min(i + batch.length, chronoSortedMsgIds.length);
+        progress.processedMessages = alreadyIndexedCount + Math.min(i + batch.length, chronoSortedMsgIds.length);
+        progress.remainingMessages = Math.max(0, chronoSortedMsgIds.length - (i + batch.length));
         notifyProgress(progress);
 
         // Throttle between batches on large initial syncs to stay within Gmail quota

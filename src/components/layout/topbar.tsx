@@ -20,6 +20,9 @@ interface SyncProgress {
   accountType: string;
   totalMessages: number;
   processedMessages: number;
+  alreadyIndexed?: number;
+  remainingMessages?: number;
+  isResuming?: boolean;
   newEmails: number;
   newCompanies: number;
   skippedDuplicates: number;
@@ -487,6 +490,11 @@ export default function Topbar({ userName, userAvatar, lastSyncAt }: TopbarProps
                       {syncProgress.totalMessages}
                     </span>{' '}
                     emails ({progressPercent}%)
+                    {syncProgress.remainingMessages !== undefined && syncProgress.remainingMessages > 0 && (
+                      <span className="text-zinc-400 text-[11px] font-mono ml-1">
+                        · {syncProgress.remainingMessages} remaining
+                      </span>
+                    )}
                     {syncProgress.accountType === 'college' ? ' · College CDC' : ' · Personal NeoPAT'}
                   </>
                 )}
@@ -525,12 +533,19 @@ export default function Topbar({ userName, userAvatar, lastSyncAt }: TopbarProps
               </p>
             )}
 
-            {syncProgress.isInitialSync && (
+            {syncProgress.isResuming && syncProgress.alreadyIndexed && syncProgress.alreadyIndexed > 0 ? (
+              <span className="text-[10px] text-emerald-400 font-medium bg-emerald-500/10 border border-emerald-500/25 px-2.5 py-0.5 rounded-full inline-flex items-center gap-1.5 self-start sm:self-auto animate-fade-in">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping" />
+                <span className="font-semibold text-emerald-300">Resumed checkpoint:</span>
+                <span className="text-zinc-300">{syncProgress.alreadyIndexed} emails already saved</span>
+                <span className="text-zinc-400 font-mono">({syncProgress.remainingMessages} remaining)</span>
+              </span>
+            ) : syncProgress.isInitialSync ? (
               <span className="text-[10px] text-amber-400/90 font-medium bg-amber-500/10 border border-amber-500/20 px-2 py-0.5 rounded-full inline-flex items-center gap-1 self-start sm:self-auto">
                 <span>⚡ First-time sync:</span>
                 <span className="text-zinc-400">Scanning placement emails from July 1st. Future syncs are fast.</span>
               </span>
-            )}
+            ) : null}
           </div>
         </div>
       )}

@@ -54,8 +54,15 @@ export async function GET() {
 
   if (dbSyncState?.is_syncing) {
     const updatedAt = new Date(dbSyncState.updated_at || 0).getTime();
-    const isStale = Date.now() - updatedAt > 15 * 60 * 1000;
+    // 2.5 minutes timeout: if the process died (laptop shut down), recover quickly
+    const isStale = Date.now() - updatedAt > 150 * 1000;
     if (!isStale) {
+      const totalMessages = dbSyncState.total_messages || 0;
+      const processedMessages = dbSyncState.processed_messages || 0;
+      const alreadyIndexed = dbSyncState.skipped_duplicates || 0;
+      const remainingMessages = Math.max(0, totalMessages - processedMessages);
+      const isResuming = alreadyIndexed > 0 && remainingMessages > 0;
+
       return NextResponse.json({
         isSyncing: true,
         phase: dbSyncState.phase,
@@ -63,8 +70,11 @@ export async function GET() {
           phase: dbSyncState.phase,
           accountEmail: dbSyncState.account_email || '',
           accountType: dbSyncState.account_type || '',
-          totalMessages: dbSyncState.total_messages || 0,
-          processedMessages: dbSyncState.processed_messages || 0,
+          totalMessages,
+          processedMessages,
+          alreadyIndexed,
+          remainingMessages,
+          isResuming,
           newEmails: dbSyncState.new_emails || 0,
           newCompanies: dbSyncState.new_companies || 0,
           skippedDuplicates: dbSyncState.skipped_duplicates || 0,
