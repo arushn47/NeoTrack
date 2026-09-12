@@ -528,7 +528,7 @@ export default function Topbar({ userName, userAvatar, lastSyncAt }: TopbarProps
             {syncProgress.isInitialSync && (
               <span className="text-[10px] text-amber-400/90 font-medium bg-amber-500/10 border border-amber-500/20 px-2 py-0.5 rounded-full inline-flex items-center gap-1 self-start sm:self-auto">
                 <span>⚡ First-time sync:</span>
-                <span className="text-zinc-400">Scanning 6 months of emails (~15–30 min). Future syncs are fast.</span>
+                <span className="text-zinc-400">Scanning placement emails from July 1st. Future syncs are fast.</span>
               </span>
             )}
           </div>

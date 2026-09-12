@@ -57,16 +57,16 @@ export function getPlacementSearchQuery(
   if (accountType === 'college') {
     const collegeDateFilter = afterDate
       ? ` after:${afterDate.toISOString().split('T')[0].replace(/-/g, '/')}`
-      : ' after:2026/05/01';
+      : ' after:2026/07/01';
 
     // College accounts — STRICTLY official CDC senders with placement keywords
     return `(from:vitbhopal.ac.in OR from:vitstudent.ac.in) (shortlist OR shortlisted OR "online test" OR "coding test" OR PPT OR assessment OR interview OR "selection list" OR "super dream" OR "dream core" OR registration OR internship OR "placement drive" OR "campus drive")${collegeDateFilter} -category:promotions -category:social`;
   }
 
-  // Personal accounts — STRICTLY official NeoPAT / CDC emails from vitstudent.ac.in starting May/June 2026
+  // Personal accounts — STRICTLY official NeoPAT / CDC emails from vitstudent.ac.in starting July 2026
   const personalDateFilter = afterDate
     ? ` after:${afterDate.toISOString().split('T')[0].replace(/-/g, '/')}`
-    : ' after:2026/05/01';
+    : ' after:2026/07/01';
 
   return `from:noreply.cdcinfo@vitstudent.ac.in${personalDateFilter}`;
 }
