@@ -17,6 +17,15 @@ const PUBLIC_ROUTES = [
 ];
 
 export async function middleware(request: NextRequest) {
+  const host = request.headers.get('x-forwarded-host') || request.headers.get('host') || '';
+  if (host === 'wheresmyoffer.in') {
+    const url = request.nextUrl.clone();
+    url.host = 'www.wheresmyoffer.in';
+    url.port = '';
+    url.protocol = 'https:';
+    return NextResponse.redirect(url, 308);
+  }
+
   const { pathname } = request.nextUrl;
 
   // Allow public routes and static assets

@@ -14,6 +14,17 @@ const nextConfig: NextConfig = {
         destination: 'https://www.wheresmyoffer.in/:path*',
         permanent: true,
       },
+      {
+        source: '/:path*',
+        has: [
+          {
+            type: 'host',
+            value: 'wheresmyoffer.in',
+          },
+        ],
+        destination: 'https://www.wheresmyoffer.in/:path*',
+        permanent: true,
+      },
     ];
   },
 };

@@ -26,6 +26,8 @@ export interface CompanyWithDetails {
   name: string;
   legal_name: string | null;
   aliases: string[] | null;
+  drive_number?: string | null;
+  drive_name?: string | null;
   updated_at: string;
   latestEmailDate?: string;
   application: {

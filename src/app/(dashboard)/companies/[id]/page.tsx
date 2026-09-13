@@ -48,7 +48,7 @@ export default async function CompanyDetailPage({
   ] = await Promise.all([
     supabase
       .from('companies')
-      .select('id, name, legal_name, aliases')
+      .select('id, name, aliases, drive_number, drive_name')
       .eq('id', companyId)
       .eq('user_id', session.userId)
       .single(),
@@ -110,8 +110,10 @@ export default async function CompanyDetailPage({
   const detail: CompanyDetail = {
     id: company.id,
     name: company.name,
-    legalName: company.legal_name,
+    legalName: null,
     aliases: company.aliases,
+    driveNumber: company.drive_number || null,
+    driveName: company.drive_name || null,
     candidateName: userProfile?.name || session.name || 'Student Candidate',
     candidateRegId: userProfile?.neo_id || '',
     application: application

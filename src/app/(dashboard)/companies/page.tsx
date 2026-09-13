@@ -20,7 +20,7 @@ export default async function CompaniesPage() {
   const [{ data: companies }, { data: applications }, { data: events }, { data: matches }, { data: emails }] = await Promise.all([
     supabase
       .from('companies')
-      .select('id, name, legal_name, aliases, updated_at')
+      .select('id, name, drive_number, drive_name, aliases, updated_at')
       .eq('user_id', session.userId)
       .order('updated_at', { ascending: false }),
 
@@ -104,8 +104,10 @@ export default async function CompaniesPage() {
     return {
       id: comp.id,
       name: comp.name,
-      legal_name: comp.legal_name,
+      legal_name: null,
       aliases: comp.aliases,
+      drive_number: comp.drive_number || null,
+      drive_name: comp.drive_name || null,
       updated_at: comp.updated_at,
       latestEmailDate: latestEmailMap.get(comp.id) || comp.updated_at,
       application: app

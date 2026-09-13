@@ -23,6 +23,8 @@ export interface CompanyDetail {
   name: string;
   legalName: string | null;
   aliases: string[] | null;
+  driveNumber?: string | null;
+  driveName?: string | null;
   candidateName?: string | null;
   candidateRegId?: string | null;
   application: {
