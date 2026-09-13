@@ -39,6 +39,8 @@ export default function Topbar({ userName, userAvatar, lastSyncAt }: TopbarProps
   const router = useRouter();
   const [isSyncing, setIsSyncing] = useState(false);
   const isSyncingRef = useRef(false);
+  const isSseActiveRef = useRef(false);
+  const chainedTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const hasMountedAutoSyncRef = useRef(false);
   const pollIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
@@ -118,9 +120,15 @@ export default function Topbar({ userName, userAvatar, lastSyncAt }: TopbarProps
     pollIntervalRef.current = setInterval(poll, 2500);
   }, [router, stopPolling]);
 
-  // Clean up polling interval on unmount
+  // Clean up polling interval and chained timeouts on unmount
   useEffect(() => {
-    return () => stopPolling();
+    return () => {
+      stopPolling();
+      if (chainedTimeoutRef.current) {
+        clearTimeout(chainedTimeoutRef.current);
+        chainedTimeoutRef.current = null;
+      }
+    };
   }, [stopPolling]);
 
   // Close profile dropdown when clicking outside or pressing Escape
@@ -162,8 +170,8 @@ export default function Topbar({ userName, userAvatar, lastSyncAt }: TopbarProps
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [router]);
 
-  const handleSync = useCallback(async (silent: boolean = false) => {
-    if (isSyncingRef.current) return;
+  const handleSync = useCallback(async (silent: boolean = false, isChained: boolean = false) => {
+    if (isSyncingRef.current && !isChained) return;
     isSyncingRef.current = true;
     setIsSyncing(true);
     setSyncResult(null);
@@ -194,100 +202,107 @@ export default function Topbar({ userName, userAvatar, lastSyncAt }: TopbarProps
       const reader = response.body?.getReader();
       if (!reader) throw new Error('No response stream');
 
+      isSseActiveRef.current = true;
       const decoder = new TextDecoder();
       let buffer = '';
 
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
+      try {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
 
-        buffer += decoder.decode(value, { stream: true });
+          buffer += decoder.decode(value, { stream: true });
 
-        // Split by standard SSE double-newline message delimiter
-        const messages = buffer.split('\n\n');
-        // Keep any incomplete trailing block in buffer
-        buffer = messages.pop() || '';
+          // Split by standard SSE double-newline message delimiter
+          const messages = buffer.split('\n\n');
+          // Keep any incomplete trailing block in buffer
+          buffer = messages.pop() || '';
 
-        for (const message of messages) {
-          const lines = message.split('\n');
-          let currentEvent = '';
-          let currentData = '';
+          for (const message of messages) {
+            const lines = message.split('\n');
+            let currentEvent = '';
+            let currentData = '';
 
-          for (const line of lines) {
-            if (line.startsWith('event: ')) {
-              currentEvent = line.slice(7).trim();
-            } else if (line.startsWith('data: ')) {
-              currentData = line.slice(6).trim();
-            }
-          }
-
-          if (currentEvent && currentData) {
-            try {
-              const parsed = JSON.parse(currentData);
-
-              if (currentEvent === 'sync_active' || currentEvent === 'active') {
-                // A background sync (e.g. from cron) is already actively running
-                willAdvanceNextChunk = true;
-                startPolling(true);
-                return;
+            for (const line of lines) {
+              if (line.startsWith('event: ')) {
+                currentEvent = line.slice(7).trim();
+              } else if (line.startsWith('data: ')) {
+                currentData = line.slice(6).trim();
               }
+            }
 
-              if (currentEvent === 'progress' || currentEvent === 'sync_progress') {
-                setSyncProgress((prev) => {
-                  if (silent && parsed.phase !== 'processing' && !prev) {
-                    return null;
-                  }
-                  return parsed;
-                });
-              } else if (currentEvent === 'complete' || currentEvent === 'sync_complete') {
-                stopPolling();
-                if (parsed.result?.hasMorePagesPending) {
-                  // Keep progress banner smoothly visible with next batch indicator
+            if (currentEvent && currentData) {
+              try {
+                const parsed = JSON.parse(currentData);
+
+                if (currentEvent === 'sync_active' || currentEvent === 'active') {
+                  // A background sync (e.g. from cron) is already actively running
                   willAdvanceNextChunk = true;
-                  setSyncProgress((prev) => prev ? {
-                    ...prev,
-                    currentSubject: 'Chunk checkpointed. Advancing to next batch...',
-                  } : null);
-                  setTimeout(() => {
-                    handleSync(false); // Seamlessly trigger next chunk without hiding banner
-                  }, 800);
+                  startPolling(true);
                   return;
                 }
 
-                // Smooth transition: show 100% completion in banner briefly before toast
-                setSyncProgress((prev) => (prev ? { ...prev, phase: 'complete' } : null));
+                if (currentEvent === 'progress' || currentEvent === 'sync_progress') {
+                  setSyncProgress((prev) => {
+                    if (silent && parsed.phase !== 'processing' && !prev) {
+                      return null;
+                    }
+                    return parsed;
+                  });
+                } else if (currentEvent === 'complete' || currentEvent === 'sync_complete') {
+                  stopPolling();
+                  if (parsed.result?.hasMorePagesPending) {
+                    // Keep progress banner smoothly visible with next batch indicator
+                    willAdvanceNextChunk = true;
+                    setSyncProgress((prev) => prev ? {
+                      ...prev,
+                      currentSubject: 'Chunk checkpointed. Advancing to next batch...',
+                    } : null);
+                    if (chainedTimeoutRef.current) clearTimeout(chainedTimeoutRef.current);
+                    chainedTimeoutRef.current = setTimeout(() => {
+                      chainedTimeoutRef.current = null;
+                      handleSync(false, true); // Seamlessly trigger next chunk with isChained bypass
+                    }, 800);
+                    return;
+                  }
 
-                setTimeout(() => {
+                  // Smooth transition: show 100% completion in banner briefly before toast
+                  setSyncProgress((prev) => (prev ? { ...prev, phase: 'complete' } : null));
+
+                  setTimeout(() => {
+                    setSyncProgress(null);
+                    setSyncResult({
+                      show: true,
+                      success: true,
+                      message: syncProgress?.isInitialSync
+                        ? 'Sync complete! All placement drives are up to date.'
+                        : 'Placement sync complete',
+                      newEmails: parsed.newEmails ?? parsed.result?.newEmails ?? 0,
+                      newCompanies: parsed.newCompanies ?? parsed.result?.newCompanies ?? 0,
+                    });
+                    router.refresh();
+                    setTimeout(() => setSyncResult(null), 5000);
+                  }, 1000);
+                } else if (currentEvent === 'error' || currentEvent === 'sync_error') {
+                  stopPolling();
                   setSyncProgress(null);
                   setSyncResult({
                     show: true,
-                    success: true,
-                    message: syncProgress?.isInitialSync
-                      ? 'Sync complete! All placement drives are up to date.'
-                      : 'Placement sync complete',
-                    newEmails: parsed.newEmails ?? parsed.result?.newEmails ?? 0,
-                    newCompanies: parsed.newCompanies ?? parsed.result?.newCompanies ?? 0,
+                    success: false,
+                    message: parsed.message || 'Sync encountered an issue',
+                    newEmails: 0,
+                    newCompanies: 0,
                   });
-                  router.refresh();
-                  setTimeout(() => setSyncResult(null), 5000);
-                }, 1000);
-              } else if (currentEvent === 'error' || currentEvent === 'sync_error') {
-                stopPolling();
-                setSyncProgress(null);
-                setSyncResult({
-                  show: true,
-                  success: false,
-                  message: parsed.message || 'Sync encountered an issue',
-                  newEmails: 0,
-                  newCompanies: 0,
-                });
-                setTimeout(() => setSyncResult(null), 8000);
+                  setTimeout(() => setSyncResult(null), 8000);
+                }
+              } catch {
+                // Ignore malformed JSON
               }
-            } catch {
-              // Ignore malformed JSON
             }
           }
         }
+      } finally {
+        isSseActiveRef.current = false;
       }
 
       // If stream ended without complete event, verify with /api/sync/status
@@ -299,8 +314,10 @@ export default function Topbar({ userName, userAvatar, lastSyncAt }: TopbarProps
             if (data.phase === 'pending' || (data.progress && data.progress.totalPagesCount > 1)) {
               console.log('[Topbar Sync] Stream closed with pending pages. Auto-advancing...');
               willAdvanceNextChunk = true;
-              setTimeout(() => {
-                handleSync(false);
+              if (chainedTimeoutRef.current) clearTimeout(chainedTimeoutRef.current);
+              chainedTimeoutRef.current = setTimeout(() => {
+                chainedTimeoutRef.current = null;
+                handleSync(false, true);
               }, 1200);
               return;
             }
@@ -356,17 +373,23 @@ export default function Topbar({ userName, userAvatar, lastSyncAt }: TopbarProps
   }, [lastSyncAt, handleSync, startPolling]);
 
   // Page Visibility guard: handle browser tab backgrounding and foregrounding
-  // Survives tab throttling when user navigates away and resumes seamlessly when returning
+  // Avoids fighting active SSE streams, survives tab throttling, and resumes seamlessly when returning
   useEffect(() => {
     const handleVisibilityChange = async () => {
       if (document.visibilityState === 'hidden') {
-        // Tab backgrounded: switch to lightweight polling instead of chained setTimeouts
-        // which get heavily throttled or frozen by browsers when hidden
-        if (isSyncingRef.current) {
+        // Tab backgrounded:
+        // If an SSE stream is actively connected, it is already receiving server events pushed in real time.
+        // DO NOT start polling — running polling concurrently with an active SSE stream creates two competing loops.
+        // Only start polling if marked syncing BUT without an active SSE stream (e.g. background cron was running).
+        if (isSyncingRef.current && !isSseActiveRef.current) {
           startPolling();
         }
       } else if (document.visibilityState === 'visible') {
-        // Tab foregrounded: query server directly to get immediate ground truth
+        // Tab foregrounded:
+        // If an SSE stream is currently connected and actively pumping events, let it do its job.
+        if (isSseActiveRef.current) return;
+
+        // Otherwise, query server directly to get immediate ground truth
         try {
           const res = await fetch('/api/sync/status');
           if (!res.ok) return;
@@ -380,9 +403,13 @@ export default function Topbar({ userName, userAvatar, lastSyncAt }: TopbarProps
             }
             startPolling();
           } else if (data.phase === 'pending') {
-            // Pending chunks remain! Seamlessly resume the sync chain now that the tab is active
+            // Pending chunks remain! Cancel any throttled timer and resume the next chunk immediately
             stopPolling();
-            handleSync(false);
+            if (chainedTimeoutRef.current) {
+              clearTimeout(chainedTimeoutRef.current);
+              chainedTimeoutRef.current = null;
+            }
+            handleSync(false, true);
           } else if (data.phase === 'complete') {
             stopPolling();
             if (isSyncingRef.current) {
