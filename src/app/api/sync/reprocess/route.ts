@@ -359,20 +359,36 @@ export async function performReprocess(
                 .select('id, name')
                 .single();
 
-              if (insertError && insertError.code === '23505' && driveNumber) {
-                const suffixedName = `${normalized} (${driveNumber.split('-').pop()})`;
-                const { data: retryComp } = await supabase
-                  .from('companies')
-                  .insert({
-                    user_id: userId,
-                    name: suffixedName,
-                    aliases: generatedAliases,
-                    drive_number: driveNumber || null,
-                    drive_name: driveName || null,
-                  })
-                  .select('id, name')
-                  .single();
-                newComp = retryComp;
+              if (insertError) {
+                if (insertError.code === '23505') {
+                  // Unique constraint violation — NEVER create a suffixed name.
+                  // Look up the existing company by drive_number, then by name.
+                  let existingId: string | null = null;
+                  if (driveNumber) {
+                    const { data: driveOwner } = await supabase
+                      .from('companies')
+                      .select('id, name')
+                      .eq('user_id', userId)
+                      .eq('drive_number', driveNumber)
+                      .maybeSingle();
+                    if (driveOwner) {
+                      existingId = driveOwner.id;
+                      newComp = driveOwner;
+                    }
+                  }
+                  if (!existingId) {
+                    const { data: nameOwner } = await supabase
+                      .from('companies')
+                      .select('id, name')
+                      .eq('user_id', userId)
+                      .eq('name', normalized)
+                      .maybeSingle();
+                    if (nameOwner) {
+                      existingId = nameOwner.id;
+                      newComp = nameOwner;
+                    }
+                  }
+                }
               }
 
               if (newComp) {

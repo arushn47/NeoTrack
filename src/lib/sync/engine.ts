@@ -1801,31 +1801,25 @@ async function upsertCompany(
 
   if (error) {
     if (error.code === '23505') {
-      // If we rejected the existing company because it was bound to another drive,
-      // we must not return it! We must create a new isolated entry with a suffixed name.
+      // Unique constraint violation: either drive_number or name already exists.
+      // NEVER create a suffixed name — that just creates duplicates.
+      // Strategy: look up by drive_number first (most reliable), then by name.
       if (driveNumber) {
-        const suffixedName = `${normalized} (${driveNumber.split('-').pop()})`;
-        const { data: retryComp } = await supabase
+        const { data: driveOwner } = await supabase
           .from('companies')
-          .insert({
-            user_id: userId,
-            name: suffixedName,
-            aliases: generatedAliases,
-            drive_number: driveNumber || null,
-            drive_name: driveName || null,
-          })
           .select('id')
-          .single();
-        if (retryComp) return retryComp.id;
+          .eq('user_id', userId)
+          .eq('drive_number', driveNumber)
+          .maybeSingle();
+        if (driveOwner?.id) return driveOwner.id;
       }
-
-      // Otherwise, it was just a standard race condition, return the existing
+      // Fallback: name-based lookup (race condition on name unique constraint)
       const { data: refetch } = await supabase
         .from('companies')
         .select('id')
         .eq('user_id', userId)
         .eq('name', normalized)
-        .single();
+        .maybeSingle();
       return refetch?.id || null;
     }
     console.error('Failed to create company:', error);
