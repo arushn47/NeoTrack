@@ -54,20 +54,36 @@ export async function requireSession(): Promise<SessionPayload> {
  */
 export function getBaseUrl(request: Request): string {
   const url = new URL(request.url);
-  const host = request.headers.get('x-forwarded-host') || request.headers.get('host') || url.host;
-  const proto = request.headers.get('x-forwarded-proto') || (url.protocol.replace(':', '')) || 'https';
+  const rawHost = request.headers.get('x-forwarded-host') || request.headers.get('host') || url.host;
+  const rawProto = request.headers.get('x-forwarded-proto') || (url.protocol.replace(':', '')) || 'https';
+  
+  // Clean up if forwarded headers contain multiple comma-separated values
+  const host = rawHost.split(',')[0].trim();
+  const proto = rawProto.split(',')[0].trim();
+  
   return `${proto}://${host}`;
 }
 
 /**
  * Gets the Google OAuth redirect URI to use for the authorization request.
- * Automatically avoids localhost redirect URIs when running on a live deployed domain.
+ * Automatically avoids localhost redirect URIs or mismatched domain URIs when running on a live deployed domain.
  */
 export function getOAuthRedirectUri(request: Request): string {
   const origin = getBaseUrl(request);
   const configuredUri = process.env.GOOGLE_REDIRECT_URI;
 
   if (configuredUri) {
+    try {
+      const configuredOrigin = new URL(configuredUri).origin;
+      // If deployed on a live domain, always ensure the redirect matches the live domain
+      if (!origin.includes('localhost') && configuredOrigin !== origin) {
+        return `${origin}/api/auth/callback`;
+      }
+    } catch {
+      // If configuredUri cannot be parsed, fallback to dynamic origin
+      return `${origin}/api/auth/callback`;
+    }
+
     // If GOOGLE_REDIRECT_URI is set to localhost but request is on a deployed/production domain, use dynamic origin
     if (configuredUri.includes('localhost') && !origin.includes('localhost')) {
       return `${origin}/api/auth/callback`;
@@ -87,6 +103,15 @@ export function getAppUrl(request: Request): string {
   const configuredAppUrl = process.env.NEXT_PUBLIC_APP_URL;
 
   if (configuredAppUrl) {
+    try {
+      const configuredOrigin = new URL(configuredAppUrl).origin;
+      if (!origin.includes('localhost') && configuredOrigin !== origin) {
+        return origin;
+      }
+    } catch {
+      return origin;
+    }
+
     if (configuredAppUrl.includes('localhost') && !origin.includes('localhost')) {
       return origin;
     }

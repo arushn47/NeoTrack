@@ -7,7 +7,7 @@ import Link from 'next/link';
 import { cn } from '@/lib/utils';
 import { timeAgo } from '@/lib/utils';
 import NotificationBell from '@/components/notifications/notification-bell';
-import { AppLogo } from '@/components/layout/sidebar';
+import { AppLogo, AppLogoMark } from '@/components/brand/logo';
 
 interface TopbarProps {
   userName: string | null;
@@ -317,14 +317,19 @@ export default function Topbar({ userName, userAvatar, lastSyncAt }: TopbarProps
 
   return (
     <>
-      <header className="flex items-center justify-between h-16 px-4 sm:px-6 bg-[#09090b]/85 backdrop-blur-xl border-b border-zinc-800/80 sticky top-0 z-40">
+      <header className="flex items-center justify-between h-14 sm:h-16 px-3 sm:px-6 bg-[#09090b]/85 backdrop-blur-xl border-b border-zinc-800/80 sticky top-0 z-40 w-full min-w-0 max-w-full">
         {/* Left: Mobile logo (hidden on desktop) */}
-        <div className="flex items-center gap-2.5 lg:hidden">
-          <AppLogo />
+        <div className="flex items-center gap-2 lg:hidden min-w-0 shrink">
+          <Link href="/" className="flex items-center gap-2 min-w-0 group" title="Where's My Offer">
+            <AppLogoMark size={28} className="shrink-0 transition-transform group-hover:scale-105" />
+            <span className="font-display text-xs sm:text-sm font-bold tracking-tight text-zinc-100 truncate hidden xs:inline">
+              Where&apos;s My Offer
+            </span>
+          </Link>
         </div>
 
         {/* Center: Quick Search Trigger */}
-        <div className="flex-1 max-w-xs md:max-w-md mx-3 hidden sm:block">
+        <div className="flex-1 max-w-xs md:max-w-md mx-3 hidden md:block">
           <Link
             href="/search"
             className="flex items-center gap-2.5 px-3.5 py-2 rounded-lg bg-zinc-900/60 border border-zinc-800 hover:border-emerald-500/40 text-xs text-zinc-400 hover:text-zinc-200 transition-all w-full group"
@@ -338,35 +343,47 @@ export default function Topbar({ userName, userAvatar, lastSyncAt }: TopbarProps
         </div>
 
         {/* Right: Actions */}
-        <div className="flex items-center gap-2.5 sm:gap-3">
+        <div className="flex items-center gap-1.5 sm:gap-3 shrink-0 ml-auto">
+          {/* Mobile Search Button */}
+          <Link
+            href="/search"
+            className="flex md:hidden items-center justify-center p-2 rounded-lg text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/60 transition-colors"
+            title="Search drives & roles"
+            aria-label="Search"
+          >
+            <Search className="h-4 w-4" />
+          </Link>
+
           {/* Live Sync Pill */}
           <button
             onClick={() => handleSync(false)}
             disabled={isSyncing}
             className={cn(
-              'flex items-center gap-2 rounded-full border px-3 py-1.5 text-[11px] font-mono transition-all duration-200 disabled:opacity-80 select-none cursor-pointer',
+              'flex items-center gap-1.5 sm:gap-2 rounded-full border px-2.5 sm:px-3 py-1 sm:py-1.5 text-[10px] sm:text-[11px] font-mono transition-all duration-200 disabled:opacity-80 select-none cursor-pointer shrink-0',
               isSyncing
                 ? 'border-amber-500/40 bg-amber-500/10 text-amber-300 shadow-[0_0_16px_rgba(245,158,11,0.15)]'
                 : 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300 hover:bg-emerald-500/15 hover:border-emerald-500/50'
             )}
-            title="Click to sync Gmail inboxes"
+            title={mounted && lastSyncAt ? `All inboxes caught up (${timeAgo(lastSyncAt)})` : 'Click to sync Gmail inboxes'}
             aria-label="Sync status"
           >
             {isSyncing ? (
               <>
                 <Zap className="h-3 w-3 animate-pulse text-amber-400 shrink-0" />
-                <span className="truncate max-w-[200px]">
+                <span className="hidden sm:inline truncate max-w-[180px]">
                   {syncProgress?.currentPageIndex !== undefined && syncProgress?.totalPagesCount !== undefined
                     ? `⚡ Page ${(syncProgress.currentPageIndex) + 1} of ${syncProgress.totalPagesCount}`
                     : 'Syncing…'}
                 </span>
+                <span className="sm:hidden font-semibold">Syncing</span>
               </>
             ) : (
               <>
                 <CheckCheck className="h-3 w-3 text-emerald-400 shrink-0" />
-                <span className="truncate">
+                <span className="hidden sm:inline truncate">
                   {mounted && lastSyncAt ? `All inboxes caught up (${timeAgo(lastSyncAt)})` : 'Sync inboxes'}
                 </span>
+                <span className="sm:hidden font-medium">Sync</span>
               </>
             )}
           </button>

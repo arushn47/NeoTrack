@@ -179,26 +179,27 @@ export default function CalendarClient({ events }: CalendarClientProps) {
   };
 
   return (
-    <div data-testid="calendar-page" className="mx-auto max-w-6xl">
+    <div data-testid="calendar-page" className="mx-auto max-w-6xl w-full min-w-0 max-w-full">
       {/* Header Bar */}
-      <div className="flex flex-wrap items-center justify-between gap-4">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 sm:gap-4">
         <div>
-          <h1 className="font-display text-2xl font-extrabold tracking-tight sm:text-3xl text-white">
+          <h1 className="font-display text-xl sm:text-3xl font-extrabold tracking-tight text-white">
             Placement Schedule
           </h1>
-          <p className="mt-1 text-sm text-zinc-500">
+          <p className="mt-1 text-xs sm:text-sm text-zinc-500">
             PPTs, tests & interviews — auto-extracted from circulars
           </p>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2 sm:gap-3 shrink-0">
           <button
             data-testid="gcal-sync-btn"
             onClick={handleSyncGcal}
             disabled={isSyncingGcal}
-            className="flex items-center gap-2 rounded-full border border-sky-500/30 bg-sky-500/10 px-4 py-2 text-xs font-semibold text-sky-300 transition-colors hover:bg-sky-500/20 disabled:opacity-60 cursor-pointer"
+            className="flex items-center gap-1.5 sm:gap-2 rounded-full border border-sky-500/30 bg-sky-500/10 px-3 sm:px-4 py-1.5 sm:py-2 text-xs font-semibold text-sky-300 transition-colors hover:bg-sky-500/20 disabled:opacity-60 cursor-pointer"
           >
-            <CalendarPlus className={`h-4 w-4 ${isSyncingGcal ? 'animate-spin' : ''}`} />
-            {isSyncingGcal ? 'Syncing…' : 'Sync Google Calendar'}
+            <CalendarPlus className={`h-3.5 sm:h-4 w-3.5 sm:w-4 ${isSyncingGcal ? 'animate-spin' : ''}`} />
+            <span className="hidden xs:inline">{isSyncingGcal ? 'Syncing…' : 'Sync Google Calendar'}</span>
+            <span className="xs:hidden">{isSyncingGcal ? 'Syncing…' : 'Sync GCal'}</span>
           </button>
           <div className="flex rounded-full border border-zinc-800 bg-zinc-900/60 p-1" data-testid="view-toggle">
             {(['month', 'agenda'] as const).map((v) => (
@@ -206,7 +207,7 @@ export default function CalendarClient({ events }: CalendarClientProps) {
                 key={v}
                 data-testid={`view-${v}-btn`}
                 onClick={() => setView(v)}
-                className={`rounded-full px-4 py-1.5 text-xs font-semibold capitalize transition-colors duration-200 cursor-pointer ${
+                className={`rounded-full px-3 sm:px-4 py-1 sm:py-1.5 text-xs font-semibold capitalize transition-colors duration-200 cursor-pointer ${
                   view === v ? 'bg-zinc-800 text-zinc-100 font-bold' : 'text-zinc-500 hover:text-zinc-300'
                 }`}
               >
@@ -219,7 +220,7 @@ export default function CalendarClient({ events }: CalendarClientProps) {
 
       {/* Legend */}
       <div
-        className="mt-5 flex flex-wrap gap-4 font-mono text-[10px] uppercase tracking-widest text-zinc-500"
+        className="mt-4 sm:mt-5 flex flex-wrap gap-3 sm:gap-4 font-mono text-[9px] sm:text-[10px] uppercase tracking-widest text-zinc-500"
         data-testid="calendar-legend"
       >
         {Object.entries(EVENT_META).map(([k, m]) => (
@@ -235,13 +236,13 @@ export default function CalendarClient({ events }: CalendarClientProps) {
           initial={{ opacity: 0, y: 12 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.4 }}
-          className="mt-5 overflow-hidden rounded-2xl border border-zinc-800 bg-[#101014]"
+          className="mt-4 sm:mt-5 overflow-hidden rounded-2xl border border-zinc-800 bg-[#101014] max-w-full"
           data-testid="month-grid"
         >
           {/* Month Header & Controls */}
-          <div className="flex items-center justify-between border-b border-zinc-800 px-5 py-4">
-            <div className="flex items-center gap-3">
-              <h2 className="font-display text-lg font-bold text-zinc-100">
+          <div className="flex flex-col xs:flex-row xs:items-center justify-between border-b border-zinc-800 px-3 sm:px-5 py-3 sm:py-4 gap-2">
+            <div className="flex items-center gap-2 sm:gap-3">
+              <h2 className="font-display text-base sm:text-lg font-bold text-zinc-100">
                 {format(currentMonth, 'MMMM yyyy')}
               </h2>
               <div className="flex items-center gap-1">
@@ -267,7 +268,7 @@ export default function CalendarClient({ events }: CalendarClientProps) {
                 </button>
               </div>
             </div>
-            <span className="font-mono text-[10px] uppercase tracking-widest text-zinc-500">
+            <span className="font-mono text-[9px] sm:text-[10px] uppercase tracking-widest text-zinc-500">
               {events.length} events this season
             </span>
           </div>
@@ -275,7 +276,7 @@ export default function CalendarClient({ events }: CalendarClientProps) {
           {/* Day Names Row */}
           <div className="grid grid-cols-7 border-b border-zinc-800">
             {['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'].map((d) => (
-              <div key={d} className="px-2 py-2.5 text-center font-mono text-[9px] tracking-widest text-zinc-600">
+              <div key={d} className="px-1 sm:px-2 py-2 text-center font-mono text-[8px] sm:text-[9px] tracking-widest text-zinc-600">
                 {d}
               </div>
             ))}
@@ -294,24 +295,43 @@ export default function CalendarClient({ events }: CalendarClientProps) {
                   key={i}
                   data-testid={today ? 'calendar-today-cell' : `calendar-day-${format(day, 'd')}`}
                   onClick={() => setSelectedDay(day)}
-                  className={`min-h-[72px] cursor-pointer border-b border-r border-zinc-800/60 p-1.5 sm:min-h-[96px] sm:p-2 transition-colors hover:bg-zinc-800/30 ${
+                  className={`min-h-[58px] sm:min-h-[96px] cursor-pointer border-b border-r border-zinc-800/60 p-1 sm:p-2 transition-colors hover:bg-zinc-800/30 ${
                     !inMonth ? 'opacity-30' : ''
                   } ${today ? 'bg-emerald-500/[0.05]' : ''}`}
                 >
                   <div className="flex items-center justify-between">
                     <span
-                      className={`inline-flex h-6 w-6 items-center justify-center rounded-full font-tabular text-[11px] ${
+                      className={`inline-flex h-5 w-5 sm:h-6 sm:w-6 items-center justify-center rounded-full font-tabular text-[10px] sm:text-[11px] ${
                         today ? 'bg-emerald-500 font-bold text-zinc-950' : 'text-zinc-500'
                       }`}
                     >
                       {format(day, 'd')}
                     </span>
-                    {hasEvents && (
-                      <span className="h-1.5 w-1.5 rounded-full bg-emerald-400/80 sm:hidden" />
-                    )}
                   </div>
 
-                  <div className="mt-1 space-y-1">
+                  {/* Mobile event dots */}
+                  {hasEvents && (
+                    <div className="flex flex-wrap gap-1 items-center justify-center mt-1 sm:hidden">
+                      {evs.slice(0, 3).map((e) => {
+                        const norm = normalizeEventType(e.eventType);
+                        const meta = EVENT_META[norm];
+                        return (
+                          <span
+                            key={e.id}
+                            className={`h-1.5 w-1.5 rounded-full ${meta.dot}`}
+                          />
+                        );
+                      })}
+                      {evs.length > 3 && (
+                        <span className="text-[7px] font-mono text-zinc-500 leading-none">
+                          +{evs.length - 3}
+                        </span>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Desktop event pills */}
+                  <div className="mt-1 space-y-1 hidden sm:block">
                     {evs.slice(0, 2).map((e) => {
                       const norm = normalizeEventType(e.eventType);
                       const meta = EVENT_META[norm];

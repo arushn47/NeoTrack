@@ -342,23 +342,23 @@ export default function CompanyDetailClient({ company }: CompanyDetailClientProp
         initial={{ opacity: 0, y: 16 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.45 }}
-        className="rounded-2xl border border-zinc-800 bg-[#101014] p-6"
+        className="rounded-2xl border border-zinc-800 bg-[#101014] p-4 sm:p-6"
       >
-        <div className="flex flex-wrap items-start justify-between gap-4">
-          <div className="flex items-start gap-4">
-            <div className={`flex h-14 w-14 items-center justify-center rounded-xl border font-display text-lg font-bold ${hue}`}>
+        <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3 sm:gap-4">
+          <div className="flex items-start gap-3 sm:gap-4 min-w-0 flex-1">
+            <div className={`flex h-12 w-12 sm:h-14 sm:w-14 shrink-0 items-center justify-center rounded-xl border font-display text-base sm:text-lg font-bold ${hue}`}>
               {initials}
             </div>
-            <div>
-              <h1 className="font-display text-2xl font-extrabold tracking-tight text-white">{company.name}</h1>
-              <div className="mt-1.5 flex flex-wrap items-center gap-2.5">
-                <span className="text-sm text-zinc-300 font-medium">{displayRole}</span>
+            <div className="min-w-0 flex-1">
+              <h1 className="font-display text-xl sm:text-2xl font-extrabold tracking-tight text-white truncate">{company.name}</h1>
+              <div className="mt-1.5 flex flex-wrap items-center gap-2">
+                <span className="text-xs sm:text-sm text-zinc-300 font-medium truncate">{displayRole}</span>
                 <CategoryBadge category={category} />
               </div>
             </div>
           </div>
 
-          <div className="flex items-center gap-2.5">
+          <div className="flex items-center gap-2 sm:gap-2.5 self-start sm:self-auto shrink-0">
             {/* Status override dropdown — single unified pill with cursor-pointer */}
             <div className="relative">
               {(() => {
@@ -577,14 +577,14 @@ export default function CompanyDetailClient({ company }: CompanyDetailClientProp
 
               const Icon = isOffer ? FileSpreadsheet : isInterview ? CalendarPlus : isTest ? AlertTriangle : isShortlist ? FileSpreadsheet : Mail;
               const iconCls = isOffer
-                ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300'
+                ? 'border-emerald-500/50 bg-[#121218] text-emerald-400'
                 : isInterview
-                ? 'border-cyan-500/40 bg-cyan-500/10 text-cyan-300'
+                ? 'border-cyan-500/50 bg-[#121218] text-cyan-400'
                 : isTest
-                ? 'border-amber-500/40 bg-amber-500/10 text-amber-300'
+                ? 'border-amber-500/50 bg-[#121218] text-amber-400'
                 : isShortlist
-                ? 'border-violet-500/40 bg-violet-500/10 text-violet-300'
-                : 'border-sky-500/30 bg-sky-500/10 text-sky-300';
+                ? 'border-violet-500/50 bg-[#121218] text-violet-400'
+                : 'border-sky-500/40 bg-[#121218] text-sky-400';
 
               const isOpen = openAccordion === idx;
               const isPersonal = email.sender.includes('noreply.cdcinfo');
@@ -592,7 +592,7 @@ export default function CompanyDetailClient({ company }: CompanyDetailClientProp
 
               return (
                 <div key={email.id} data-testid={`timeline-item-${idx}`} className="relative flex items-start gap-3 sm:gap-4 w-full min-w-0">
-                  <div className={`z-10 mt-1 flex h-8 w-8 shrink-0 items-center justify-center rounded-full border ${iconCls}`}>
+                  <div className={cn('z-10 mt-1 flex h-8 w-8 shrink-0 items-center justify-center rounded-full border shadow-sm ring-4 ring-[#101014]', iconCls)}>
                     <Icon className="h-3.5 w-3.5 shrink-0" />
                   </div>
 
@@ -603,18 +603,18 @@ export default function CompanyDetailClient({ company }: CompanyDetailClientProp
                       className="flex w-full items-center justify-between gap-3 px-3.5 sm:px-4 py-3 text-left min-w-0 hover:bg-zinc-900/60 transition-colors cursor-pointer"
                     >
                       <div className="flex-1 min-w-0 overflow-hidden">
-                        <div className="truncate text-sm font-semibold text-zinc-200" title={email.subject}>
+                        <div className="text-xs sm:text-sm font-semibold text-zinc-200 line-clamp-2 leading-snug break-words" title={email.subject}>
                           {email.subject}
                         </div>
-                        <div className="mt-0.5 flex items-center gap-2 font-mono text-[10px] text-zinc-500">
+                        <div className="mt-1 flex items-center gap-2 font-mono text-[10px] text-zinc-500">
                           <span>{timeAgo(email.receivedAt)}</span>
                           <span>·</span>
                           <span>{isPersonal ? 'personal gmail' : 'college gmail'}</span>
                         </div>
                       </div>
                       <ChevronDown
-                        className={`h-4 w-4 shrink-0 text-zinc-600 transition-transform duration-200 ${
-                          isOpen ? 'rotate-180' : ''
+                        className={`h-4 w-4 shrink-0 text-zinc-500 transition-transform duration-200 ${
+                          isOpen ? 'rotate-180 text-zinc-300' : ''
                         }`}
                       />
                     </button>
@@ -648,37 +648,43 @@ export default function CompanyDetailClient({ company }: CompanyDetailClientProp
                                     shortlist verified
                                   </span>
                                 </div>
-                                <div className="grid grid-cols-4 gap-px bg-zinc-800/70 font-mono text-[10px]">
-                                  <div className="bg-[#0b0d11] px-3 py-2 text-violet-300 truncate font-semibold">
-                                    {matchedCandidate.matchedValue || company.candidateRegId || 'Candidate ID'}
-                                  </div>
-                                  <div className="bg-[#0b0d11] px-3 py-2 text-zinc-300 truncate">
-                                    {company.candidateName || 'Candidate Verified'}
-                                  </div>
-                                  <div className="bg-[#0b0d11] px-3 py-2 text-zinc-400 truncate">
-                                    {matchedCandidate.matchLocation || 'row verified'}
-                                  </div>
-                                  <div className="bg-[#0b0d11] px-3 py-2 font-bold text-emerald-300 whitespace-nowrap">
-                                    MATCH ✓
+                                <div className="overflow-x-auto">
+                                  <div className="min-w-[280px] grid grid-cols-4 gap-px bg-zinc-800/70 font-mono text-[10px]">
+                                    <div className="bg-[#0b0d11] px-2.5 sm:px-3 py-2 text-violet-300 truncate font-semibold">
+                                      {matchedCandidate.matchedValue || company.candidateRegId || 'Candidate ID'}
+                                    </div>
+                                    <div className="bg-[#0b0d11] px-2.5 sm:px-3 py-2 text-zinc-300 truncate">
+                                      {company.candidateName || 'Candidate Verified'}
+                                    </div>
+                                    <div className="bg-[#0b0d11] px-2.5 sm:px-3 py-2 text-zinc-400 truncate">
+                                      {matchedCandidate.matchLocation || 'row verified'}
+                                    </div>
+                                    <div className="bg-[#0b0d11] px-2.5 sm:px-3 py-2 font-bold text-emerald-300 whitespace-nowrap text-center">
+                                      MATCH ✓
+                                    </div>
                                   </div>
                                 </div>
                               </div>
                             )}
 
                             {/* Action links row: Direct link to original Gmail thread */}
-                            <div className="mt-3 flex items-center justify-between pt-1">
+                            <div className="mt-3.5 flex flex-col xs:flex-row xs:items-center justify-between gap-2 pt-2.5 border-t border-zinc-800/60">
                               <a
                                 href={getGmailLink(email)}
                                 target="_blank"
                                 rel="noopener noreferrer"
                                 data-testid={`open-email-${idx}`}
-                                className="inline-flex items-center gap-1.5 text-[11px] font-semibold text-emerald-400 hover:text-emerald-300 transition-colors"
+                                className="inline-flex items-center gap-1.5 text-xs font-semibold text-emerald-400 hover:text-emerald-300 transition-colors shrink-0 py-0.5"
                               >
-                                Open original email <ExternalLink className="h-3 w-3" />
+                                <span>Open original email</span>
+                                <ExternalLink className="h-3.5 w-3.5" />
                               </a>
-                              <span className="font-mono text-[10px] text-zinc-600 truncate max-w-[200px]">
-                                {email.sender}
-                              </span>
+                              <div className="flex items-center gap-1.5 text-[10px] font-mono text-zinc-500 min-w-0 max-w-full">
+                                <span className="text-zinc-600 shrink-0">From:</span>
+                                <span className="truncate" title={email.sender}>
+                                  {email.sender}
+                                </span>
+                              </div>
                             </div>
                           </div>
                         </motion.div>

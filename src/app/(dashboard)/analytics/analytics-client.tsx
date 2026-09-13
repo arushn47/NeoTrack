@@ -213,19 +213,19 @@ export default function AnalyticsClient({
   const totalCategorized = superDreamCount + dreamCount + regularCount || 1;
 
   return (
-    <div data-testid="analytics-page" className="space-y-6">
+    <div data-testid="analytics-page" className="space-y-5 sm:space-y-6 w-full min-w-0 max-w-full">
       {/* Header */}
-      <div className="flex flex-wrap items-end justify-between gap-4">
+      <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-3 sm:gap-4">
         <div>
-          <div className="flex items-center gap-3">
-            <h1 className="font-display text-2xl font-extrabold tracking-tight sm:text-3xl text-white">
+          <div className="flex items-center gap-2.5 sm:gap-3">
+            <h1 className="font-display text-xl sm:text-3xl font-extrabold tracking-tight text-white">
               Placement Radar Analytics
             </h1>
             <span className="rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2.5 py-0.5 font-mono text-xs font-bold text-emerald-300">
               LIVE
             </span>
           </div>
-          <p className="mt-1 text-sm text-zinc-500">
+          <p className="mt-1 text-xs sm:text-sm text-zinc-500">
             Season {new Date().getFullYear()}
             {neoId && (
               <>
@@ -249,20 +249,20 @@ export default function AnalyticsClient({
       </div>
 
       {/* 4 Funnel Metric Cards (Emergent Card Design) */}
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+      <div className="grid grid-cols-2 gap-2.5 sm:gap-3 sm:grid-cols-4">
         <motion.div
           initial={{ opacity: 0, y: 14 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.4 }}
-          className="rounded-2xl border border-indigo-500/20 bg-indigo-500/[0.05] p-5"
+          className="rounded-2xl border border-indigo-500/20 bg-indigo-500/[0.05] p-3.5 sm:p-5 min-w-0"
         >
-          <div className="font-mono text-[10px] uppercase tracking-widest text-indigo-300">
+          <div className="font-mono text-[9px] sm:text-[10px] uppercase tracking-widest text-indigo-300 truncate">
             Drives Synced
           </div>
-          <div className="font-tabular mt-2 font-display text-3xl font-extrabold text-white">
+          <div className="font-tabular mt-1.5 sm:mt-2 font-display text-2xl sm:text-3xl font-extrabold text-white">
             {companiesCount || applications.length}
           </div>
-          <div className="mt-1 font-mono text-[11px] text-zinc-500">
+          <div className="mt-1 font-mono text-[10px] sm:text-[11px] text-zinc-500 truncate">
             Official CDC circulars
           </div>
         </motion.div>
@@ -362,7 +362,7 @@ export default function AnalyticsClient({
       </motion.div>
 
       {/* Section 2: Compensation Tier Distribution */}
-      <div className="grid gap-4 md:grid-cols-2">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 w-full min-w-0 max-w-full">
         <motion.div
           initial={{ opacity: 0, y: 16 }}
           animate={{ opacity: 1, y: 0 }}

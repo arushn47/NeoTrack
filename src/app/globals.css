@@ -5,6 +5,7 @@
    ============================================ */
 
 @theme {
+  --breakpoint-xs: 480px;
   --font-sans: var(--font-outfit), 'Outfit', system-ui, sans-serif;
   --font-display: var(--font-outfit), 'Outfit', system-ui, sans-serif;
   --font-mono: var(--font-mono), 'JetBrains Mono', monospace;
@@ -39,6 +40,7 @@
 /* Base styles */
 html {
   background-color: #09090b;
+  overflow-x: clip;
 }
 
 body {
@@ -47,6 +49,7 @@ body {
   font-family: var(--font-outfit), 'Outfit', system-ui, sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  overflow-x: clip;
 }
 
 /* Film grain overlay */

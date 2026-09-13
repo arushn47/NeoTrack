@@ -1,12 +1,13 @@
 'use client';
 
-import { useEffect, useRef } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import Link from 'next/link';
 import {
   CheckCircle2,
   AlertTriangle,
   Lock,
   ArrowLeft,
+  ArrowUp,
   Mail,
   ExternalLink,
   Scale,
@@ -51,6 +52,20 @@ function AnimatedSection({ children, delay = 0 }: { children: React.ReactNode; d
 }
 
 export default function TermsClient() {
+  const [showScrollTop, setShowScrollTop] = useState(false);
+
+  useEffect(() => {
+    const handleScroll = () => {
+      setShowScrollTop(window.scrollY > 300);
+    };
+    window.addEventListener('scroll', handleScroll, { passive: true });
+    return () => window.removeEventListener('scroll', handleScroll);
+  }, []);
+
+  const scrollToTop = () => {
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
   return (
     <div className="min-h-screen bg-[#09090b] text-zinc-300 selection:bg-emerald-500/20 font-sans overflow-x-hidden">
       {/* Animated Background */}
@@ -395,18 +410,31 @@ export default function TermsClient() {
         <AnimatedSection delay={200}>
           <div className="mt-16 pt-8 border-t border-zinc-800/60 flex flex-col sm:flex-row items-center justify-between gap-4 text-xs font-mono text-zinc-500">
             <p>© {new Date().getFullYear()} {APP_NAME}. All rights reserved.</p>
-            <div className="flex items-center gap-4">
-              <Link href="/privacy" className="hover:text-zinc-300 transition-colors">Privacy Policy</Link>
+            <div className="flex items-center justify-center gap-3 sm:gap-4 whitespace-nowrap text-[11px]">
+              <Link href="/privacy" className="hover:text-zinc-200 transition-colors whitespace-nowrap">
+                Privacy Policy
+              </Link>
               <span className="text-zinc-700">·</span>
-              <Link href="/terms" className="text-emerald-400 font-semibold">Terms of Service</Link>
-              <span className="text-zinc-700">·</span>
-              <Link href="/feedback" className="hover:text-zinc-300 transition-colors">Feedback & Support</Link>
-              <span className="text-zinc-700">·</span>
-              <Link href="/" className="hover:text-zinc-300 transition-colors">Back to App</Link>
+              <Link href="/feedback" className="hover:text-zinc-200 transition-colors whitespace-nowrap">
+                Feedback & Support
+              </Link>
             </div>
           </div>
         </AnimatedSection>
       </main>
+
+      {/* Hovering / Floating Scroll to Top Arrow Button */}
+      <button
+        type="button"
+        onClick={scrollToTop}
+        aria-label="Scroll to top"
+        title="Scroll to top"
+        className={`fixed bottom-6 right-6 z-40 flex h-11 w-11 items-center justify-center rounded-full border border-zinc-700/80 bg-zinc-900/90 text-zinc-300 shadow-2xl backdrop-blur-md transition-all duration-300 hover:border-emerald-500/50 hover:bg-zinc-800 hover:text-white active:scale-95 cursor-pointer ${
+          showScrollTop ? 'opacity-100 translate-y-0 pointer-events-auto' : 'opacity-0 translate-y-4 pointer-events-none'
+        }`}
+      >
+        <ArrowUp className="h-5 w-5" />
+      </button>
     </div>
   );
 }

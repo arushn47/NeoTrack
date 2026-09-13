@@ -5,6 +5,7 @@ import { useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { motion, useMotionValue, useSpring } from 'framer-motion';
 import Lenis from 'lenis';
+import { cn } from '@/lib/utils';
 import { AppLogoMark } from '@/components/brand/logo';
 import {
   Radar,
@@ -101,8 +102,8 @@ const TerminalCard = () => {
   };
 
   return (
-    <div style={{ perspective: 1200 }} className="relative">
-      <div className="absolute -inset-8 rounded-full bg-emerald-500/10 blur-3xl" />
+    <div style={{ perspective: 1200 }} className="relative w-full max-w-full overflow-hidden sm:overflow-visible">
+      <div className="absolute -inset-4 sm:-inset-8 rounded-full bg-emerald-500/10 blur-2xl sm:blur-3xl pointer-events-none" />
       <motion.div
         ref={ref}
         onMouseMove={onMove}
@@ -114,42 +115,46 @@ const TerminalCard = () => {
         initial={{ opacity: 0, y: 40 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 1.1, delay: 0.55, ease: [0.16, 1, 0.3, 1] }}
-        className="scanline relative overflow-hidden rounded-2xl border border-zinc-800 bg-[#0d0f14]/95 shadow-2xl shadow-black/60"
+        className="scanline relative overflow-hidden rounded-2xl border border-zinc-800 bg-[#0d0f14]/95 shadow-2xl shadow-black/60 w-full max-w-full"
         data-testid="sync-terminal"
       >
-        <div className="flex items-center gap-2 border-b border-zinc-800/80 px-4 py-3">
-          <span className="h-2.5 w-2.5 rounded-full bg-rose-500/70" />
-          <span className="h-2.5 w-2.5 rounded-full bg-amber-500/70" />
-          <span className="h-2.5 w-2.5 rounded-full bg-emerald-500/70" />
-          <span className="ml-3 font-mono text-[11px] text-zinc-500">wmo://sync-engine — live</span>
-          <span className="ml-auto flex items-center gap-1.5 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2 py-0.5 font-mono text-[9px] uppercase tracking-widest text-emerald-300">
+        <div className="flex items-center gap-2 border-b border-zinc-800/80 px-3 sm:px-4 py-2.5 sm:py-3">
+          <span className="h-2.5 w-2.5 rounded-full bg-rose-500/70 shrink-0" />
+          <span className="h-2.5 w-2.5 rounded-full bg-amber-500/70 shrink-0" />
+          <span className="h-2.5 w-2.5 rounded-full bg-emerald-500/70 shrink-0" />
+          <span className="ml-2 sm:ml-3 font-mono text-[10px] sm:text-[11px] text-zinc-500 truncate max-w-[150px] sm:max-w-none">
+            wmo://sync-engine — live
+          </span>
+          <span className="ml-auto flex shrink-0 items-center gap-1.5 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2 py-0.5 font-mono text-[9px] uppercase tracking-widest text-emerald-300">
             <span className="h-1 w-1 animate-pulse rounded-full bg-emerald-400" /> parsing
           </span>
         </div>
-        <div className="h-64 space-y-2.5 overflow-hidden px-4 py-4 font-mono text-[11px] leading-relaxed sm:text-xs">
+        <div className="h-56 sm:h-64 space-y-2 sm:space-y-2.5 overflow-hidden px-3 sm:px-4 py-3 sm:py-4 font-mono text-[10px] leading-relaxed sm:text-xs">
           {lines.map((l, i) => (
             <motion.div
               key={`${l.t}-${i}-${l.text}`}
               initial={{ opacity: 0, x: -8 }}
               animate={{ opacity: 1, x: 0 }}
               transition={{ duration: 0.3 }}
-              className="flex gap-3"
+              className="flex gap-2 sm:gap-3 min-w-0"
             >
               <span className="shrink-0 text-zinc-600">{l.t}</span>
-              <span className={l.tone}>{l.text}</span>
+              <span className={cn('truncate sm:break-normal min-w-0 flex-1', l.tone)}>{l.text}</span>
             </motion.div>
           ))}
           <span className="cursor-blink text-emerald-400">▍</span>
         </div>
-        <div className="flex items-center gap-4 border-t border-zinc-800/80 px-4 py-3 font-mono text-[10px] text-zinc-500">
-          <span className="flex items-center gap-1.5">
-            <CheckCheck className="h-3 w-3 text-emerald-400" /> personal@gmail
-          </span>
-          <span className="flex items-center gap-1.5">
-            <CheckCheck className="h-3 w-3 text-emerald-400" /> college@vit.ac.in
-          </span>
-          <span className="ml-auto flex items-center gap-1.5 text-violet-300">
-            <FileSpreadsheet className="h-3 w-3" /> excel scanner armed
+        <div className="flex flex-wrap items-center justify-between gap-2 border-t border-zinc-800/80 px-3 sm:px-4 py-2.5 sm:py-3 font-mono text-[9px] sm:text-[10px] text-zinc-500">
+          <div className="flex items-center gap-3">
+            <span className="flex items-center gap-1">
+              <CheckCheck className="h-3 w-3 text-emerald-400 shrink-0" /> personal
+            </span>
+            <span className="flex items-center gap-1">
+              <CheckCheck className="h-3 w-3 text-emerald-400 shrink-0" /> college
+            </span>
+          </div>
+          <span className="flex items-center gap-1 text-violet-300">
+            <FileSpreadsheet className="h-3 w-3 shrink-0" /> excel scanner armed
           </span>
         </div>
       </motion.div>
@@ -195,12 +200,13 @@ const chapters = [
         ].map((m, i) => (
           <div
             key={i}
-            className={`flex items-center gap-3 rounded-lg border px-3 py-2.5 font-mono text-[11px] ${m.hot ? 'border-zinc-700 bg-zinc-900' : 'border-zinc-800/60 bg-zinc-900/40'
-              }`}
+            className={`flex items-center gap-2 sm:gap-3 rounded-lg border px-2.5 sm:px-3 py-2 sm:py-2.5 font-mono text-[10px] sm:text-[11px] min-w-0 overflow-hidden ${
+              m.hot ? 'border-zinc-700 bg-zinc-900' : 'border-zinc-800/60 bg-zinc-900/40'
+            }`}
           >
             <Mail className={`h-3.5 w-3.5 shrink-0 ${m.hot ? 'text-amber-400' : 'text-zinc-600'}`} />
-            <span className="w-32 shrink-0 truncate text-zinc-500">{m.from}</span>
-            <span className={`truncate ${m.tone}`}>{m.sub}</span>
+            <span className="w-24 sm:w-32 shrink-0 truncate text-zinc-500">{m.from}</span>
+            <span className={`truncate min-w-0 flex-1 ${m.tone}`}>{m.sub}</span>
           </div>
         ))}
       </div>
@@ -211,36 +217,40 @@ const chapters = [
     title: 'The Excel Agony',
     copy: "Every shortlist is a 15 MB spreadsheet with 4,000 roll numbers. On your phone. Outside an exam hall. Where's My Offer scans every attachment the second it lands and flips your status automatically.",
     visual: (
-      <div className="overflow-hidden rounded-lg border border-zinc-800 font-mono text-[11px]">
-        <div className="grid grid-cols-4 gap-px bg-zinc-800/70 text-zinc-500">
+      <div className="overflow-x-auto rounded-lg border border-zinc-800 font-mono text-[10px] sm:text-[11px]">
+        <div className="grid grid-cols-4 min-w-[280px] gap-px bg-zinc-800/70 text-zinc-500">
           {['NEO ID', 'NAME', 'BRANCH', 'STATUS'].map((h) => (
-            <div key={h} className="bg-[#0d0f14] px-3 py-1.5 text-[9px] tracking-widest">
+            <div key={h} className="bg-[#0d0f14] px-2.5 sm:px-3 py-1.5 text-[8px] sm:text-[9px] tracking-widest">
               {h}
             </div>
           ))}
           {['23BCE10811', '23BCE10933', '23BCE10472', '23BCE11207'].map((id, i) => (
             <div key={id} className="contents">
               <div
-                className={`px-3 py-2 ${id === '23BCE10472' ? 'bg-violet-500/15 text-violet-300' : 'bg-[#0b0d11] text-zinc-500'
-                  }`}
+                className={`px-2.5 sm:px-3 py-2 ${
+                  id === '23BCE10472' ? 'bg-violet-500/15 text-violet-300' : 'bg-[#0b0d11] text-zinc-500'
+                }`}
               >
                 {id}
               </div>
               <div
-                className={`px-3 py-2 ${id === '23BCE10472' ? 'bg-violet-500/15 text-zinc-200' : 'bg-[#0b0d11] text-zinc-600'
-                  }`}
+                className={`px-2.5 sm:px-3 py-2 ${
+                  id === '23BCE10472' ? 'bg-violet-500/15 text-zinc-200' : 'bg-[#0b0d11] text-zinc-600'
+                }`}
               >
                 {['K. Iyer', 'S. Menon', 'Arush N.', 'R. Das'][i]}
               </div>
               <div
-                className={`px-3 py-2 ${id === '23BCE10472' ? 'bg-violet-500/15 text-zinc-300' : 'bg-[#0b0d11] text-zinc-600'
-                  }`}
+                className={`px-2.5 sm:px-3 py-2 ${
+                  id === '23BCE10472' ? 'bg-violet-500/15 text-zinc-300' : 'bg-[#0b0d11] text-zinc-600'
+                }`}
               >
                 CSE
               </div>
               <div
-                className={`px-3 py-2 ${id === '23BCE10472' ? 'bg-violet-500/15 font-bold text-violet-300' : 'bg-[#0b0d11] text-zinc-600'
-                  }`}
+                className={`px-2.5 sm:px-3 py-2 ${
+                  id === '23BCE10472' ? 'bg-violet-500/15 font-bold text-violet-300' : 'bg-[#0b0d11] text-zinc-600'
+                }`}
               >
                 {id === '23BCE10472' ? 'MATCH ✓' : '—'}
               </div>
@@ -255,10 +265,10 @@ const chapters = [
     title: 'The Parser Engine',
     copy: 'A recency-first sync engine reads every circular the moment it arrives — extracting dates, venues, deadlines and eligibility — then writes them straight onto your calendar.',
     visual: (
-      <div className="space-y-2 rounded-lg border border-zinc-800 bg-[#0b0d11] p-3.5 font-mono text-[11px]">
-        <div className="text-zinc-500">$ wmo parse --inbox college --latest</div>
-        <div className="text-zinc-400">→ circular: "TI Digital Design — R1 interview"</div>
-        <div className="text-sky-300">→ extracted: venue=TT Lab 1 · report=8:30 AM</div>
+      <div className="space-y-2 rounded-lg border border-zinc-800 bg-[#0b0d11] p-3 sm:p-3.5 font-mono text-[10px] sm:text-[11px] min-w-0 overflow-hidden">
+        <div className="text-zinc-500 truncate">$ wmo parse --inbox college --latest</div>
+        <div className="text-zinc-400 truncate">→ circular: "TI Digital Design — R1 interview"</div>
+        <div className="text-sky-300 truncate">→ extracted: venue=TT Lab 1 · report=8:30 AM</div>
         <div className="text-emerald-300">→ calendar event created ✓</div>
       </div>
     ),
@@ -268,20 +278,21 @@ const chapters = [
     title: 'The Offer Radar',
     copy: "One canonical pipeline across every drive on campus. No more 'did I apply?' — just open the radar and know exactly where you stand, from registration to offer letter.",
     visual: (
-      <div className="flex flex-wrap items-center gap-2">
+      <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
         {['Applied', 'Shortlisted', 'Test', 'Interview', 'Offer'].map((s, i) => (
-          <div key={s} className="flex items-center gap-2">
+          <div key={s} className="flex items-center gap-1.5 sm:gap-2">
             <span
-              className={`rounded-full border px-3 py-1 font-mono text-[10px] tracking-wider ${i === 4
+              className={`rounded-full border px-2.5 sm:px-3 py-1 font-mono text-[9px] sm:text-[10px] tracking-wider ${
+                i === 4
                   ? 'border-emerald-500/50 bg-emerald-500/15 text-emerald-300 shadow-[0_0_24px_rgba(16,185,129,0.25)]'
                   : i === 1
                     ? 'border-violet-500/40 bg-violet-500/10 text-violet-300'
                     : 'border-zinc-700 bg-zinc-900 text-zinc-400'
-                }`}
+              }`}
             >
               {s}
             </span>
-            {i < 4 && <span className="h-px w-4 bg-zinc-700" />}
+            {i < 4 && <span className="hidden xs:inline-block h-px w-3 sm:w-4 bg-zinc-700" />}
           </div>
         ))}
       </div>
@@ -329,22 +340,24 @@ export default function LoginClient() {
   };
 
   return (
-    <div className="min-h-screen bg-[#09090b] text-zinc-100 selection:bg-emerald-500/28 selection:text-zinc-100">
+    <div className="min-h-screen bg-[#09090b] text-zinc-100 selection:bg-emerald-500/28 selection:text-zinc-100 max-w-full overflow-x-hidden">
       {/* Top Bar */}
       <header className="fixed inset-x-0 top-0 z-50 border-b border-zinc-800/60 bg-[#09090b]/80 backdrop-blur-xl">
-        <div className="mx-auto flex h-16 max-w-7xl items-center justify-between px-4 sm:px-6">
-          <div className="flex items-center gap-2.5" data-testid="landing-logo">
-            <AppLogoMark size={32} className="transition-transform duration-200 hover:scale-105" />
-            <span className="font-display text-sm font-bold tracking-tight text-white">Where&apos;s My Offer</span>
+        <div className="mx-auto flex h-14 sm:h-16 max-w-7xl items-center justify-between px-3 sm:px-6">
+          <div className="flex items-center gap-2 sm:gap-2.5 min-w-0" data-testid="landing-logo">
+            <AppLogoMark size={28} className="transition-transform duration-200 hover:scale-105 shrink-0" />
+            <span className="font-display text-xs sm:text-sm font-bold tracking-tight text-white truncate">
+              Where&apos;s My Offer
+            </span>
           </div>
-          <div className="flex items-center gap-5">
+          <div className="flex items-center gap-3 sm:gap-5 shrink-0">
             <span className="hidden font-mono text-[10px] uppercase tracking-widest text-zinc-600 sm:block">
               placement radar · live
             </span>
             <a
               data-testid="nav-signin-btn"
               href="/api/auth/google"
-              className="rounded-full border border-zinc-700 px-4 py-1.5 text-xs font-semibold text-zinc-300 transition-colors duration-200 hover:border-zinc-500 hover:text-white"
+              className="rounded-full border border-zinc-700 px-3.5 sm:px-4 py-1 sm:py-1.5 text-xs font-semibold text-zinc-300 transition-colors duration-200 hover:border-zinc-500 hover:text-white"
             >
               Sign in
             </a>
@@ -354,8 +367,8 @@ export default function LoginClient() {
 
       {/* Auth Error Banner */}
       {error && (
-        <div className="fixed top-20 left-1/2 -translate-x-1/2 z-50 w-full max-w-md px-4">
-          <div className="rounded-xl border border-rose-500/30 bg-rose-500/10 backdrop-blur-md p-4 text-xs text-rose-300 flex items-center gap-3 shadow-2xl">
+        <div className="fixed top-16 sm:top-20 left-1/2 -translate-x-1/2 z-50 w-full max-w-md px-4">
+          <div className="rounded-xl border border-rose-500/30 bg-rose-500/10 backdrop-blur-md p-3.5 sm:p-4 text-xs text-rose-300 flex items-center gap-3 shadow-2xl">
             <AlertCircle className="w-5 h-5 text-rose-400 shrink-0" />
             <span>{ERROR_MESSAGES[error] || 'Authentication error. Please try again.'}</span>
           </div>
@@ -363,15 +376,15 @@ export default function LoginClient() {
       )}
 
       {/* Hero */}
-      <section className="relative mx-auto grid max-w-7xl gap-10 lg:gap-14 px-4 pb-16 pt-24 sm:px-6 sm:pt-24 lg:grid-cols-[1.05fr_0.95fr] lg:items-center lg:pt-28">
+      <section className="relative mx-auto grid max-w-7xl gap-8 sm:gap-10 lg:gap-14 px-4 pb-12 pt-20 sm:pb-16 sm:px-6 sm:pt-24 lg:grid-cols-[1.05fr_0.95fr] lg:items-center lg:pt-28">
         <div className="pointer-events-none absolute -top-20 left-1/4 h-72 w-72 rounded-full bg-violet-600/10 blur-3xl" />
-        <div>
+        <div className="min-w-0">
           <Reveal delay={0.1}>
-            <span className="font-mono text-[11px] uppercase tracking-[0.3em] text-emerald-400">
+            <span className="font-mono text-[10px] sm:text-[11px] uppercase tracking-[0.25em] sm:tracking-[0.3em] text-emerald-400">
               {'// placement season 2026 · vit bhopal'}
             </span>
           </Reveal>
-          <h1 className="mt-4 font-display text-5xl font-black leading-[0.95] tracking-tight sm:text-7xl lg:text-8xl">
+          <h1 className="mt-3 sm:mt-4 font-display text-4xl xs:text-5xl font-black leading-[0.95] tracking-tight sm:text-7xl lg:text-8xl">
             <Reveal delay={0.22}>WHERE&apos;S</Reveal>
             <Reveal delay={0.34}>MY</Reveal>
             <Reveal delay={0.46}>
@@ -382,7 +395,7 @@ export default function LoginClient() {
             initial={{ opacity: 0, y: 16 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.8, delay: 0.7 }}
-            className="mt-4 max-w-md text-base leading-relaxed text-zinc-400 sm:text-lg"
+            className="mt-3 sm:mt-4 max-w-md text-sm leading-relaxed text-zinc-400 sm:text-lg"
           >
             From chaotic CDC circulars to your final offer letter — tracked in real time. Both inboxes, every Excel shortlist, one radar.
           </motion.p>
@@ -392,26 +405,26 @@ export default function LoginClient() {
             transition={{ duration: 0.8, delay: 0.85 }}
             className="mt-6 sm:mt-7"
           >
-            <div className="flex flex-wrap items-center gap-5">
+            <div className="flex flex-col xs:flex-row items-stretch xs:items-center gap-3 sm:gap-5">
               <a
                 href="/api/auth/google"
                 data-testid="hero-google-btn"
-                className="group flex items-center gap-3 rounded-full bg-zinc-100 px-6 py-3 text-sm font-bold text-zinc-900 transition-transform duration-200 hover:scale-[1.03] active:scale-[0.98]"
+                className="group flex items-center justify-center gap-3 rounded-full bg-zinc-100 px-5 sm:px-6 py-2.5 sm:py-3 text-sm font-bold text-zinc-900 transition-transform duration-200 hover:scale-[1.03] active:scale-[0.98]"
               >
                 <GoogleMark />
-                Continue with Google
+                <span>Continue with Google</span>
                 <ArrowRight className="h-4 w-4 transition-transform duration-200 group-hover:translate-x-1" />
               </a>
               <a
                 href="#manifesto"
                 onClick={handleScrollToManifesto}
                 data-testid="hero-manifesto-link"
-                className="text-sm font-medium text-zinc-500 transition-colors hover:text-zinc-200 cursor-pointer select-none"
+                className="text-center text-xs sm:text-sm font-medium text-zinc-500 transition-colors hover:text-zinc-200 cursor-pointer select-none py-1"
               >
                 Read the manifesto ↓
               </a>
             </div>
-            <p className="mt-2.5 text-[11px] text-zinc-500 font-mono">
+            <p className="mt-2.5 text-[10px] sm:text-[11px] text-zinc-500 font-mono">
               By connecting, you agree to our{' '}
               <Link href="/terms" className="underline underline-offset-2 hover:text-zinc-300">
                 Terms of Service
@@ -426,7 +439,7 @@ export default function LoginClient() {
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             transition={{ duration: 1, delay: 1.05 }}
-            className="mt-7 sm:mt-8 flex flex-wrap gap-2.5"
+            className="mt-6 sm:mt-8 flex flex-wrap gap-2 sm:gap-2.5"
           >
             {[
               { icon: ShieldCheck, text: 'Read-only Gmail scope' },
@@ -436,9 +449,9 @@ export default function LoginClient() {
               <span
                 key={text}
                 data-testid={`trust-chip-${text.split(' ')[0].toLowerCase()}`}
-                className="flex items-center gap-2 rounded-full border border-zinc-800 bg-zinc-900/60 px-3 py-1.5 text-[11px] text-zinc-400"
+                className="flex items-center gap-1.5 sm:gap-2 rounded-full border border-zinc-800 bg-zinc-900/60 px-2.5 sm:px-3 py-1 sm:py-1.5 text-[10px] sm:text-[11px] text-zinc-400"
               >
-                <Icon className="h-3.5 w-3.5 text-emerald-400" /> {text}
+                <Icon className="h-3 sm:h-3.5 w-3 sm:w-3.5 text-emerald-400 shrink-0" /> {text}
               </span>
             ))}
           </motion.div>
@@ -447,7 +460,7 @@ export default function LoginClient() {
       </section>
 
       {/* Marquee */}
-      <section className="overflow-hidden border-y border-zinc-800/70 bg-[#0b0b0e] py-5" data-testid="company-marquee">
+      <section className="overflow-hidden border-y border-zinc-800/70 bg-[#0b0b0e] py-4 sm:py-5 max-w-full" data-testid="company-marquee">
         <div className="animate-marquee flex w-max items-center gap-12 whitespace-nowrap">
           {[...MARQUEE, ...MARQUEE].map((c, i) => (
             <span key={i} className="flex items-center gap-12 font-mono text-xs tracking-[0.35em] text-zinc-600">
@@ -458,21 +471,21 @@ export default function LoginClient() {
       </section>
 
       {/* Manifesto chapters */}
-      <section id="manifesto" className="mx-auto max-w-7xl px-4 py-28 sm:px-6">
+      <section id="manifesto" className="mx-auto max-w-7xl px-4 py-16 sm:py-28 sm:px-6">
         <motion.div
           initial={{ opacity: 0, y: 24 }}
           whileInView={{ opacity: 1, y: 0 }}
           viewport={{ once: true, margin: '-80px' }}
           transition={{ duration: 0.7 }}
-          className="mb-16"
+          className="mb-10 sm:mb-16"
         >
           <span className="font-mono text-[11px] uppercase tracking-[0.3em] text-zinc-500">the manifesto</span>
-          <h2 className="mt-4 max-w-2xl font-display text-3xl font-extrabold tracking-tight sm:text-4xl">
+          <h2 className="mt-3 sm:mt-4 max-w-2xl font-display text-2xl sm:text-4xl font-extrabold tracking-tight">
             Built in a hostel room.{' '}
             <span className="text-zinc-500">Battle-tested in placement season.</span>
           </h2>
         </motion.div>
-        <div className="grid gap-6 md:grid-cols-2">
+        <div className="grid gap-4 sm:gap-6 md:grid-cols-2">
           {chapters.map((ch, i) => (
             <motion.div
               key={ch.n}
@@ -481,7 +494,7 @@ export default function LoginClient() {
               whileInView={{ opacity: 1, y: 0 }}
               viewport={{ once: true, margin: '-60px' }}
               transition={{ duration: 0.7, delay: (i % 2) * 0.12 }}
-              className="group rounded-2xl border border-zinc-800 bg-[#0d0f14]/80 p-7 transition-colors duration-300 hover:border-zinc-700"
+              className="group rounded-2xl border border-zinc-800 bg-[#0d0f14]/80 p-4 sm:p-7 transition-colors duration-300 hover:border-zinc-700 min-w-0 overflow-hidden"
             >
               <div className="text-outline font-display text-6xl font-black leading-none">{ch.n}</div>
               <h3 className="mt-5 font-display text-xl font-bold tracking-tight">{ch.title}</h3>

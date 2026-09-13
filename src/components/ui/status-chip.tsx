@@ -40,11 +40,11 @@ export const StatusChip: React.FC<StatusChipProps> = ({ status, size = 'sm', cla
   return (
     <span
       data-testid={`status-chip-${normStatus}`}
-      className={`inline-flex items-center gap-1.5 rounded-full border font-medium ${m.cls} ${
+      className={`inline-flex items-center gap-1.5 shrink-0 whitespace-nowrap rounded-full border font-medium ${m.cls} ${
         size === 'sm' ? 'px-2.5 py-0.5 text-[11px]' : 'px-3 py-1 text-xs'
       } ${className}`}
     >
-      <span className={`h-1.5 w-1.5 rounded-full ${m.dot} ${m.isPulse ? 'pulse-dot' : ''}`} />
+      <span className={`h-1.5 w-1.5 rounded-full shrink-0 ${m.dot} ${m.isPulse ? 'pulse-dot' : ''}`} />
       {m.label}
     </span>
   );
@@ -54,6 +54,7 @@ export const CategoryBadge: React.FC<{ category?: string | null; className?: str
   if (!category) return null;
   const isSuperDream = /super\s*dream/i.test(category);
   const isDream = /dream/i.test(category) && !isSuperDream;
+  const displayCategory = isSuperDream ? 'Super Dream' : isDream ? 'Dream' : category;
 
   const cls = isSuperDream
     ? 'bg-violet-500/10 text-violet-300 border-violet-500/30'
@@ -63,10 +64,10 @@ export const CategoryBadge: React.FC<{ category?: string | null; className?: str
 
   return (
     <span
-      data-testid={`category-badge-${category.replace(/\s/g, '-').toLowerCase()}`}
-      className={`inline-flex items-center rounded-md border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider ${cls} ${className}`}
+      data-testid={`category-badge-${displayCategory.replace(/\s/g, '-').toLowerCase()}`}
+      className={`inline-flex items-center shrink-0 whitespace-nowrap rounded-md border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider ${cls} ${className}`}
     >
-      {category}
+      {displayCategory}
     </span>
   );
 };

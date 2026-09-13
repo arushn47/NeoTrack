@@ -167,10 +167,10 @@ export default function ChatAssistant() {
       {isOpen && (
         <div
           className={cn(
-            'fixed bottom-[8.5rem] right-2 left-2 lg:bottom-20 lg:right-6 lg:left-auto z-50 bg-bg-surface/95 backdrop-blur-xl border border-border-default rounded-3xl shadow-2xl flex flex-col overflow-hidden transition-all duration-300 animate-fade-in',
+            'fixed bottom-[4.5rem] sm:bottom-20 right-2 left-2 lg:bottom-20 lg:right-6 lg:left-auto z-50 bg-bg-surface/95 backdrop-blur-xl border border-border-default rounded-3xl shadow-2xl flex flex-col overflow-hidden transition-all duration-300 animate-fade-in max-h-[calc(100dvh-5.5rem)]',
             isExpanded
               ? 'lg:w-[620px] h-[min(700px,85vh)]'
-              : 'lg:w-[390px] h-[min(540px,65vh)]'
+              : 'lg:w-[390px] h-[min(540px,70vh)]'
           )}
         >
           {/* Drawer Header */}

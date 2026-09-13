@@ -217,20 +217,22 @@ export default function SearchClient({ data }: SearchClientProps) {
               <Link
                 key={c.id}
                 href={`/companies/${c.id}`}
-                className="flex items-center justify-between p-4 bg-[#101018]/90 backdrop-blur-xl border border-zinc-800/80 hover:border-indigo-500/40 rounded-2xl transition-all duration-200 hover:-translate-y-0.5 group shadow-sm"
+                className="flex items-center justify-between gap-3 p-3.5 sm:p-4 bg-[#101018]/90 backdrop-blur-xl border border-zinc-800/80 hover:border-indigo-500/40 rounded-2xl transition-all duration-200 hover:-translate-y-0.5 group shadow-sm min-w-0"
               >
-                <div className="flex items-center gap-3.5">
-                  <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-indigo-500/10 to-violet-500/10 border border-indigo-500/20 flex items-center justify-center font-extrabold text-indigo-400 text-sm flex-shrink-0 group-hover:scale-105 transition-transform">
+                <div className="flex items-center gap-3 min-w-0 flex-1">
+                  <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-indigo-500/10 to-violet-500/10 border border-indigo-500/20 flex items-center justify-center font-extrabold text-indigo-400 text-sm shrink-0 group-hover:scale-105 transition-transform">
                     {c.name.charAt(0)}
                   </div>
-                  <div>
+                  <div className="min-w-0 flex-1">
                     <h3 className="text-sm font-bold text-white group-hover:text-indigo-300 transition-colors truncate">
                       {c.name}
                     </h3>
-                    <p className="text-xs text-zinc-400 truncate max-w-[180px]">{c.role || 'Placement Drive'}</p>
+                    <p className="text-xs text-zinc-400 truncate max-w-full">{c.role || 'Placement Drive'}</p>
                   </div>
                 </div>
-                <StatusBadge status={c.status} events={data.events.filter((e) => e.companyId === c.id)} />
+                <div className="shrink-0">
+                  <StatusBadge status={c.status} events={data.events.filter((e) => e.companyId === c.id)} />
+                </div>
               </Link>
             ))}
           </div>
@@ -249,19 +251,19 @@ export default function SearchClient({ data }: SearchClientProps) {
               <Link
                 key={evt.id}
                 href={`/companies/${evt.companyId}`}
-                className="flex items-center justify-between p-4 bg-[#101018]/90 border border-zinc-800/80 hover:border-indigo-500/40 rounded-2xl transition-all group"
+                className="flex items-center justify-between gap-3 p-3.5 sm:p-4 bg-[#101018]/90 border border-zinc-800/80 hover:border-indigo-500/40 rounded-2xl transition-all group min-w-0"
               >
-                <div>
-                  <span className="text-[11px] font-bold text-indigo-400 uppercase tracking-wider">
+                <div className="min-w-0 flex-1">
+                  <span className="text-[11px] font-bold text-indigo-400 uppercase tracking-wider block truncate">
                     {evt.companyName} · {evt.eventType.replace('_', ' ')}
                   </span>
-                  <h4 className="text-sm font-bold text-white mt-0.5">{evt.title || evt.eventType}</h4>
+                  <h4 className="text-sm font-bold text-white mt-0.5 truncate">{evt.title || evt.eventType}</h4>
                 </div>
-                <div className="text-right text-xs text-zinc-500">
+                <div className="text-right text-xs text-zinc-500 shrink-0">
                   {evt.startTime && (
-                    <span className="font-mono">{new Date(evt.startTime).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}</span>
+                    <span className="font-mono block">{new Date(evt.startTime).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}</span>
                   )}
-                  {evt.venue && <p className="text-[11px] text-zinc-400 truncate max-w-[150px]">{evt.venue}</p>}
+                  {evt.venue && <p className="text-[11px] text-zinc-400 truncate max-w-[120px] sm:max-w-[150px]">{evt.venue}</p>}
                 </div>
               </Link>
             ))}

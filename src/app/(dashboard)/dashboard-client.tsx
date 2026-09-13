@@ -136,17 +136,17 @@ export default function DashboardClient({
   ];
 
   return (
-    <div data-testid="dashboard-page" className="mx-auto max-w-7xl space-y-6">
+    <div data-testid="dashboard-page" className="mx-auto max-w-7xl space-y-5 sm:space-y-6 w-full min-w-0 max-w-full">
       {/* Onboarding Alert Banner if missing requirements */}
       {(!hasCollegeAccount || !hasNeoId) && (
-        <div className="rounded-2xl border border-amber-500/30 bg-amber-500/[0.05] p-4 sm:p-5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+        <div className="rounded-2xl border border-amber-500/30 bg-amber-500/[0.05] p-3.5 sm:p-5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 sm:gap-4">
           <div className="flex items-start gap-3">
             <ShieldAlert className="w-5 h-5 text-amber-400 shrink-0 mt-0.5" />
             <div>
-              <h4 className="text-sm font-semibold text-zinc-200">
+              <h4 className="text-xs sm:text-sm font-semibold text-zinc-200">
                 {!hasCollegeAccount ? 'Link your College Gmail to unlock test circulars' : 'Add your Registration ID'}
               </h4>
-              <p className="text-xs text-zinc-400 mt-0.5">
+              <p className="text-[11px] sm:text-xs text-zinc-400 mt-0.5">
                 {!hasCollegeAccount
                   ? 'Connect your @vitstudent.ac.in account in Settings so the engine can parse shortlists and test links.'
                   : "Add your roll number in Settings so Where's My Offer can match your name in shortlist Excel files."}
@@ -155,7 +155,7 @@ export default function DashboardClient({
           </div>
           <Link
             href="/settings"
-            className="rounded-full bg-amber-500 px-4 py-1.5 text-xs font-semibold text-zinc-950 hover:bg-amber-400 transition-colors whitespace-nowrap"
+            className="rounded-full bg-amber-500 px-4 py-1.5 text-xs font-semibold text-zinc-950 hover:bg-amber-400 transition-colors whitespace-nowrap self-end sm:self-auto"
           >
             Go to Settings →
           </Link>
@@ -164,26 +164,28 @@ export default function DashboardClient({
 
       {/* Page Header */}
       <div>
-        <h1 className="font-display text-2xl font-extrabold tracking-tight sm:text-3xl text-zinc-100">
+        <h1 className="font-display text-xl sm:text-3xl font-extrabold tracking-tight text-zinc-100">
           Placement Pipeline
         </h1>
-        <p className="flex gap-2 mt-1 text-sm text-zinc-500">
-          Season {new Date().getFullYear()}
+        <p className="flex flex-wrap items-center gap-1.5 mt-1 text-xs sm:text-sm text-zinc-500">
+          <span>Season {new Date().getFullYear()}</span>
           {neoId && (
             <>
-              {' '}· <span className="font-mono text-zinc-400">{neoId}</span>
+              <span>·</span>
+              <span className="font-mono text-zinc-400">{neoId}</span>
             </>
           )}
           {campus && (
             <>
-              {' '}· <span className="text-zinc-400">{campus}{branch ? ` (${branch})` : ''}</span>
+              <span>·</span>
+              <span className="text-zinc-400">{campus}{branch ? ` (${branch})` : ''}</span>
             </>
           )}
         </p>
       </div>
 
       {/* Funnel Metrics Grid */}
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+      <div className="grid grid-cols-2 gap-2.5 sm:gap-3 sm:grid-cols-3 lg:grid-cols-5">
         {funnelCards.map((f, i) => (
           <motion.div
             key={f.id}
@@ -191,11 +193,11 @@ export default function DashboardClient({
             initial={{ opacity: 0, y: 18 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.5, delay: i * 0.06 }}
-            className={`rounded-xl border p-4 ${ACCENTS[f.accent]}`}
+            className={`rounded-xl border p-3 sm:p-4 min-w-0 ${ACCENTS[f.accent]}`}
           >
-            <div className="font-tabular font-display text-3xl font-extrabold tracking-tight">{f.value}</div>
-            <div className="mt-1 text-xs font-semibold text-zinc-300">{f.label}</div>
-            <div className="mt-0.5 font-mono text-[10px] text-zinc-500">{f.sub}</div>
+            <div className="font-tabular font-display text-2xl sm:text-3xl font-extrabold tracking-tight">{f.value}</div>
+            <div className="mt-1 text-[11px] sm:text-xs font-semibold text-zinc-300 truncate">{f.label}</div>
+            <div className="mt-0.5 font-mono text-[9px] sm:text-[10px] text-zinc-500 truncate">{f.sub}</div>
           </motion.div>
         ))}
       </div>
@@ -206,7 +208,7 @@ export default function DashboardClient({
           initial={{ opacity: 0, y: 14 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.5, delay: 0.3 }}
-          className="flex items-center gap-3 overflow-x-auto rounded-xl border border-amber-500/20 bg-amber-500/[0.05] px-4 py-3"
+          className="flex items-center gap-2.5 sm:gap-3 overflow-x-auto rounded-xl border border-amber-500/20 bg-amber-500/[0.05] px-3 sm:px-4 py-2.5 sm:py-3 scrollbar-none max-w-full min-w-0"
           data-testid="upcoming-strip"
         >
           <CalendarClock className="h-4 w-4 shrink-0 text-amber-400" />
@@ -214,11 +216,11 @@ export default function DashboardClient({
           {upcomingEvents.slice(0, 5).map((e) => (
             <span
               key={e.id}
-              className="flex shrink-0 items-center gap-2 rounded-full border border-zinc-800 bg-zinc-900/70 px-3 py-1 text-[11px] text-zinc-300"
+              className="flex shrink-0 items-center gap-2 rounded-full border border-zinc-800 bg-zinc-900/70 px-2.5 sm:px-3 py-1 text-[10px] sm:text-[11px] text-zinc-300"
             >
-              <span className="h-1.5 w-1.5 rounded-full bg-amber-400 pulse-dot" />
-              {e.companyName || 'Company'} — {e.title || e.event_type.replace(/_/g, ' ')}
-              <span className="font-tabular font-mono text-amber-300">{formatEventTime(e.start_time)}</span>
+              <span className="h-1.5 w-1.5 rounded-full bg-amber-400 pulse-dot shrink-0" />
+              <span className="truncate max-w-[150px] sm:max-w-none">{e.companyName || 'Company'} — {e.title || e.event_type.replace(/_/g, ' ')}</span>
+              <span className="font-tabular font-mono text-amber-300 shrink-0">{formatEventTime(e.start_time)}</span>
             </span>
           ))}
         </motion.div>
@@ -250,7 +252,7 @@ export default function DashboardClient({
             </p>
           </div>
         ) : (
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 w-full min-w-0 max-w-full">
             {upcomingEvents.slice(0, 6).map((ev) => (
               <Link
                 key={ev.id}
@@ -290,11 +292,11 @@ export default function DashboardClient({
       </div>
 
       {/* Section 2: Active Pipeline Spotlight */}
-      <div className="space-y-4 pt-4">
-        <div className="flex items-center justify-between">
+      <div className="space-y-3 sm:space-y-4 pt-2 sm:pt-4">
+        <div className="flex flex-col xs:flex-row xs:items-center justify-between gap-2">
           <div className="flex items-center gap-2">
-            <Zap className="h-4 w-4 text-emerald-400" />
-            <h2 className="font-display text-lg font-bold tracking-tight text-zinc-100">
+            <Zap className="h-4 w-4 text-emerald-400 shrink-0" />
+            <h2 className="font-display text-base sm:text-lg font-bold tracking-tight text-zinc-100">
               Active Drives Spotlight
             </h2>
           </div>
@@ -302,16 +304,16 @@ export default function DashboardClient({
             href="/companies"
             className="flex items-center gap-1.5 text-xs font-bold text-emerald-400 hover:text-emerald-300 transition-colors"
           >
-            View all {stats.total_companies} drives in Placement Drives <ArrowRight className="h-3.5 w-3.5" />
+            View all {stats.total_companies} drives <ArrowRight className="h-3.5 w-3.5" />
           </Link>
         </div>
 
         {spotlightDrives.length === 0 ? (
-          <div className="rounded-2xl border border-zinc-800 bg-[#101014] p-8 text-center">
-            <p className="font-mono text-sm text-zinc-500">No active applications in the spotlight right now.</p>
+          <div className="rounded-2xl border border-zinc-800 bg-[#101014] p-6 sm:p-8 text-center">
+            <p className="font-mono text-xs sm:text-sm text-zinc-500">No active applications in the spotlight right now.</p>
           </div>
         ) : (
-          <div className="grid gap-3 lg:grid-cols-2">
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 w-full min-w-0 max-w-full">
             {spotlightDrives.map((c) => {
               const category = c.category || (/1[0-9]\s*lpa|[2-9][0-9]\s*lpa/i.test(c.ctc || '') ? 'Super Dream' : 'Dream');
               const initials = c.companyName.slice(0, 2).toUpperCase();
@@ -321,35 +323,35 @@ export default function DashboardClient({
                 <Link
                   key={c.id}
                   href={`/companies/${c.companyId}`}
-                  className="group block rounded-xl border border-zinc-800 bg-[#101014] p-4 transition-all duration-200 hover:border-zinc-600"
+                  className="group block w-full min-w-0 max-w-full overflow-hidden rounded-xl border border-zinc-800 bg-[#101014] p-3.5 sm:p-4 transition-all duration-200 hover:border-zinc-600"
                 >
-                  <div className="flex items-start gap-3">
-                    <div className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-lg border font-display text-sm font-bold ${hue}`}>
+                  <div className="flex items-start gap-2.5 sm:gap-3 min-w-0">
+                    <div className={`flex h-10 w-10 sm:h-11 sm:w-11 shrink-0 items-center justify-center rounded-lg border font-display text-xs sm:text-sm font-bold ${hue}`}>
                       {initials}
                     </div>
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-center justify-between gap-2">
-                        <h3 className="truncate font-display text-base font-bold tracking-tight text-zinc-100 group-hover:text-emerald-300 transition-colors">
+                    <div className="min-w-0 flex-1 overflow-hidden">
+                      <div className="flex items-center justify-between gap-2 min-w-0">
+                        <h3 className="truncate min-w-0 flex-1 font-display text-sm sm:text-base font-bold tracking-tight text-zinc-100 group-hover:text-emerald-300 transition-colors">
                           {c.companyName}
                         </h3>
-                        <StatusChip status={c.status} />
+                        <StatusChip status={c.status} className="shrink-0" />
                       </div>
-                      <div className="mt-1 flex flex-wrap items-center gap-2">
-                        <span className="truncate text-xs text-zinc-400">{c.role || 'Software Engineering'}</span>
-                        <CategoryBadge category={category} />
+                      <div className="mt-1 flex items-center gap-2 min-w-0">
+                        <span className="truncate text-[11px] sm:text-xs text-zinc-400">{c.role || 'Software Engineering'}</span>
+                        <CategoryBadge category={category} className="shrink-0" />
                       </div>
                     </div>
                   </div>
 
-                  <div className="mt-3.5 flex flex-wrap items-center gap-x-4 gap-y-1.5 text-[11px] text-zinc-500">
-                    <span className="font-tabular font-mono text-sm font-bold text-zinc-200">
+                  <div className="mt-3 flex flex-wrap items-center gap-x-3 sm:gap-x-4 gap-y-1 text-[11px] text-zinc-500 min-w-0">
+                    <span className="font-tabular font-mono text-xs sm:text-sm font-bold text-zinc-200 shrink-0">
                       {c.ctc || formatStipend(c.stipend) || 'TBA'}
                     </span>
-                    <span className="flex items-center gap-1">
-                      <MapPin className="h-3 w-3" />
-                      {c.location || 'Pan-India'}
+                    <span className="flex items-center gap-1 min-w-0 max-w-[130px] sm:max-w-none truncate shrink-0">
+                      <MapPin className="h-3 w-3 shrink-0 text-zinc-500" />
+                      <span className="truncate">{c.location || 'Pan-India'}</span>
                     </span>
-                    <span className="ml-auto font-mono text-[10px] text-zinc-600">
+                    <span className="ml-auto font-mono text-[10px] text-zinc-600 shrink-0 transition-colors duration-200 group-hover:text-emerald-400">
                       Open drive details ↗
                     </span>
                   </div>
@@ -360,20 +362,20 @@ export default function DashboardClient({
         )}
 
         {/* Big CTA banner linking to the full Placement Drives directory */}
-        <div className="rounded-2xl border border-zinc-800 bg-gradient-to-r from-zinc-900/80 via-[#101014] to-zinc-900/80 p-5 flex flex-col sm:flex-row items-center justify-between gap-4">
+        <div className="rounded-2xl border border-zinc-800 bg-gradient-to-r from-zinc-900/80 via-[#101014] to-zinc-900/80 p-4 sm:p-5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
           <div>
-            <h4 className="font-display text-base font-bold text-zinc-100">
+            <h4 className="font-display text-sm sm:text-base font-bold text-zinc-100">
               Browse All {stats.total_companies} Campus Placement Drives
             </h4>
-            <p className="text-xs text-zinc-400 mt-0.5">
+            <p className="text-[11px] sm:text-xs text-zinc-400 mt-0.5">
               Filter by Applied, Shortlisted, In Progress, Offers, or search by role and CTC in the Placement Drives directory.
             </p>
           </div>
           <Link
             href="/companies"
-            className="flex items-center gap-2 rounded-xl bg-emerald-500 px-5 py-2.5 text-xs font-bold text-zinc-950 hover:bg-emerald-400 transition-colors shrink-0 shadow-lg shadow-emerald-500/10"
+            className="flex items-center justify-center gap-2 rounded-xl bg-emerald-500 px-4 sm:px-5 py-2 sm:py-2.5 text-xs font-bold text-zinc-950 hover:bg-emerald-400 transition-colors shrink-0 shadow-lg shadow-emerald-500/10 w-full sm:w-auto text-center"
           >
-            Open Placement Drives <ArrowRight className="h-4 w-4" />
+            <span>Open Placement Drives</span> <ArrowRight className="h-4 w-4" />
           </Link>
         </div>
       </div>

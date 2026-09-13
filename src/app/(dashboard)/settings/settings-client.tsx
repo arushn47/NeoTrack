@@ -188,13 +188,13 @@ export default function SettingsClient({ accounts, neoId: initialNeoId, userEmai
   };
 
   return (
-    <div data-testid="settings-page" className="mx-auto max-w-3xl space-y-4">
+    <div data-testid="settings-page" className="mx-auto max-w-3xl space-y-4 w-full min-w-0 max-w-full">
       {/* Header */}
       <div>
-        <h1 className="font-display text-2xl font-extrabold tracking-tight sm:text-3xl text-white">
+        <h1 className="font-display text-xl sm:text-3xl font-extrabold tracking-tight text-white">
           Settings
         </h1>
-        <p className="mt-1 text-sm text-zinc-500">
+        <p className="mt-1 text-xs sm:text-sm text-zinc-500">
           Connected inboxes, registration ID & sync preferences
         </p>
       </div>
@@ -206,7 +206,7 @@ export default function SettingsClient({ accounts, neoId: initialNeoId, userEmai
         desc="Your unique campus ID — the Excel scanner matches this in every shortlist attachment."
         testid="regid-card"
       >
-        <div className="flex gap-3">
+        <div className="flex flex-col sm:flex-row gap-2.5 sm:gap-3">
           <input
             data-testid="regid-input"
             value={regId}
@@ -219,7 +219,7 @@ export default function SettingsClient({ accounts, neoId: initialNeoId, userEmai
             data-testid="regid-save-btn"
             onClick={handleSaveRegId}
             disabled={isSavingId}
-            className="rounded-lg bg-emerald-500 px-5 text-sm font-bold text-zinc-950 transition-colors hover:bg-emerald-400 disabled:opacity-60 cursor-pointer"
+            className="h-11 rounded-lg bg-emerald-500 px-5 text-sm font-bold text-zinc-950 transition-colors hover:bg-emerald-400 disabled:opacity-60 cursor-pointer w-full sm:w-auto text-center"
           >
             {isSavingId ? 'Saving…' : 'Save ID'}
           </button>
@@ -235,25 +235,27 @@ export default function SettingsClient({ accounts, neoId: initialNeoId, userEmai
       >
         <div className="space-y-3">
           {/* Personal Gmail Row */}
-          <div className="flex items-center gap-4 rounded-xl border border-zinc-800 bg-zinc-900/50 px-4 py-3.5">
-            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-emerald-500/25 bg-emerald-500/10">
-              <Mail className="h-4 w-4 text-emerald-400" />
-            </div>
-            <div className="min-w-0 flex-1">
-              <div className="flex flex-wrap items-center gap-2">
-                <span className="text-sm font-semibold text-zinc-100">Personal Gmail</span>
-                {personalAccount ? (
-                  <span className="flex items-center gap-1 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider text-emerald-300">
-                    <CheckCheck className="h-2.5 w-2.5" /> Connected
-                  </span>
-                ) : (
-                  <span className="rounded-full border border-zinc-700 bg-zinc-800 px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider text-zinc-400">
-                    Not Connected
-                  </span>
-                )}
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 rounded-xl border border-zinc-800 bg-zinc-900/50 p-3.5 sm:px-4 sm:py-3.5">
+            <div className="flex items-start gap-3 min-w-0 flex-1">
+              <div className="flex h-9 w-9 sm:h-10 sm:w-10 shrink-0 items-center justify-center rounded-lg border border-emerald-500/25 bg-emerald-500/10">
+                <Mail className="h-4 w-4 text-emerald-400" />
               </div>
-              <div className="mt-0.5 truncate font-mono text-[11px] text-zinc-500">
-                {personalAccount ? personalAccount.email : userEmail || 'your.personal@gmail.com'} · Official registrations & offer letters
+              <div className="min-w-0 flex-1">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="text-sm font-semibold text-zinc-100">Personal Gmail</span>
+                  {personalAccount ? (
+                    <span className="flex items-center gap-1 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider text-emerald-300">
+                      <CheckCheck className="h-2.5 w-2.5" /> Connected
+                    </span>
+                  ) : (
+                    <span className="rounded-full border border-zinc-700 bg-zinc-800 px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider text-zinc-400">
+                      Not Connected
+                    </span>
+                  )}
+                </div>
+                <div className="mt-0.5 truncate font-mono text-[11px] text-zinc-500">
+                  {personalAccount ? personalAccount.email : userEmail || 'your.personal@gmail.com'} · Official registrations & offer letters
+                </div>
               </div>
             </div>
             {personalAccount ? (
@@ -261,14 +263,14 @@ export default function SettingsClient({ accounts, neoId: initialNeoId, userEmai
                 data-testid="disconnect-personal-btn"
                 onClick={() => handleDisconnect(personalAccount.id)}
                 disabled={disconnecting === personalAccount.id}
-                className="shrink-0 rounded-lg border border-zinc-800 px-3.5 py-2 text-[11px] font-semibold text-zinc-500 transition-colors hover:border-rose-500/40 hover:text-rose-300 cursor-pointer"
+                className="shrink-0 rounded-lg border border-zinc-800 px-3.5 py-2 text-[11px] font-semibold text-zinc-500 transition-colors hover:border-rose-500/40 hover:text-rose-300 cursor-pointer w-full sm:w-auto text-center"
               >
                 {disconnecting === personalAccount.id ? 'Disconnecting…' : 'Disconnect'}
               </button>
             ) : (
               <a
                 href="/api/auth/google?type=personal"
-                className="flex items-center gap-1.5 shrink-0 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3.5 py-2 text-[11px] font-semibold text-emerald-300 hover:bg-emerald-500/20 transition-colors"
+                className="flex items-center justify-center gap-1.5 shrink-0 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3.5 py-2 text-[11px] font-semibold text-emerald-300 hover:bg-emerald-500/20 transition-colors w-full sm:w-auto text-center"
               >
                 <Plus className="h-3.5 w-3.5" /> Connect
               </a>
@@ -276,27 +278,29 @@ export default function SettingsClient({ accounts, neoId: initialNeoId, userEmai
           </div>
 
           {/* College Gmail Row */}
-          <div className="flex items-center gap-4 rounded-xl border border-zinc-800 bg-zinc-900/50 px-4 py-3.5">
-            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-emerald-500/25 bg-emerald-500/10">
-              <Mail className="h-4 w-4 text-emerald-400" />
-            </div>
-            <div className="min-w-0 flex-1">
-              <div className="flex flex-wrap items-center gap-2">
-                <span className="text-sm font-semibold text-zinc-100">
-                  College Gmail (VIT Bhopal)
-                </span>
-                {collegeAccount ? (
-                  <span className="flex items-center gap-1 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider text-emerald-300">
-                    <CheckCheck className="h-2.5 w-2.5" /> Connected
-                  </span>
-                ) : (
-                  <span className="rounded-full border border-amber-500/30 bg-amber-500/10 px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider text-amber-300">
-                    Action Required
-                  </span>
-                )}
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 rounded-xl border border-zinc-800 bg-zinc-900/50 p-3.5 sm:px-4 sm:py-3.5">
+            <div className="flex items-start gap-3 min-w-0 flex-1">
+              <div className="flex h-9 w-9 sm:h-10 sm:w-10 shrink-0 items-center justify-center rounded-lg border border-emerald-500/25 bg-emerald-500/10">
+                <Mail className="h-4 w-4 text-emerald-400" />
               </div>
-              <div className="mt-0.5 truncate font-mono text-[11px] text-zinc-500">
-                {collegeAccount ? collegeAccount.email : 'student.23bce@vitbhopal.ac.in'} · CDC circulars, test links & shortlists
+              <div className="min-w-0 flex-1">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="text-sm font-semibold text-zinc-100">
+                    College Gmail (VIT Bhopal)
+                  </span>
+                  {collegeAccount ? (
+                    <span className="flex items-center gap-1 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider text-emerald-300">
+                      <CheckCheck className="h-2.5 w-2.5" /> Connected
+                    </span>
+                  ) : (
+                    <span className="rounded-full border border-amber-500/30 bg-amber-500/10 px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider text-amber-300">
+                      Action Required
+                    </span>
+                  )}
+                </div>
+                <div className="mt-0.5 truncate font-mono text-[11px] text-zinc-500">
+                  {collegeAccount ? collegeAccount.email : 'student.23bce@vitbhopal.ac.in'} · CDC circulars, test links & shortlists
+                </div>
               </div>
             </div>
             {collegeAccount ? (
@@ -304,14 +308,14 @@ export default function SettingsClient({ accounts, neoId: initialNeoId, userEmai
                 data-testid="disconnect-college-btn"
                 onClick={() => handleDisconnect(collegeAccount.id)}
                 disabled={disconnecting === collegeAccount.id}
-                className="shrink-0 rounded-lg border border-zinc-800 px-3.5 py-2 text-[11px] font-semibold text-zinc-500 transition-colors hover:border-rose-500/40 hover:text-rose-300 cursor-pointer"
+                className="shrink-0 rounded-lg border border-zinc-800 px-3.5 py-2 text-[11px] font-semibold text-zinc-500 transition-colors hover:border-rose-500/40 hover:text-rose-300 cursor-pointer w-full sm:w-auto text-center"
               >
                 {disconnecting === collegeAccount.id ? 'Disconnecting…' : 'Disconnect'}
               </button>
             ) : (
               <a
                 href="/api/auth/google?type=college"
-                className="flex items-center gap-1.5 shrink-0 rounded-lg border border-emerald-500/40 bg-emerald-500 px-3.5 py-2 text-[11px] font-bold text-zinc-950 hover:bg-emerald-400 transition-colors"
+                className="flex items-center justify-center gap-1.5 shrink-0 rounded-lg border border-emerald-500/40 bg-emerald-500 px-3.5 py-2 text-[11px] font-bold text-zinc-950 hover:bg-emerald-400 transition-colors w-full sm:w-auto text-center"
               >
                 <Plus className="h-3.5 w-3.5" /> Link College Gmail
               </a>
@@ -395,18 +399,18 @@ export default function SettingsClient({ accounts, neoId: initialNeoId, userEmai
 
       {/* Legal & Compliance Footer */}
       <div className="pt-4 pb-12 flex flex-col sm:flex-row items-center justify-between gap-3 font-mono text-[11px] text-zinc-500 border-t border-zinc-850/80">
-        <span className="text-zinc-600">Where&apos;s My Offer · Placement Radar</span>
-        <div className="flex items-center gap-4">
-          <Link href="/feedback" className="hover:text-zinc-300 transition-colors">
-            Feedback & Support
+        <span className="text-zinc-600 text-center sm:text-left">Where&apos;s My Offer · Placement Radar</span>
+        <div className="flex items-center justify-center gap-2.5 sm:gap-4 whitespace-nowrap text-[11px]">
+          <Link href="/feedback" className="hover:text-zinc-300 transition-colors whitespace-nowrap">
+            Feedback
           </Link>
           <span className="text-zinc-700">·</span>
-          <Link href="/privacy" className="hover:text-zinc-300 transition-colors">
-            Privacy Policy
+          <Link href="/privacy" className="hover:text-zinc-300 transition-colors whitespace-nowrap">
+            Privacy
           </Link>
           <span className="text-zinc-700">·</span>
-          <Link href="/terms" className="hover:text-zinc-300 transition-colors">
-            Terms of Service
+          <Link href="/terms" className="hover:text-zinc-300 transition-colors whitespace-nowrap">
+            Terms
           </Link>
         </div>
       </div>

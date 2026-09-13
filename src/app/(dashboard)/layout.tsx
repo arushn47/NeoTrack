@@ -25,15 +25,15 @@ export default async function DashboardLayout({
   const lastSyncAt = accounts?.[0]?.last_sync_at || null;
 
   return (
-    <div className="flex min-h-screen bg-bg-primary relative">
+    <div className="min-h-screen bg-bg-primary relative w-full max-w-full overflow-x-clip">
       <Sidebar />
-      <div className="flex-1 flex flex-col min-w-0">
+      <div className="flex-1 flex flex-col min-w-0 lg:pl-60 w-full max-w-full">
         <Topbar
           userName={session.name}
           userAvatar={session.avatar}
           lastSyncAt={lastSyncAt}
         />
-        <main className="flex-1 p-4 sm:p-6 pb-28 lg:pb-6 overflow-y-auto min-w-0">
+        <main className="flex-1 p-3 sm:p-6 pb-28 lg:pb-6 min-w-0 w-full max-w-full">
           {children}
         </main>
       </div>

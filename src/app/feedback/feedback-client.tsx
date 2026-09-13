@@ -169,15 +169,15 @@ export default function FeedbackClient({ session }: FeedbackClientProps) {
       {/* Top Navbar — Solid z-50 to eliminate any scroll/overlap bleed */}
       <header className="sticky top-0 z-50 border-b border-zinc-800/80 bg-[#09090b]/95 backdrop-blur-md">
         <div className="mx-auto flex max-w-4xl items-center justify-between px-4 py-3 sm:px-6">
-          <div className="flex items-center gap-3">
-            <Link href="/" className="flex items-center gap-2.5 group">
-              <AppLogoMark size={32} className="transition-transform group-hover:scale-105" />
-              <span className="font-bold text-sm tracking-tight text-white group-hover:text-emerald-300 transition-colors">
+          <div className="flex items-center gap-2 sm:gap-3 min-w-0">
+            <Link href="/" className="flex items-center gap-2 sm:gap-2.5 group shrink-0">
+              <AppLogoMark size={28} className="transition-transform group-hover:scale-105 shrink-0" />
+              <span className="font-bold text-xs sm:text-sm tracking-tight text-white group-hover:text-emerald-300 transition-colors truncate">
                 Where&apos;s My Offer
               </span>
             </Link>
-            <span className="text-zinc-700">/</span>
-            <span className="text-xs font-mono text-zinc-400">Feedback & Support</span>
+            <span className="text-zinc-700 hidden sm:inline">/</span>
+            <span className="text-xs font-mono text-zinc-400 hidden sm:inline">Feedback & Support</span>
           </div>
 
           <div className="flex items-center gap-3">
@@ -473,14 +473,14 @@ export default function FeedbackClient({ session }: FeedbackClientProps) {
               </div>
 
               {/* Auto Diagnostics Capsule */}
-              <div className="rounded-xl border border-zinc-800/80 bg-zinc-950/50 p-3 text-[11px] font-mono text-zinc-500 flex items-center justify-between">
-                <div className="flex items-center gap-2 overflow-hidden truncate">
+              <div className="rounded-xl border border-zinc-800/80 bg-zinc-950/50 p-3 text-[11px] font-mono text-zinc-500 flex items-center justify-between gap-2 min-w-0">
+                <div className="flex items-center gap-2 overflow-hidden truncate min-w-0">
                   <Terminal className="h-3.5 w-3.5 text-emerald-400 shrink-0" />
                   <span className="truncate">
                     Client: {String(clientMetadata.browser || 'Browser')} · {String(clientMetadata.os || 'OS')} · {String(clientMetadata.screen || 'Desktop')}
                   </span>
                 </div>
-                <span className="text-emerald-400 shrink-0 text-[10px] uppercase font-bold tracking-wider">
+                <span className="text-emerald-400 shrink-0 text-[10px] uppercase font-bold tracking-wider ml-auto">
                   Auto-Attached
                 </span>
               </div>
@@ -597,12 +597,12 @@ export default function FeedbackClient({ session }: FeedbackClientProps) {
         {/* Footer info */}
         <footer className="mt-8 border-t border-zinc-800/70 pt-5 flex flex-col sm:flex-row items-center justify-between gap-3 font-mono text-[11px] text-zinc-600">
           <p>© 2026 Where&apos;s My Offer · Dedicated Placement Support Desk</p>
-          <div className="flex items-center gap-4 text-zinc-500">
-            <Link href="/privacy" className="hover:text-zinc-300 transition-colors">
+          <div className="flex items-center justify-center gap-3 sm:gap-4 text-zinc-500 whitespace-nowrap text-[11px]">
+            <Link href="/privacy" className="hover:text-zinc-300 transition-colors whitespace-nowrap">
               Privacy Policy
             </Link>
             <span>·</span>
-            <Link href="/terms" className="hover:text-zinc-300 transition-colors">
+            <Link href="/terms" className="hover:text-zinc-300 transition-colors whitespace-nowrap">
               Terms of Service
             </Link>
           </div>

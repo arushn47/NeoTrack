@@ -28,7 +28,7 @@ export default function Sidebar() {
   const pathname = usePathname();
 
   return (
-    <aside className="sticky top-0 hidden h-screen w-60 shrink-0 flex-col border-r border-zinc-800/80 bg-[#0b0b0e] lg:flex z-40 select-none">
+    <aside className="fixed inset-y-0 left-0 hidden h-screen w-60 shrink-0 flex-col border-r border-zinc-800/80 bg-[#0b0b0e] lg:flex z-40 select-none">
       {/* Brand Header */}
       <div className="flex h-16 items-center border-b border-zinc-800/80 px-5">
         <AppLogo />
