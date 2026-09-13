@@ -2,9 +2,9 @@
 
 ## ⚠️ CRITICAL KNOWLEDGE: External Background Cron Job
 - **Provider**: [cron-job.org](https://console.cron-job.org/jobs/8265126)
-- **Job Title**: `NeoTrack 2-Hour Email Sync` (formerly `NeoTrack 15 Min Email Sync`)
+- **Job Title**: `NeoTrack 15-Min Email Sync`
 - **Target URL**: `https://neopat-tracker.vercel.app/api/cron/sync`
-- **Execution Schedule**: **Every 2 hours** (`0 */2 * * *`)
+- **Execution Schedule**: **Every 15 minutes** (`*/15 * * * *`)
 - **Status**: **ALWAYS ACTIVE IN THE BACKGROUND** (running 24/7 independently of local dev, Vercel cron, or browser sessions).
 
 ### Architectural Implications (DO NOT VIOLATE):
