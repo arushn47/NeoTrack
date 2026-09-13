@@ -2,26 +2,22 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
+import Link from 'next/link';
+import { detectCampus } from '@/lib/utils';
+import { motion } from 'framer-motion';
+import { toast } from 'sonner';
 import {
   Mail,
-  Link2,
-  Link2Off,
-  CheckCircle2,
-  AlertCircle,
   Fingerprint,
-  Save,
-  Loader2,
-  Shield,
-  Sparkles,
-  User,
-  Check,
+  Bell,
+  AlertOctagon,
   RefreshCw,
-  Trash2,
-  AlertTriangle,
+  LogOut,
+  CheckCheck,
+  Loader2,
+  Plus,
+  Send,
 } from 'lucide-react';
-import { cn } from '@/lib/utils';
-import { timeAgo } from '@/lib/utils';
-import NotificationSettings from '@/components/notifications/notification-settings';
 
 interface Account {
   id: string;
@@ -37,61 +33,84 @@ interface SettingsClientProps {
   userEmail: string;
 }
 
+const Toggle = ({ on, onChange, id }: { on: boolean; onChange: (v: boolean) => void; id: string }) => (
+  <button
+    type="button"
+    data-testid={`toggle-${id}`}
+    onClick={() => onChange(!on)}
+    className={`relative h-6 w-11 shrink-0 rounded-full border transition-colors duration-200 cursor-pointer ${
+      on ? 'border-emerald-500/50 bg-emerald-500/25' : 'border-zinc-700 bg-zinc-800'
+    }`}
+  >
+    <span
+      className={`absolute top-0.5 h-[18px] w-[18px] rounded-full transition-all duration-200 ${
+        on ? 'left-[22px] bg-emerald-400' : 'left-0.5 bg-zinc-500'
+      }`}
+    />
+  </button>
+);
+
+const Card = ({
+  icon: Icon,
+  title,
+  desc,
+  children,
+  danger,
+  testid,
+}: {
+  icon: React.ComponentType<{ className?: string }>;
+  title: string;
+  desc: string;
+  children: React.ReactNode;
+  danger?: boolean;
+  testid?: string;
+}) => (
+  <motion.section
+    data-testid={testid}
+    initial={{ opacity: 0, y: 16 }}
+    animate={{ opacity: 1, y: 0 }}
+    transition={{ duration: 0.45 }}
+    className={`rounded-2xl border p-6 ${
+      danger ? 'border-rose-500/25 bg-rose-500/[0.03]' : 'border-zinc-800 bg-[#101014]'
+    }`}
+  >
+    <div className="flex items-center gap-2.5">
+      <Icon className={`h-4 w-4 ${danger ? 'text-rose-400' : 'text-emerald-400'}`} />
+      <h2 className="font-display text-base font-bold tracking-tight text-white">{title}</h2>
+    </div>
+    <p className="mt-1.5 text-xs leading-relaxed text-zinc-500">{desc}</p>
+    <div className="mt-5">{children}</div>
+  </motion.section>
+);
+
 export default function SettingsClient({ accounts, neoId: initialNeoId, userEmail }: SettingsClientProps) {
   const router = useRouter();
-  const [neoId, setNeoId] = useState(initialNeoId);
-  const [savingNeoId, setSavingNeoId] = useState(false);
-  const [neoIdSaved, setNeoIdSaved] = useState(false);
-  const [neoIdError, setNeoIdError] = useState('');
+  const [regId, setRegId] = useState(initialNeoId);
+  const [isSavingId, setIsSavingId] = useState(false);
   const [disconnecting, setDisconnecting] = useState<string | null>(null);
-
   const [reprocessing, setReprocessing] = useState(false);
-  const [reprocessResult, setReprocessResult] = useState<{
-    message: string;
-    neoPatDrivesCount?: number;
-    deletedNonNeoPatCompanies?: string[];
-    collegeCircularsLinked?: number;
-    collegeCircularsDiscarded?: number;
-    updatedApplications?: number;
-  } | null>(null);
+  const [revoking, setRevoking] = useState(false);
 
-  const [resetting, setResetting] = useState(false);
-  const [resetConfirmOpen, setResetConfirmOpen] = useState(false);
+  // Notification Preferences matching Emergent prototype
+  const [prefs, setPrefs] = useState({
+    shortlist: true,
+    tests: true,
+    digest: false,
+  });
 
-  const handleReprocess = async () => {
-    setReprocessing(true);
-    setReprocessResult(null);
-    try {
-      const res = await fetch('/api/sync/reprocess', { method: 'POST' });
-      const data = await res.json();
-      if (res.ok) {
-        setReprocessResult(data);
-        router.refresh();
-      } else {
-        alert(data.error || 'Failed to reprocess placement feeds');
-      }
-    } catch {
-      alert('Failed to reprocess placement feeds');
-    } finally {
-      setReprocessing(false);
-    }
-  };
+  const personalAccount = accounts.find((a) => a.account_type === 'personal' && a.is_connected);
+  const collegeAccount = accounts.find((a) => a.account_type === 'college' && a.is_connected);
 
-  const personalAccount = accounts.find((a) => a.account_type === 'personal');
-  const collegeAccount = accounts.find((a) => a.account_type === 'college');
-
-  const handleSaveNeoId = async () => {
-    const trimmed = neoId.trim().toUpperCase();
-
+  const handleSaveRegId = async () => {
+    const trimmed = regId.trim().toUpperCase();
     if (trimmed && !/^[A-Z0-9]{6,12}$/.test(trimmed)) {
-      setNeoIdError('Neo ID should be 6-12 alphanumeric characters (e.g. A6S2A7G9)');
+      toast.error('Invalid Registration ID', {
+        description: 'ID should be 6-12 alphanumeric characters (e.g. 21BCE0492).',
+      });
       return;
     }
 
-    setSavingNeoId(true);
-    setNeoIdError('');
-    setNeoIdSaved(false);
-
+    setIsSavingId(true);
     try {
       const res = await fetch('/api/user/neo-id', {
         method: 'PATCH',
@@ -99,358 +118,298 @@ export default function SettingsClient({ accounts, neoId: initialNeoId, userEmai
         body: JSON.stringify({ neo_id: trimmed || null }),
       });
 
-      if (!res.ok) throw new Error('Failed to save');
+      if (!res.ok) throw new Error('Failed to save ID');
 
-      setNeoId(trimmed);
-      setNeoIdSaved(true);
-      setTimeout(() => setNeoIdSaved(false), 3000);
+      setRegId(trimmed);
+      toast.success(`Registration ID saved: ${trimmed || 'None'}`);
+      router.refresh();
     } catch {
-      setNeoIdError('Failed to save — please try again.');
+      toast.error('Failed to save Registration ID');
     } finally {
-      setSavingNeoId(false);
+      setIsSavingId(false);
     }
   };
 
   const handleDisconnect = async (accountId: string) => {
+    if (!confirm('Disconnect this Gmail account from Where\'s My Offer? Sync for this inbox will pause.')) return;
     setDisconnecting(accountId);
     try {
-      await fetch('/api/auth/disconnect', {
+      const res = await fetch('/api/auth/disconnect', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ gmail_account_id: accountId }),
       });
-      window.location.reload();
+      if (res.ok) {
+        toast.success('Gmail account disconnected');
+        window.location.reload();
+      } else {
+        toast.error('Failed to disconnect');
+      }
     } catch {
-      // Handle error
+      toast.error('Failed to disconnect');
     } finally {
       setDisconnecting(null);
     }
   };
 
+  const handleReprocess = async () => {
+    setReprocessing(true);
+    try {
+      const res = await fetch('/api/sync/reprocess', { method: 'POST' });
+      const data = await res.json();
+      if (res.ok) {
+        toast.success('Archive re-sync queued', {
+          description: data.message || 'Drives cleaned, stages updated, and shortlists re-verified.',
+        });
+        router.refresh();
+      } else {
+        toast.error('Re-sync failed', { description: data.error });
+      }
+    } catch {
+      toast.error('Network error during archive re-sync');
+    } finally {
+      setReprocessing(false);
+    }
+  };
+
+  const handleRevokeTokens = async () => {
+    if (!confirm('Are you sure you want to revoke all tokens and sign out? You will need to re-authenticate both Gmail accounts.')) {
+      return;
+    }
+    setRevoking(true);
+    try {
+      await fetch('/api/auth/disconnect', { method: 'DELETE' });
+      toast.success('Signed out and tokens revoked');
+      window.location.href = '/login';
+    } catch {
+      toast.error('Failed to sign out cleanly');
+      setRevoking(false);
+    }
+  };
+
   return (
-    <div className="max-w-3xl mx-auto space-y-8 animate-fade-in selection:bg-indigo-500/20">
+    <div data-testid="settings-page" className="mx-auto max-w-3xl space-y-4">
+      {/* Header */}
       <div>
-        <h1 className="text-2xl sm:text-3xl font-extrabold text-white tracking-tight">System Settings</h1>
-        <p className="text-xs sm:text-sm text-zinc-400 mt-1">
-          Manage your connected Gmail accounts, Neo ID registration, and notification preferences.
+        <h1 className="font-display text-2xl font-extrabold tracking-tight sm:text-3xl text-white">
+          Settings
+        </h1>
+        <p className="mt-1 text-sm text-zinc-500">
+          Connected inboxes, registration ID & sync preferences
         </p>
       </div>
 
-      {/* Neo ID Section */}
-      <section className="rounded-3xl bg-[#101018]/90 backdrop-blur-2xl border border-zinc-800/80 overflow-hidden shadow-xl shadow-black/20">
-        <div className="px-6 py-5 border-b border-zinc-800/80">
-          <h2 className="text-sm font-bold text-white flex items-center gap-2">
-            <Fingerprint className="w-4 h-4 text-violet-400" />
-            NeoPAT Candidate Registration ID
-          </h2>
-          <p className="text-xs text-zinc-400 mt-1">
-            Your unique campus Neo ID used to automatically detect your name in official shortlisted attachments.
-          </p>
-        </div>
-        <div className="p-6">
-          <div className="flex flex-col sm:flex-row gap-3">
-            <input
-              type="text"
-              value={neoId}
-              onChange={(e) => {
-                setNeoId(e.target.value.toUpperCase());
-                setNeoIdError('');
-                setNeoIdSaved(false);
-              }}
-              placeholder="e.g. A6S2A7G9"
-              maxLength={12}
-              className="flex-1 px-4 py-2.5 rounded-2xl bg-zinc-950/80 border border-zinc-800 text-white text-sm font-mono tracking-wider placeholder:text-zinc-600 placeholder:font-sans placeholder:tracking-normal focus:outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 uppercase"
-            />
-            <button
-              onClick={handleSaveNeoId}
-              disabled={savingNeoId}
-              className="flex items-center justify-center gap-2 px-5 py-2.5 rounded-2xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold transition-all shadow-md shadow-indigo-600/30 disabled:opacity-50 active:scale-95"
-            >
-              {savingNeoId ? (
-                <Loader2 className="w-4 h-4 animate-spin" />
-              ) : neoIdSaved ? (
-                <CheckCircle2 className="w-4 h-4 text-emerald-300" />
-              ) : (
-                <Save className="w-4 h-4" />
-              )}
-              {neoIdSaved ? 'Saved Successfully!' : 'Save ID'}
-            </button>
-          </div>
-          {neoIdError && (
-            <p className="text-xs text-red-400 mt-2.5 flex items-center gap-1 font-medium">
-              <AlertCircle className="w-3.5 h-3.5" />
-              {neoIdError}
-            </p>
-          )}
-        </div>
-      </section>
-
-      {/* Placement Intelligence Engine Maintenance / Reprocess */}
-      <section className="rounded-3xl bg-[#101018]/90 backdrop-blur-2xl border border-zinc-800/80 overflow-hidden shadow-xl shadow-black/20">
-        <div className="px-6 py-5 border-b border-zinc-800/80 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-          <div>
-            <h2 className="text-sm font-bold text-white flex items-center gap-2">
-              <Sparkles className="w-4 h-4 text-amber-400" />
-              Placement Feed Re-indexing & Cleanup
-            </h2>
-            <p className="text-xs text-zinc-400 mt-1">
-              Re-scans all stored emails with updated parser rules: deletes spurious company records (e.g. Google, role titles), fixes company aliases (e.g. EY GDS), and recalculates stage progression (e.g. MUFG, Epsilon test rejections).
-            </p>
-          </div>
+      {/* Card 1: Candidate Registration ID */}
+      <Card
+        icon={Fingerprint}
+        title="NeoPAT Candidate Registration ID"
+        desc="Your unique campus ID — the Excel scanner matches this in every shortlist attachment."
+        testid="regid-card"
+      >
+        <div className="flex gap-3">
+          <input
+            data-testid="regid-input"
+            value={regId}
+            onChange={(e) => setRegId(e.target.value.toUpperCase())}
+            placeholder="e.g. 21BCE0492"
+            maxLength={12}
+            className="h-11 flex-1 rounded-lg border border-zinc-800 bg-zinc-900/60 px-4 font-mono text-sm tracking-widest text-zinc-100 placeholder:text-zinc-600 placeholder:font-sans placeholder:tracking-normal focus:border-emerald-500/40 focus:outline-none"
+          />
           <button
-            onClick={handleReprocess}
-            disabled={reprocessing}
-            className="flex items-center justify-center gap-2 px-5 py-2.5 rounded-2xl bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 border border-amber-500/30 text-xs font-bold transition-all shadow-md active:scale-95 disabled:opacity-50 flex-shrink-0"
+            data-testid="regid-save-btn"
+            onClick={handleSaveRegId}
+            disabled={isSavingId}
+            className="rounded-lg bg-emerald-500 px-5 text-sm font-bold text-zinc-950 transition-colors hover:bg-emerald-400 disabled:opacity-60 cursor-pointer"
           >
-            {reprocessing ? (
-              <>
-                <Loader2 className="w-4 h-4 animate-spin text-amber-400" />
-                <span>Cleaning & Re-indexing...</span>
-              </>
-            ) : (
-              <>
-                <RefreshCw className="w-4 h-4 text-amber-400" />
-                <span>Re-index & Clean All Drives</span>
-              </>
-            )}
+            {isSavingId ? 'Saving…' : 'Save ID'}
           </button>
         </div>
-        {reprocessResult && (
-          <div className="p-6 bg-zinc-950/60 border-t border-zinc-800/60">
-            <div className="flex items-start gap-3">
-              <CheckCircle2 className="w-5 h-5 text-emerald-400 flex-shrink-0 mt-0.5" />
-              <div>
-                <p className="text-xs font-bold text-white">{reprocessResult.message}</p>
-                <p className="text-[11px] text-zinc-400 mt-1">
-                  Tracking {reprocessResult.neoPatDrivesCount || 0} official NeoPAT drives · Purged {reprocessResult.deletedNonNeoPatCompanies?.length || 0} non-NeoPAT companies ({reprocessResult.deletedNonNeoPatCompanies?.slice(0, 5).join(', ') || 'none'}{((reprocessResult.deletedNonNeoPatCompanies?.length || 0) > 5) ? '...' : ''}) · Linked {reprocessResult.collegeCircularsLinked || 0} college circulars · Discarded {reprocessResult.collegeCircularsDiscarded || 0} irrelevant college broadcast emails.
-                </p>
+      </Card>
+
+      {/* Card 2: Connected Gmail Accounts */}
+      <Card
+        icon={Mail}
+        title="Connected Gmail Accounts"
+        desc="Both inboxes are read-only. Tokens are AES-256 encrypted and revocable anytime."
+        testid="gmail-card"
+      >
+        <div className="space-y-3">
+          {/* Personal Gmail Row */}
+          <div className="flex items-center gap-4 rounded-xl border border-zinc-800 bg-zinc-900/50 px-4 py-3.5">
+            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-emerald-500/25 bg-emerald-500/10">
+              <Mail className="h-4 w-4 text-emerald-400" />
+            </div>
+            <div className="min-w-0 flex-1">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-sm font-semibold text-zinc-100">Personal Gmail</span>
+                {personalAccount ? (
+                  <span className="flex items-center gap-1 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider text-emerald-300">
+                    <CheckCheck className="h-2.5 w-2.5" /> Connected
+                  </span>
+                ) : (
+                  <span className="rounded-full border border-zinc-700 bg-zinc-800 px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider text-zinc-400">
+                    Not Connected
+                  </span>
+                )}
+              </div>
+              <div className="mt-0.5 truncate font-mono text-[11px] text-zinc-500">
+                {personalAccount ? personalAccount.email : userEmail || 'your.personal@gmail.com'} · Official registrations & offer letters
               </div>
             </div>
-          </div>
-        )}
-      </section>
-
-      {/* Gmail Accounts Section */}
-      <section className="rounded-3xl bg-[#101018]/90 backdrop-blur-2xl border border-zinc-800/80 overflow-hidden shadow-xl shadow-black/20">
-        <div className="px-6 py-5 border-b border-zinc-800/80">
-          <h2 className="text-sm font-bold text-white flex items-center gap-2">
-            <Mail className="w-4 h-4 text-indigo-400" />
-            Connected Gmail Accounts
-          </h2>
-          <p className="text-xs text-zinc-400 mt-1">
-            Connect both your personal and VIT college Gmail accounts to pull full placement feeds and official announcements.
-          </p>
-        </div>
-        <div className="divide-y divide-zinc-800/60">
-          {/* Personal Gmail */}
-          <AccountRow
-            label="Personal Gmail"
-            description="NeoPAT notifications, direct application confirmations"
-            account={personalAccount}
-            connectUrl="/api/auth/google?type=personal"
-            onDisconnect={handleDisconnect}
-            disconnecting={disconnecting}
-          />
-
-          {/* College Gmail */}
-          <AccountRow
-            label="College Gmail (VIT)"
-            description="Placement announcements, PPT links, tests, and JDs"
-            account={collegeAccount}
-            connectUrl="/api/auth/google?type=college"
-            onDisconnect={handleDisconnect}
-            disconnecting={disconnecting}
-          />
-        </div>
-      </section>
-
-      {/* Account Info */}
-      <section className="rounded-3xl bg-[#101018]/90 backdrop-blur-2xl border border-zinc-800/80 overflow-hidden shadow-xl shadow-black/20">
-        <div className="px-6 py-5 border-b border-zinc-800/80">
-          <h2 className="text-sm font-bold text-white flex items-center gap-2">
-            <User className="w-4 h-4 text-zinc-400" />
-            Account Information
-          </h2>
-        </div>
-        <div className="p-6">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-sm font-semibold text-white">{userEmail}</p>
-              <p className="text-xs text-zinc-500 mt-0.5 font-mono">Primary Authenticated Session</p>
-            </div>
-            <span className="text-[10px] font-semibold px-2.5 py-1 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-              Active
-            </span>
-          </div>
-        </div>
-      </section>
-
-      {/* Notification Preferences Section */}
-      <NotificationSettings />
-
-      {/* Danger Zone: Nuclear Reset */}
-      <section className="rounded-3xl bg-[#101018]/90 backdrop-blur-2xl border border-red-900/40 overflow-hidden shadow-xl shadow-black/20">
-        <div className="px-6 py-5 border-b border-red-900/30">
-          <h2 className="text-sm font-bold text-red-400 flex items-center gap-2">
-            <AlertTriangle className="w-4 h-4" />
-            Danger Zone
-          </h2>
-          <p className="text-xs text-zinc-400 mt-1">
-            Irreversible actions that will permanently delete your placement data.
-          </p>
-        </div>
-        <div className="p-6">
-          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-            <div>
-              <p className="text-sm font-semibold text-white">Wipe All Drives & Start Fresh</p>
-              <p className="text-xs text-zinc-500 mt-1">
-                Deletes all companies, applications, events, stored emails, and resets sync history. Your connected Gmail accounts and Neo ID will be preserved.
-              </p>
-            </div>
-            {!resetConfirmOpen ? (
+            {personalAccount ? (
               <button
-                onClick={() => setResetConfirmOpen(true)}
-                className="flex items-center gap-2 px-4 py-2.5 rounded-2xl bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/30 text-xs font-bold transition-all active:scale-95 flex-shrink-0"
+                data-testid="disconnect-personal-btn"
+                onClick={() => handleDisconnect(personalAccount.id)}
+                disabled={disconnecting === personalAccount.id}
+                className="shrink-0 rounded-lg border border-zinc-800 px-3.5 py-2 text-[11px] font-semibold text-zinc-500 transition-colors hover:border-rose-500/40 hover:text-rose-300 cursor-pointer"
               >
-                <Trash2 className="w-4 h-4" />
-                Reset Everything
+                {disconnecting === personalAccount.id ? 'Disconnecting…' : 'Disconnect'}
               </button>
             ) : (
-              <div className="flex items-center gap-2 flex-shrink-0">
-                <button
-                  onClick={() => setResetConfirmOpen(false)}
-                  disabled={resetting}
-                  className="px-4 py-2.5 rounded-2xl bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-xs font-bold transition-all"
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={async () => {
-                    setResetting(true);
-                    try {
-                      const res = await fetch('/api/sync/reset', { method: 'POST' });
-                      const data = await res.json();
-                      if (res.ok) {
-                        setResetConfirmOpen(false);
-                        router.refresh();
-                        // Show a brief success then reload
-                        alert(data.message || 'All data wiped. Trigger a sync to re-fetch.');
-                        window.location.reload();
-                      } else {
-                        alert(data.error || 'Reset failed');
-                      }
-                    } catch {
-                      alert('Reset failed — check your network.');
-                    } finally {
-                      setResetting(false);
-                    }
-                  }}
-                  disabled={resetting}
-                  className="flex items-center gap-2 px-4 py-2.5 rounded-2xl bg-red-600 hover:bg-red-500 text-white text-xs font-bold transition-all shadow-md shadow-red-600/30 disabled:opacity-50 active:scale-95"
-                >
-                  {resetting ? (
-                    <Loader2 className="w-4 h-4 animate-spin" />
-                  ) : (
-                    <Trash2 className="w-4 h-4" />
-                  )}
-                  {resetting ? 'Wiping...' : 'Yes, Wipe Everything'}
-                </button>
+              <a
+                href="/api/auth/google?type=personal"
+                className="flex items-center gap-1.5 shrink-0 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3.5 py-2 text-[11px] font-semibold text-emerald-300 hover:bg-emerald-500/20 transition-colors"
+              >
+                <Plus className="h-3.5 w-3.5" /> Connect
+              </a>
+            )}
+          </div>
+
+          {/* College Gmail Row */}
+          <div className="flex items-center gap-4 rounded-xl border border-zinc-800 bg-zinc-900/50 px-4 py-3.5">
+            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-emerald-500/25 bg-emerald-500/10">
+              <Mail className="h-4 w-4 text-emerald-400" />
+            </div>
+            <div className="min-w-0 flex-1">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-sm font-semibold text-zinc-100">
+                  College Gmail (VIT Bhopal)
+                </span>
+                {collegeAccount ? (
+                  <span className="flex items-center gap-1 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider text-emerald-300">
+                    <CheckCheck className="h-2.5 w-2.5" /> Connected
+                  </span>
+                ) : (
+                  <span className="rounded-full border border-amber-500/30 bg-amber-500/10 px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider text-amber-300">
+                    Action Required
+                  </span>
+                )}
               </div>
+              <div className="mt-0.5 truncate font-mono text-[11px] text-zinc-500">
+                {collegeAccount ? collegeAccount.email : 'student.23bce@vitbhopal.ac.in'} · CDC circulars, test links & shortlists
+              </div>
+            </div>
+            {collegeAccount ? (
+              <button
+                data-testid="disconnect-college-btn"
+                onClick={() => handleDisconnect(collegeAccount.id)}
+                disabled={disconnecting === collegeAccount.id}
+                className="shrink-0 rounded-lg border border-zinc-800 px-3.5 py-2 text-[11px] font-semibold text-zinc-500 transition-colors hover:border-rose-500/40 hover:text-rose-300 cursor-pointer"
+              >
+                {disconnecting === collegeAccount.id ? 'Disconnecting…' : 'Disconnect'}
+              </button>
+            ) : (
+              <a
+                href="/api/auth/google?type=college"
+                className="flex items-center gap-1.5 shrink-0 rounded-lg border border-emerald-500/40 bg-emerald-500 px-3.5 py-2 text-[11px] font-bold text-zinc-950 hover:bg-emerald-400 transition-colors"
+              >
+                <Plus className="h-3.5 w-3.5" /> Link College Gmail
+              </a>
             )}
           </div>
         </div>
-      </section>
-    </div>
-  );
-}
+      </Card>
 
-function AccountRow({
-  label,
-  description,
-  account,
-  connectUrl,
-  onDisconnect,
-  disconnecting,
-}: {
-  label: string;
-  description: string;
-  account?: Account;
-  connectUrl: string;
-  onDisconnect: (id: string) => void;
-  disconnecting: string | null;
-}) {
-  const isConnected = account?.is_connected;
-  const isDisconnected = account && !account.is_connected;
-
-  return (
-    <div className="flex items-center gap-4 px-6 py-5 hover:bg-zinc-850/30 transition-all">
-      <div className={cn(
-        'w-11 h-11 rounded-2xl flex items-center justify-center flex-shrink-0 border',
-        isConnected
-          ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400'
-          : isDisconnected
-          ? 'bg-amber-500/10 border-amber-500/20 text-amber-400'
-          : 'bg-zinc-900 border-zinc-800 text-zinc-500'
-      )}>
-        <Mail className="w-5 h-5" />
-      </div>
-      <div className="flex-1 min-w-0">
-        <div className="flex items-center gap-2">
-          <p className="text-sm font-bold text-white">{label}</p>
-          {isConnected && (
-            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-              <CheckCircle2 className="w-2.5 h-2.5" />
-              Connected
-            </span>
-          )}
-          {isDisconnected && (
-            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-500/10 text-amber-400 border border-amber-500/20">
-              Session Expired
-            </span>
-          )}
+      {/* Card 3: Notification Preferences */}
+      <Card
+        icon={Bell}
+        title="Notification Preferences"
+        desc="Choose how the radar pings you when something changes."
+        testid="notifications-card"
+      >
+        <div className="space-y-4">
+          {[
+            {
+              id: 'shortlist',
+              label: 'Shortlist alerts',
+              desc: 'Instant ping when your ID is found in any Excel sheet',
+            },
+            {
+              id: 'tests',
+              label: 'Test & interview reminders',
+              desc: '2 hours and 15 minutes before every scheduled round',
+            },
+            {
+              id: 'digest',
+              label: 'Morning digest',
+              desc: "One 8:00 AM summary of today's drives and deadlines",
+            },
+          ].map((p) => (
+            <div key={p.id} className="flex items-center justify-between gap-4">
+              <div>
+                <div className="text-sm font-semibold text-zinc-200">{p.label}</div>
+                <div className="mt-0.5 text-[11px] text-zinc-500">{p.desc}</div>
+              </div>
+              <Toggle
+                id={p.id}
+                on={prefs[p.id as keyof typeof prefs]}
+                onChange={(v) => {
+                  setPrefs((s) => ({ ...s, [p.id]: v }));
+                  toast.success(`${p.label} ${v ? 'enabled' : 'disabled'}`);
+                }}
+              />
+            </div>
+          ))}
         </div>
-        {isConnected && account ? (
-          <p className="text-xs text-zinc-400 mt-1 truncate font-mono">
-            {account.email} · Last synced {timeAgo(account.last_sync_at)}
-          </p>
-        ) : isDisconnected && account ? (
-          <p className="text-xs text-amber-300/90 mt-1 truncate">
-            {account.email} · Token expired, click Reconnect to resume sync
-          </p>
-        ) : (
-          <p className="text-xs text-zinc-500 mt-1">{description}</p>
-        )}
+      </Card>
+
+      {/* Card 4: Danger Zone */}
+      <Card
+        icon={AlertOctagon}
+        title="Danger Zone"
+        desc="Irreversible actions — proceed carefully."
+        danger
+        testid="danger-card"
+      >
+        <div className="flex flex-wrap gap-3">
+          <button
+            data-testid="resync-btn"
+            onClick={handleReprocess}
+            disabled={reprocessing}
+            className="flex items-center gap-2 rounded-lg border border-zinc-700 px-4 py-2.5 text-xs font-semibold text-zinc-300 transition-colors hover:border-amber-500/40 hover:text-amber-300 disabled:opacity-50 cursor-pointer"
+          >
+            <RefreshCw className={`h-3.5 w-3.5 ${reprocessing ? 'animate-spin text-amber-400' : ''}`} />
+            {reprocessing ? 'Re-syncing full archive…' : 'Re-sync full archive'}
+          </button>
+          <button
+            data-testid="revoke-btn"
+            onClick={handleRevokeTokens}
+            disabled={revoking}
+            className="flex items-center gap-2 rounded-lg border border-rose-500/30 bg-rose-500/10 px-4 py-2.5 text-xs font-semibold text-rose-300 transition-colors hover:bg-rose-500/20 disabled:opacity-50 cursor-pointer"
+          >
+            <LogOut className="h-3.5 w-3.5" />
+            {revoking ? 'Revoking…' : 'Revoke tokens & sign out'}
+          </button>
+        </div>
+      </Card>
+
+      {/* Legal & Compliance Footer */}
+      <div className="pt-4 pb-12 flex flex-col sm:flex-row items-center justify-between gap-3 font-mono text-[11px] text-zinc-500 border-t border-zinc-850/80">
+        <span className="text-zinc-600">Where&apos;s My Offer · Placement Radar</span>
+        <div className="flex items-center gap-4">
+          <Link href="/feedback" className="hover:text-zinc-300 transition-colors">
+            Feedback & Support
+          </Link>
+          <span className="text-zinc-700">·</span>
+          <Link href="/privacy" className="hover:text-zinc-300 transition-colors">
+            Privacy Policy
+          </Link>
+          <span className="text-zinc-700">·</span>
+          <Link href="/terms" className="hover:text-zinc-300 transition-colors">
+            Terms of Service
+          </Link>
+        </div>
       </div>
-      {isConnected && account ? (
-        <button
-          onClick={() => onDisconnect(account.id)}
-          disabled={disconnecting === account.id}
-          className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-semibold text-zinc-400 border border-zinc-800 hover:text-red-400 hover:border-red-500/30 hover:bg-red-500/10 transition-all disabled:opacity-50"
-        >
-          {disconnecting === account.id ? (
-            <Loader2 className="w-3.5 h-3.5 animate-spin" />
-          ) : (
-            <Link2Off className="w-3.5 h-3.5" />
-          )}
-          Disconnect
-        </button>
-      ) : isDisconnected ? (
-        <a
-          href={connectUrl}
-          className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold text-gray-950 bg-amber-500 hover:bg-amber-400 shadow-md shadow-amber-500/25 transition-all"
-        >
-          <RefreshCw className="w-3.5 h-3.5" />
-          Reconnect
-        </a>
-      ) : (
-        <a
-          href={connectUrl}
-          className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-500 shadow-md shadow-indigo-600/30 transition-all"
-        >
-          <Link2 className="w-3.5 h-3.5" />
-          Connect
-        </a>
-      )}
     </div>
   );
 }

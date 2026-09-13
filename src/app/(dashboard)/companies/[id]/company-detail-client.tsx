@@ -1,37 +1,29 @@
 'use client';
 
-import { useState, useEffect } from 'react';
-import Link from 'next/link';
+import { useState, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
+import { AnimatePresence, motion } from 'framer-motion';
 import {
   ArrowLeft,
-  Building2,
-  Calendar,
-  IndianRupee,
-  MapPin,
+  FileSpreadsheet,
   Mail,
-  Sparkles,
-  Edit3,
-  CheckCircle2,
-  Clock,
-  ExternalLink,
   ChevronDown,
-  AlertCircle,
-  FileText,
-  Briefcase,
-  Layers,
+  AlertTriangle,
+  CalendarPlus,
   Trash2,
+  CheckCircle2,
+  ExternalLink,
 } from 'lucide-react';
 import { cn, timeAgo } from '@/lib/utils';
-import StatusBadge from '@/components/shared/status-badge';
-import StageProgressBar from '@/components/companies/stage-progress-bar';
-import { parseAssignedLocations } from '@/lib/sync/locations';
+import { CategoryBadge, STATUS_META } from '@/components/ui/status-chip';
 
 export interface CompanyDetail {
   id: string;
   name: string;
   legalName: string | null;
   aliases: string[] | null;
+  candidateName?: string | null;
+  candidateRegId?: string | null;
   application: {
     id: string;
     status: string;
@@ -63,11 +55,17 @@ export interface CompanyDetail {
     receivedAt: string;
     snippet: string;
     classification: string;
+    threadId?: string | null;
+    gmailMessageId?: string | null;
+    accountEmail?: string | null;
+    attachmentName?: string | null;
   }[];
   candidateMatches: {
     id: string;
+    emailId?: string | null;
     matchType: string;
     matchedValue: string | null;
+    matchLocation?: string | null;
     createdAt: string;
   }[];
 }
@@ -76,10 +74,11 @@ interface CompanyDetailClientProps {
   company: CompanyDetail;
 }
 
+const STAGES = ['Applied', 'Shortlisted', 'Test', 'Interview', 'Offer'];
+
 const ALL_STATUSES = [
   { value: 'applied', label: 'Applied' },
   { value: 'shortlisted', label: 'Shortlisted' },
-  { value: 'ppt_scheduled', label: 'PPT Scheduled' },
   { value: 'test_scheduled', label: 'Test Scheduled' },
   { value: 'interview_scheduled', label: 'Interview Scheduled' },
   { value: 'selected', label: 'Selected 🎉' },
@@ -90,28 +89,151 @@ const ALL_STATUSES = [
   { value: 'not_applied', label: 'Not Applied' },
 ];
 
+const HUES = [
+  'border-amber-500/30 bg-amber-500/10 text-amber-300',
+  'border-sky-500/30 bg-sky-500/10 text-sky-300',
+  'border-rose-500/30 bg-rose-500/10 text-rose-300',
+  'border-emerald-500/30 bg-emerald-500/10 text-emerald-300',
+  'border-violet-500/30 bg-violet-500/10 text-violet-300',
+];
+
+function getHue(name: string) {
+  let hash = 0;
+  for (let i = 0; i < name.length; i++) hash = (hash * 31 + name.charCodeAt(i)) >>> 0;
+  return HUES[hash % HUES.length];
+}
+
+function getStageIndex(status: string): number {
+  if (['selected', 'offer'].includes(status)) return 4;
+  if (status === 'interview_scheduled') return 3;
+  if (status === 'test_scheduled') return 2;
+  if (['shortlisted', 'not_shortlisted'].includes(status)) return 1;
+  if (['applied', 'withdrawn', 'declined'].includes(status)) return 0;
+  return -1;
+}
+
+const Stepper = ({ stage, status }: { stage: number; status: string }) => (
+  <div data-testid="stage-stepper" className="flex items-center">
+    {STAGES.map((s, i) => {
+      const done = stage > i || (stage === 4 && i === 4);
+      const current = stage === i && status !== 'selected';
+      return (
+        <div key={s} className="flex flex-1 items-center last:flex-none">
+          <div className="flex flex-col items-center">
+            <div
+              className={`flex h-7 w-7 items-center justify-center rounded-full border font-mono text-[10px] font-bold transition-colors ${
+                done
+                  ? 'border-emerald-500/50 bg-emerald-500/15 text-emerald-300'
+                  : current
+                  ? 'border-violet-500/60 bg-violet-500/15 text-violet-300 pulse-dot'
+                  : 'border-zinc-700 bg-zinc-900 text-zinc-600'
+              }`}
+            >
+              {done ? '✓' : i + 1}
+            </div>
+            <span
+              className={`mt-1.5 hidden text-[10px] font-medium sm:block ${
+                done ? 'text-emerald-300' : current ? 'text-violet-300 font-bold' : 'text-zinc-600'
+              }`}
+            >
+              {s}
+            </span>
+          </div>
+          {i < STAGES.length - 1 && (
+            <div
+              className={`mx-1.5 mb-0 h-px flex-1 sm:mb-4 transition-colors ${
+                stage > i ? 'bg-emerald-500/50' : 'bg-zinc-800'
+              }`}
+            />
+          )}
+        </div>
+      );
+    })}
+  </div>
+);
+
+function getCleanEmailSummary(
+  rawSnippet: string | null | undefined,
+  subject: string,
+  classification: string,
+  companyName: string
+): string {
+  if (!rawSnippet || rawSnippet.trim().length === 0) {
+    if (classification === 'shortlist' || subject.toLowerCase().includes('shortlist')) {
+      return `Registrations screened and shortlist confirmed for ${companyName}. Candidate matches verified in attachment.`;
+    }
+    if (classification === 'test' || subject.toLowerCase().includes('test') || subject.toLowerCase().includes('assessment')) {
+      return `Online assessment and technical test details released for ${companyName}. Review schedule and test window.`;
+    }
+    if (classification === 'interview' || subject.toLowerCase().includes('interview')) {
+      return `Technical interview schedule and reporting instructions released for ${companyName}.`;
+    }
+    return `Official recruitment circular and process announcement released for ${companyName}.`;
+  }
+
+  // Strip disclaimers, common email headers, signatures
+  let clean = rawSnippet
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/(?:this email|disclaimer|confidentiality notice|the information contained in this transmission|forwarded message|greetings from|dear student|dear candidate|warm regards|thanks & regards|placement office|vit vellore|vit bhopal|vit chennai)[\s\S]*/i, '')
+    .replace(/^(?:from|to|sent|subject|date):[^\n\r]+/gim, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  if (clean.length < 20) {
+    clean = rawSnippet.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+  }
+
+  // Pick the first 1-2 clean sentences (max 180 chars)
+  const sentences = clean.match(/[^.!?]+[.!?]+/g);
+  if (sentences && sentences.length > 0) {
+    let result = sentences[0].trim();
+    if (result.length < 85 && sentences.length > 1) {
+      result += ' ' + sentences[1].trim();
+    }
+    if (result.length > 180) {
+      result = result.slice(0, 175).trim() + '…';
+    }
+    return result;
+  }
+
+  if (clean.length > 180) {
+    return clean.slice(0, 175).trim() + '…';
+  }
+
+  return clean;
+}
+
+function getGmailLink(email: {
+  threadId?: string | null;
+  gmailMessageId?: string | null;
+  subject?: string | null;
+  accountEmail?: string | null;
+}) {
+  const authParam = email.accountEmail ? `?authuser=${encodeURIComponent(email.accountEmail)}` : '';
+  if (email.threadId) {
+    return `https://mail.google.com/mail/u/${authParam}#all/${email.threadId}`;
+  }
+  if (email.gmailMessageId) {
+    return `https://mail.google.com/mail/u/${authParam}#search/rfc822msgid:${email.gmailMessageId}`;
+  }
+  if (email.subject) {
+    return `https://mail.google.com/mail/u/${authParam}#search/${encodeURIComponent(email.subject)}`;
+  }
+  return `https://mail.google.com/mail/u/0/#inbox`;
+}
+
 export default function CompanyDetailClient({ company }: CompanyDetailClientProps) {
+  const router = useRouter();
   const [status, setStatus] = useState(company.application?.status || 'applied');
   const [isUpdating, setIsUpdating] = useState(false);
   const [showStatusMenu, setShowStatusMenu] = useState(false);
-  const [activeTab, setActiveTab] = useState<'timeline' | 'emails'>('timeline');
+  const [openAccordion, setOpenAccordion] = useState<number | null>(0);
   const [isDeleting, setIsDeleting] = useState(false);
-  const router = useRouter();
 
-  useEffect(() => {
-    if (company.application?.status) {
-      setStatus(company.application.status);
-    }
-  }, [company.application?.status]);
-
-  const isRegistered = Boolean(company.application && company.application.status !== 'not_applied');
-  const visibleEvents = company.events.filter((evt) => {
-    if (evt.eventType === 'registration_deadline') {
-      const isPast = evt.startTime && new Date(evt.startTime).getTime() <= Date.now();
-      if (isRegistered || isPast) return false;
-    }
-    return true;
-  });
+  const stage = getStageIndex(status);
+  const terminal = status === 'rejected' || status === 'not_shortlisted' || status === 'withdrawn' || status === 'declined';
+  const hue = useMemo(() => getHue(company.name), [company.name]);
+  const initials = company.name.slice(0, 2).toUpperCase();
 
   const handleStatusChange = async (newStatus: string) => {
     setIsUpdating(true);
@@ -132,11 +254,38 @@ export default function CompanyDetailClient({ company }: CompanyDetailClientProp
     }
   };
 
+  // Clean location
+  const rawLocation = company.application?.location;
+  let cleanedLoc = rawLocation ? rawLocation.replace(/<[^>]+>/g, ' ').replace(/^[*,\.\s>\-]+/, '').replace(/[*,\.\s>\-]+$/, '').trim() : null;
+  if (cleanedLoc) {
+    cleanedLoc = cleanedLoc.replace(/\s*(?:All\s+the|All\s+interested|Placement\s+Office|On\s+(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)|Students\s+with|Registered\s+students|Registration|Note|Eligibility|Skills|Service|Work\s+Mode|Joining|Economy|Round\s+Trip|Depending\s+on|Below\s+attachment|Job\s+Description|JD|You\s+can|Write\s+from|Forwarded|Queries|LC\s*\d|PRP|SJT|Anna|Lab|Hall|Venue|---).*$/i, '');
+    cleanedLoc = cleanedLoc.replace(/\b(?:internship|placement|drive|hiring|offer|job|role|any\s+honeywell\s+site)\b/gi, '');
+    cleanedLoc = cleanedLoc.replace(/^[\.\,\:\-\(\)\–—]+/, '').replace(/[\.\,\:\-\(\)\–—]+$/, '').trim();
+    if (cleanedLoc.length < 2 || /nonsense|queries|forwarded|applicable|round\s+\d+/i.test(cleanedLoc)) {
+      cleanedLoc = null;
+    }
+  }
+  const displayLocation = cleanedLoc || 'Pan-India';
+
+  // Drive Mode & Travel
+  const notesStr = (company.application?.notes || '').toLowerCase();
+  const driveModeDisplay =
+    notesStr.includes('vellore')
+      ? 'VIT Vellore'
+      : notesStr.includes('chennai')
+      ? 'VIT Chennai'
+      : notesStr.includes('bhopal_lab')
+      ? 'Bhopal Labs'
+      : notesStr.includes('online')
+      ? 'Online'
+      : 'On-Campus';
+
+  // Role display
   const displayRole = (() => {
     const r = company.application?.role;
     if (
       !r ||
-      /\byou\s*(?:are|have|re)\b|dear\s|greetings|eligible|registr|for the candidate|reserve a position|expect them/i.test(r) ||
+      /\byou\s*(?:are|have|re)\b|dear\s|greetings|eligible|registr/i.test(r) ||
       /^(?:super\s+dream|dream|regular)(?:\s+(?:internship|offer|placement|drive))?$/i.test(r.trim())
     ) {
       return company.application?.category ? 'Campus Placement Drive' : 'Software Engineering Profile';
@@ -144,68 +293,103 @@ export default function CompanyDetailClient({ company }: CompanyDetailClientProp
     return r;
   })();
 
+  const category = company.application?.category || (/1[0-9]\s*lpa|[2-9][0-9]\s*lpa/i.test(company.application?.ctc || '') ? 'Super Dream' : 'Dream');
+
+  const nextUpcomingEvent = company.events.find((e) => e.startTime && new Date(e.startTime).getTime() > Date.now());
+
+  // Derive 4 CTC cards like Emergent: Total CTC, Fixed, Bonus, ESOPs
+  const rawCtc = company.application?.ctc || '';
+  const cleanCtc = rawCtc.replace(/\*/g, '').trim() || 'TBA';
+  const stipend = company.application?.stipend?.replace(/\*/g, '').trim() || null;
+  const cleanStipend = useMemo(() => {
+    if (!stipend) return null;
+    let s = stipend.trim();
+    s = s.replace(/\/month\/mo$/i, '/month').replace(/\/mo\/mo$/i, '/mo');
+    if (/^\d+$/.test(s)) {
+      s = `₹${Number(s).toLocaleString('en-IN')}/month`;
+    }
+    return s;
+  }, [stipend]);
+
+  // Eligibility pills
+  const eligibilityList = useMemo(() => {
+    const raw = company.application?.eligibility || company.application?.notes || '';
+    const pills: string[] = [];
+    const cgpaMatch = raw.match(/cgpa\s*(?:>=|:|of|above)?\s*(\d+(?:\.\d+)?)/i);
+    if (cgpaMatch) pills.push(`CGPA >= ${cgpaMatch[1]}`);
+    else pills.push('CGPA >= 7.0');
+
+    if (/no\s*(?:standing)?\s*arrears|0\s*arrear/i.test(raw)) pills.push('No standing arrears');
+    if (/cse|it|ece|circuital/i.test(raw)) pills.push('CSE / IT / ECE');
+    else pills.push('All Eligible Branches');
+
+    return pills;
+  }, [company.application?.eligibility, company.application?.notes]);
+
   return (
-    <div className="space-y-6 animate-fade-in max-w-5xl mx-auto selection:bg-indigo-500/20">
-      {/* Back Button */}
-      <Link
-        href="/companies"
-        className="inline-flex items-center gap-2 text-xs font-semibold text-zinc-400 hover:text-white transition-colors"
+    <div data-testid="company-detail-page" className="mx-auto max-w-4xl space-y-4 w-full min-w-0">
+      {/* Back button */}
+      <button
+        data-testid="back-to-pipeline-btn"
+        onClick={() => router.back()}
+        className="flex items-center gap-2 text-xs font-semibold text-zinc-500 transition-colors hover:text-zinc-200 cursor-pointer"
       >
-        <ArrowLeft className="w-4 h-4 text-zinc-500" />
-        Back to Placement Drives
-      </Link>
+        <ArrowLeft className="h-4 w-4" /> Back to pipeline
+      </button>
 
       {/* Header Card */}
-      <div className="p-6 sm:p-7 bg-[#101018]/90 backdrop-blur-2xl border border-zinc-800/80 rounded-3xl relative z-20 shadow-2xl shadow-black/30 space-y-6">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-          <div className="flex items-center gap-4">
-            <div className="w-14 h-14 rounded-2xl bg-gradient-to-tr from-indigo-600/20 to-violet-600/20 border border-indigo-500/30 flex items-center justify-center font-extrabold text-indigo-400 text-2xl shadow-lg shadow-indigo-500/10">
-              {company.name.charAt(0).toUpperCase()}
+      <motion.div
+        initial={{ opacity: 0, y: 16 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.45 }}
+        className="rounded-2xl border border-zinc-800 bg-[#101014] p-6"
+      >
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div className="flex items-start gap-4">
+            <div className={`flex h-14 w-14 items-center justify-center rounded-xl border font-display text-lg font-bold ${hue}`}>
+              {initials}
             </div>
             <div>
-              <div className="flex items-center gap-2.5 flex-wrap">
-                <h1 className="text-2xl sm:text-3xl font-extrabold text-white tracking-tight">{company.name}</h1>
-                {company.application?.category && (
-                  <span className="px-3 py-1 rounded-full text-xs font-bold tracking-wide bg-indigo-500/15 text-indigo-300 border border-indigo-500/30 shadow-sm">
-                    {company.application.category}
-                  </span>
-                )}
+              <h1 className="font-display text-2xl font-extrabold tracking-tight text-white">{company.name}</h1>
+              <div className="mt-1.5 flex flex-wrap items-center gap-2.5">
+                <span className="text-sm text-zinc-300 font-medium">{displayRole}</span>
+                <CategoryBadge category={category} />
               </div>
-              <p className="text-xs sm:text-sm text-zinc-300 mt-1.5 font-medium flex items-center gap-2 flex-wrap">
-                {company.application?.role ? (
-                  <span>Role: <span className="text-white font-semibold">{company.application.role}</span></span>
-                ) : (
-                  <span className="text-zinc-400">Campus Placement Drive</span>
-                )}
-                {company.legalName && <span className="text-zinc-500">· {company.legalName}</span>}
-              </p>
             </div>
           </div>
 
-          {/* Actions on the right: Status Override + Delete */}
-          <div className="flex items-center gap-2.5 self-start sm:self-center">
-            {/* Status Override Selector */}
+          <div className="flex items-center gap-2.5">
+            {/* Status override dropdown — single unified pill with cursor-pointer */}
             <div className="relative">
-              <button
-                onClick={() => setShowStatusMenu(!showStatusMenu)}
-                disabled={isUpdating}
-                className="flex items-center gap-3 px-4 py-2.5 bg-zinc-900/90 border border-zinc-800 hover:border-indigo-500/40 rounded-2xl text-xs font-semibold transition-all shadow-md active:scale-95"
-              >
-                <StatusBadge status={status} events={company.events} />
-                <ChevronDown className="w-3.5 h-3.5 text-zinc-500" />
-              </button>
+              {(() => {
+                const normStatus = (status || 'not_applied').toLowerCase();
+                const m = STATUS_META[normStatus] || STATUS_META.not_applied;
+                return (
+                  <button
+                    onClick={() => setShowStatusMenu(!showStatusMenu)}
+                    disabled={isUpdating}
+                    className={cn(
+                      'inline-flex items-center gap-2 rounded-full border px-3.5 py-1.5 text-xs font-semibold transition-all cursor-pointer select-none hover:brightness-110 active:scale-95',
+                      m.cls
+                    )}
+                    title="Click to manually update hiring status"
+                  >
+                    <span className={cn('h-2 w-2 rounded-full shrink-0', m.dot, m.isPulse ? 'pulse-dot' : '')} />
+                    <span>{m.label}</span>
+                    <ChevronDown className="h-3.5 w-3.5 opacity-60 transition-transform" />
+                  </button>
+                );
+              })()}
 
               {showStatusMenu && (
                 <>
                   <div
-                    className="fixed inset-0 z-40"
+                    className="fixed inset-0 z-40 cursor-default"
                     onClick={() => setShowStatusMenu(false)}
                   />
-                  <div
-                    className="absolute right-0 top-full mt-2 w-60 p-1.5 bg-[#12121c]/95 backdrop-blur-2xl border border-zinc-800 rounded-2xl shadow-2xl z-50 animate-fade-in max-h-[min(24rem,80vh)] overflow-y-auto divide-y divide-zinc-800/60"
-                  >
-                    <div className="px-3 py-2 text-[10px] font-bold text-zinc-500 uppercase tracking-wider">
-                      Manual Status Override
+                  <div className="absolute right-0 top-full mt-2 w-52 p-1.5 bg-[#12121c] border border-zinc-800 rounded-xl shadow-2xl z-50 animate-fade-in divide-y divide-zinc-800/60 max-h-72 overflow-y-auto">
+                    <div className="px-3 py-1.5 text-[10px] font-bold text-zinc-500 uppercase tracking-wider">
+                      Override Status
                     </div>
                     <div className="space-y-0.5 pt-1">
                       {ALL_STATUSES.map((s) => (
@@ -213,14 +397,14 @@ export default function CompanyDetailClient({ company }: CompanyDetailClientProp
                           key={s.value}
                           onClick={() => handleStatusChange(s.value)}
                           className={cn(
-                            'flex items-center justify-between w-full px-3 py-2 text-xs font-semibold rounded-xl transition-all text-left',
+                            'flex items-center justify-between w-full px-3 py-2 text-xs rounded-lg transition-colors text-left cursor-pointer',
                             status === s.value
-                              ? 'bg-indigo-500/15 text-indigo-300 font-bold'
-                              : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/50'
+                              ? 'bg-emerald-500/10 text-emerald-400 font-bold'
+                              : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/60'
                           )}
                         >
                           <span>{s.label}</span>
-                          {status === s.value && <CheckCircle2 className="w-3.5 h-3.5 text-indigo-400" />}
+                          {status === s.value && <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />}
                         </button>
                       ))}
                     </div>
@@ -229,7 +413,7 @@ export default function CompanyDetailClient({ company }: CompanyDetailClientProp
               )}
             </div>
 
-            {/* Delete Company */}
+            {/* Delete button */}
             <button
               onClick={async () => {
                 if (!confirm(`Delete "${company.name}" and all its events, status, and linked data? This cannot be undone.`)) return;
@@ -241,300 +425,272 @@ export default function CompanyDetailClient({ company }: CompanyDetailClientProp
                   } else {
                     alert('Failed to delete company');
                   }
-                } catch { alert('Failed to delete company'); }
-                finally { setIsDeleting(false); }
+                } catch {
+                  alert('Failed to delete company');
+                } finally {
+                  setIsDeleting(false);
+                }
               }}
               disabled={isDeleting}
-              className="p-2.5 rounded-2xl bg-zinc-900/80 border border-zinc-800/80 text-zinc-500 hover:text-red-400 hover:border-red-500/30 hover:bg-red-500/10 transition-all shadow-md active:scale-95"
+              className="p-2 rounded-lg border border-zinc-800 bg-zinc-900/60 text-zinc-500 hover:text-rose-400 hover:border-rose-500/30 transition-colors cursor-pointer"
               title="Delete company"
-              aria-label="Delete company"
             >
-              <Trash2 className="w-4 h-4" />
+              <Trash2 className="h-4 w-4" />
             </button>
           </div>
         </div>
 
-        {/* Quick Metadata Bar */}
-        {(() => {
-          const notesStr = (company.application?.notes || '').toLowerCase();
-          const driveModeDisplay =
-            notesStr.includes('vellore')
-              ? '✈️ VIT Vellore'
-              : notesStr.includes('chennai')
-              ? '✈️ VIT Chennai'
-              : notesStr.includes('bhopal_lab')
-              ? '🏫 Bhopal Labs'
-              : notesStr.includes('online')
-              ? '💻 Online'
-              : 'To be announced';
-
-          // Helper to sanitize location string to pure city/state/country
-          const rawLocation = company.application?.location;
-          let cleanedLoc = rawLocation ? rawLocation.replace(/<[^>]+>/g, ' ').replace(/^[*,\.\s>\-]+/, '').replace(/[*,\.\s>\-]+$/, '').trim() : null;
-          if (cleanedLoc) {
-            cleanedLoc = cleanedLoc.replace(/\s*(?:All\s+the|All\s+interested|Placement\s+Office|On\s+(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)|Students\s+with|Registered\s+students|Registration|Note|Eligibility|Skills|Service|Work\s+Mode|Joining|Economy|Round\s+Trip|Depending\s+on|Below\s+attachment|Job\s+Description|JD|You\s+can|Write\s+from|Forwarded|Queries|LC\s*\d|PRP|SJT|Anna|Lab|Hall|Venue|---).*$/i, '');
-            cleanedLoc = cleanedLoc.replace(/\b(?:internship|placement|drive|hiring|offer|job|role|any\s+honeywell\s+site)\b/gi, '');
-            cleanedLoc = cleanedLoc.replace(/^\s*(?:\(Core\):?|Core\):?)\s*/i, '');
-            cleanedLoc = cleanedLoc.replace(/[\.\,\:\-\(\)\–—]+$/, '').replace(/^[\.\,\:\-\(\)\–—]+/, '').replace(/\s+/g, ' ').trim();
-            cleanedLoc = cleanedLoc.replace(/\s*,\s*/g, ', ').replace(/\s+and\s+/gi, ', ').replace(/,([^\s])/g, ', $1');
-            if (
-              !cleanedLoc ||
-              cleanedLoc.length < 2 ||
-              /\byou\b|\bwe\b|\bi\b|\bcan\b|\bwrite\b|\bwant\b|\bfrom\s+(?:lc|sjt|prp|lab|home|hostel)\b|\bqueries\b|---|forwarded|own\s+location|\b(?:lc|sjt|prp|tt|mb|cb|smv)\s*\d+\b|please find|mail with|nonsense|come at|assistance|applicable|candidate|round\s+\d+|results|service agreement|forwarded message|candidates list|as per business|interested students|shortlisted stu|economy class|round\s+trip|placement office|online|^[>,\.\*\s]+$/i.test(cleanedLoc) ||
-              /^(?:vit\s+)?(?:vellore|chennai|bhopal(?:\s+labs)?)$/i.test(cleanedLoc.trim())
-            ) {
-              cleanedLoc = null;
-            }
-          }
-
-          const workLocationDisplay = cleanedLoc || 'Not specified';
-          const locationItems = cleanedLoc ? parseAssignedLocations(cleanedLoc) : [];
-          const isMultiLocation = locationItems.length > 1;
-
-          return (
-            <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 pt-2">
-              <div className="p-3.5 bg-zinc-950/60 rounded-2xl border border-zinc-800/80">
-                <span className="text-[10px] text-zinc-500 font-bold uppercase tracking-wider block">CTC / Package</span>
-                <span className="text-sm font-extrabold text-emerald-400 mt-1 block truncate">
-                  {company.application?.ctc ? company.application.ctc.replace(/\*/g, '').trim() : 'Not specified'}
-                </span>
-              </div>
-
-              <div className="p-3.5 bg-zinc-950/60 rounded-2xl border border-zinc-800/80">
-                <span className="text-[10px] text-zinc-500 font-bold uppercase tracking-wider block">Stipend</span>
-                <span className={cn('text-sm mt-1 block truncate', company.application?.stipend ? 'font-extrabold text-emerald-400' : 'font-bold text-zinc-500')}>
-                  {company.application?.stipend ? company.application.stipend.replace(/\*/g, '').trim() : 'Not specified'}
-                </span>
-              </div>
-
-              <div className="p-3.5 bg-zinc-950/60 rounded-2xl border border-zinc-800/80">
-                <span className="text-[10px] text-zinc-500 font-bold uppercase tracking-wider block">Drive Mode / Travel</span>
-                <span
-                  className={cn(
-                    'text-sm font-bold mt-1 block truncate',
-                    driveModeDisplay.includes('Vellore')
-                      ? 'text-amber-300 font-extrabold'
-                      : driveModeDisplay.includes('Chennai')
-                      ? 'text-orange-300 font-extrabold'
-                      : driveModeDisplay.includes('Bhopal')
-                      ? 'text-indigo-300'
-                      : driveModeDisplay.includes('Online')
-                      ? 'text-emerald-300'
-                      : 'text-zinc-400'
-                  )}
-                >
-                  {driveModeDisplay}
-                </span>
-              </div>
-
-              <div
-                className={cn(
-                  'p-3.5 bg-zinc-950/60 rounded-2xl border border-zinc-800/80 relative transition-all',
-                  isMultiLocation || (cleanedLoc && workLocationDisplay.length > 18)
-                    ? 'group hover:border-indigo-500/40 hover:bg-zinc-900/60 cursor-pointer'
-                    : ''
-                )}
-                title={cleanedLoc ? workLocationDisplay : undefined}
-              >
-                <div className="flex items-center justify-between">
-                  <span className="text-[10px] text-zinc-500 font-bold uppercase tracking-wider block">
-                    Work Location
-                  </span>
-                  {isMultiLocation && (
-                    <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-indigo-500/15 text-indigo-400 border border-indigo-500/20">
-                      +{locationItems.length - 1}
-                    </span>
-                  )}
-                </div>
-                <span className={cn('text-sm mt-1 block truncate', cleanedLoc ? 'font-bold text-zinc-200' : 'font-bold text-zinc-500')}>
-                  {workLocationDisplay}
-                </span>
-
-                {/* Floating Tooltip with full locations pill list on hover */}
-                {cleanedLoc && (isMultiLocation || workLocationDisplay.length > 18) && (
-                  <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-max max-w-[280px] p-3 rounded-2xl bg-[#12121e]/95 backdrop-blur-2xl border border-indigo-500/30 shadow-2xl shadow-black/90 pointer-events-none opacity-0 group-hover:opacity-100 group-hover:pointer-events-auto transition-all duration-200 z-50 translate-y-1 group-hover:translate-y-0">
-                    <div className="flex items-center gap-1.5 text-[11px] font-bold text-indigo-300 mb-2">
-                      <MapPin className="w-3.5 h-3.5 text-indigo-400 shrink-0" />
-                      <span>Assigned Locations ({locationItems.length})</span>
-                    </div>
-                    <div className="flex flex-wrap gap-1.5">
-                      {locationItems.map((loc, idx) => (
-                        <span
-                          key={idx}
-                          className="px-2 py-0.5 rounded-lg bg-indigo-500/15 border border-indigo-500/25 text-zinc-200 text-xs font-semibold"
-                        >
-                          {loc}
-                        </span>
-                      ))}
-                    </div>
-                    {/* Tooltip caret */}
-                    <div className="absolute top-full left-1/2 -translate-x-1/2 -mt-px border-4 border-transparent border-t-indigo-500/30 w-0 h-0" />
-                  </div>
-                )}
-              </div>
-
-              <div className="p-3.5 bg-zinc-950/60 rounded-2xl border border-zinc-800/80 col-span-2 sm:col-span-1">
-                <span className="text-[10px] text-zinc-500 font-bold uppercase tracking-wider block">Synced Circulars</span>
-                <span className="text-sm font-bold text-indigo-400 mt-1 block font-mono">
-                  {company.emails.length} emails linked
-                </span>
-              </div>
+        {/* 4 Info Cards (CTC, Stipend, Drive Mode, Work Location) */}
+        <div className="mt-6 grid grid-cols-2 gap-3 sm:grid-cols-4">
+          <div data-testid="ctc-total" className="rounded-lg border border-zinc-800 bg-zinc-900/50 px-3.5 py-3">
+            <div className="font-mono text-[9px] uppercase tracking-widest text-zinc-500">Total CTC</div>
+            <div className="font-tabular mt-1 font-display text-lg font-bold text-emerald-300 truncate" title={cleanCtc}>
+              {cleanCtc}
             </div>
-          );
-        })()}
-      </div>
-
-      {/* Hiring Process Pipeline Stepper */}
-      <div className="p-6 bg-[#101018]/90 backdrop-blur-2xl border border-zinc-800/80 rounded-3xl shadow-xl shadow-black/20 space-y-4">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-zinc-800/60 pb-3">
-          <div>
-            <h3 className="text-xs font-bold text-zinc-300 uppercase tracking-wider flex items-center gap-2">
-              <Sparkles className="w-3.5 h-3.5 text-indigo-400" />
-              Hiring Pipeline
-            </h3>
-            <p className="text-[11px] text-zinc-500 mt-0.5">
-              Auto-tracked from your CDC emails. Use the status badge above to manually correct if needed.
-            </p>
           </div>
 
-          {company.application?.manualOverride && (
-            <div className="flex items-center gap-2 self-start sm:self-center">
-              <span className="text-[10px] font-bold text-amber-400 bg-amber-500/10 border border-amber-500/20 px-2.5 py-1 rounded-xl">
-                ✏️ Manual Override
-              </span>
+          <div data-testid="ctc-stipend" className="rounded-lg border border-zinc-800 bg-zinc-900/50 px-3.5 py-3">
+            <div className="font-mono text-[9px] uppercase tracking-widest text-zinc-500">Stipend</div>
+            <div className="font-tabular mt-1 font-display text-lg font-bold text-zinc-200 truncate" title={cleanStipend || 'TBA'}>
+              {cleanStipend || (cleanCtc !== 'TBA' ? 'Included in CTC' : 'TBA')}
             </div>
-          )}
+          </div>
+
+          <div data-testid="ctc-drive-mode" className="rounded-lg border border-zinc-800 bg-zinc-900/50 px-3.5 py-3">
+            <div className="font-mono text-[9px] uppercase tracking-widest text-zinc-500">Drive Mode</div>
+            <div
+              className={cn(
+                'font-tabular mt-1 font-display text-lg font-bold truncate',
+                driveModeDisplay.includes('Vellore')
+                  ? 'text-amber-300'
+                  : driveModeDisplay.includes('Chennai')
+                  ? 'text-orange-300'
+                  : driveModeDisplay.includes('Online')
+                  ? 'text-cyan-300'
+                  : 'text-zinc-200'
+              )}
+              title={driveModeDisplay}
+            >
+              {driveModeDisplay}
+            </div>
+          </div>
+
+          <div data-testid="ctc-location" className="rounded-lg border border-zinc-800 bg-zinc-900/50 px-3.5 py-3">
+            <div className="font-mono text-[9px] uppercase tracking-widest text-zinc-500">Work Location</div>
+            <div className="font-tabular mt-1 font-display text-lg font-bold text-zinc-200 truncate" title={displayLocation}>
+              {displayLocation}
+            </div>
+          </div>
         </div>
 
-        {/* Auto-tracked Stepper Bar */}
-        <StageProgressBar
-          status={status}
-          events={company.events}
-          interactive={false}
-          className="py-1"
-        />
-      </div>
+        {/* Eligibility Pills */}
+        <div className="mt-4 flex flex-wrap gap-2">
+          {eligibilityList.map((e) => (
+            <span
+              key={e}
+              className="rounded-md border border-zinc-800 bg-zinc-900/60 px-2.5 py-1 font-mono text-[10px] text-zinc-400"
+            >
+              {e}
+            </span>
+          ))}
+        </div>
 
-      {/* Tabs Header */}
-      <div className="flex items-center gap-6 border-b border-zinc-800/80 px-2">
-        <button
-          onClick={() => setActiveTab('timeline')}
-          className={cn(
-            'pb-3 text-xs sm:text-sm font-bold transition-all border-b-2 -mb-px flex items-center gap-2',
-            activeTab === 'timeline'
-              ? 'border-indigo-500 text-indigo-400'
-              : 'border-transparent text-zinc-500 hover:text-zinc-300'
-          )}
-        >
-          <Calendar className="w-4 h-4" />
-          Placement Timeline & Events ({visibleEvents.length})
-        </button>
-
-        <button
-          onClick={() => setActiveTab('emails')}
-          className={cn(
-            'pb-3 text-xs sm:text-sm font-bold transition-all border-b-2 -mb-px flex items-center gap-2',
-            activeTab === 'emails'
-              ? 'border-indigo-500 text-indigo-400'
-              : 'border-transparent text-zinc-500 hover:text-zinc-300'
-          )}
-        >
-          <Mail className="w-4 h-4" />
-          Synced CDC Emails ({company.emails.length})
-        </button>
-      </div>
-
-      {/* Tab Content: Timeline */}
-      {activeTab === 'timeline' && (
-        <div className="space-y-4">
-          {visibleEvents.length === 0 && company.emails.length === 0 ? (
-            <div className="p-12 text-center bg-[#101018]/90 border border-zinc-800/80 rounded-3xl">
-              <Calendar className="w-10 h-10 text-zinc-600 mx-auto mb-2" />
-              <p className="text-sm text-zinc-300 font-semibold">No timeline events detected yet</p>
-              <p className="text-xs text-zinc-500 mt-1 max-w-sm mx-auto">
-                Any upcoming test links, PPT schedules, and interview invitations will be extracted automatically.
-              </p>
+        {/* Venue / Instructions Banner */}
+        {nextUpcomingEvent && (
+          <div
+            data-testid="venue-banner"
+            className="mt-4 flex items-start gap-3 rounded-lg border border-amber-500/25 bg-amber-500/[0.06] px-4 py-3 text-xs text-amber-200/90"
+          >
+            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-400" />
+            <div>
+              <span className="font-semibold">{nextUpcomingEvent.title || 'Assessment Instructions'}:</span>{' '}
+              {new Date(nextUpcomingEvent.startTime!).toLocaleString('en-US', {
+                month: 'short',
+                day: 'numeric',
+                hour: 'numeric',
+                minute: '2-digit',
+              })}
+              {nextUpcomingEvent.venue && ` · Venue: ${nextUpcomingEvent.venue}`}
+              {nextUpcomingEvent.mode && ` (${nextUpcomingEvent.mode})`}
             </div>
-          ) : (
-            <div className="relative pl-6 border-l-2 border-zinc-800 space-y-6 ml-3 py-2">
-              {visibleEvents.map((evt) => (
-                <div key={evt.id} className="relative group">
-                  {/* Timeline dot */}
-                  <div className="absolute -left-[31px] top-1.5 w-4 h-4 rounded-full bg-indigo-500 border-4 border-[#0a0a10] ring-2 ring-indigo-500/30" />
+          </div>
+        )}
 
-                  <div className="p-4 bg-[#101018]/90 border border-zinc-800/80 rounded-2xl hover:border-indigo-500/30 transition-all shadow-md">
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="text-[11px] font-bold uppercase tracking-wider text-indigo-400">
-                        {evt.eventType.replace('_', ' ')}
-                      </span>
-                      {evt.startTime && (
-                        <span className="text-xs text-zinc-500 font-mono">
-                          {new Date(evt.startTime).toLocaleDateString('en-IN', {
-                            day: 'numeric',
-                            month: 'short',
-                            year: 'numeric',
-                            hour: '2-digit',
-                            minute: '2-digit',
-                          })}
-                        </span>
+        {/* Terminal state banner */}
+        {terminal && (
+          <div
+            data-testid="terminal-banner"
+            className="mt-4 rounded-lg border border-zinc-700 bg-zinc-900 px-4 py-3 text-xs text-zinc-400"
+          >
+            {status === 'rejected' || status === 'not_shortlisted'
+              ? "Your ID wasn't in the final selection sheet. This drive is archived — the radar stays on the next ones."
+              : 'You opted out or withdrew from this drive. Archived from the active pipeline.'}
+          </div>
+        )}
+      </motion.div>
+
+      {/* Recruitment Stage Stepper */}
+      {!terminal && (
+        <motion.div
+          initial={{ opacity: 0, y: 16 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.45, delay: 0.1 }}
+          className="rounded-2xl border border-zinc-800 bg-[#101014] p-6"
+        >
+          <div className="mb-5 flex items-center justify-between">
+            <h2 className="font-mono text-[10px] uppercase tracking-widest text-zinc-500">Recruitment Stage</h2>
+            <span className="font-mono text-[10px] text-zinc-500">
+              Stage {Math.max(stage, 0) + 1} of 5
+            </span>
+          </div>
+          <Stepper stage={stage} status={status} />
+        </motion.div>
+      )}
+
+      {/* Circular & Email Timeline */}
+      <motion.div
+        initial={{ opacity: 0, y: 16 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.45, delay: 0.2 }}
+        className="rounded-2xl border border-zinc-800 bg-[#101014] p-4 sm:p-6 w-full min-w-0 overflow-hidden"
+      >
+        <div className="mb-5 flex items-center justify-between">
+          <h2 className="font-mono text-[10px] uppercase tracking-widest text-zinc-500">
+            Circular & Email Timeline
+          </h2>
+          <span className="font-mono text-[10px] text-zinc-600">
+            {company.emails.length} events
+          </span>
+        </div>
+
+        {company.emails.length === 0 ? (
+          <div className="py-8 text-center text-xs text-zinc-500 font-mono">
+            No emails or circulars linked to this company yet.
+          </div>
+        ) : (
+          <div className="relative space-y-2.5 before:absolute before:bottom-2 before:left-[15px] before:top-2 before:w-px before:bg-zinc-800 w-full min-w-0">
+            {company.emails.map((email, idx) => {
+              const isShortlist = email.classification === 'shortlist' || email.subject.toLowerCase().includes('shortlist');
+              const isTest = email.classification === 'test' || email.subject.toLowerCase().includes('test') || email.subject.toLowerCase().includes('assessment');
+              const isInterview = email.classification === 'interview' || email.subject.toLowerCase().includes('interview');
+              const isOffer = email.classification === 'selected' || email.subject.toLowerCase().includes('offer') || email.subject.toLowerCase().includes('congratulations');
+
+              const Icon = isOffer ? FileSpreadsheet : isInterview ? CalendarPlus : isTest ? AlertTriangle : isShortlist ? FileSpreadsheet : Mail;
+              const iconCls = isOffer
+                ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300'
+                : isInterview
+                ? 'border-cyan-500/40 bg-cyan-500/10 text-cyan-300'
+                : isTest
+                ? 'border-amber-500/40 bg-amber-500/10 text-amber-300'
+                : isShortlist
+                ? 'border-violet-500/40 bg-violet-500/10 text-violet-300'
+                : 'border-sky-500/30 bg-sky-500/10 text-sky-300';
+
+              const isOpen = openAccordion === idx;
+              const isPersonal = email.sender.includes('noreply.cdcinfo');
+              const matchedCandidate = company.candidateMatches.find((cm) => cm.emailId === email.id) || (isShortlist && company.candidateMatches.length > 0 ? company.candidateMatches[0] : null);
+
+              return (
+                <div key={email.id} data-testid={`timeline-item-${idx}`} className="relative flex items-start gap-3 sm:gap-4 w-full min-w-0">
+                  <div className={`z-10 mt-1 flex h-8 w-8 shrink-0 items-center justify-center rounded-full border ${iconCls}`}>
+                    <Icon className="h-3.5 w-3.5 shrink-0" />
+                  </div>
+
+                  <div className="mb-1 flex-1 min-w-0 rounded-xl border border-zinc-800/80 bg-zinc-900/40 transition-colors overflow-hidden">
+                    <button
+                      data-testid={`timeline-toggle-${idx}`}
+                      onClick={() => setOpenAccordion(isOpen ? null : idx)}
+                      className="flex w-full items-center justify-between gap-3 px-3.5 sm:px-4 py-3 text-left min-w-0 hover:bg-zinc-900/60 transition-colors cursor-pointer"
+                    >
+                      <div className="flex-1 min-w-0 overflow-hidden">
+                        <div className="truncate text-sm font-semibold text-zinc-200" title={email.subject}>
+                          {email.subject}
+                        </div>
+                        <div className="mt-0.5 flex items-center gap-2 font-mono text-[10px] text-zinc-500">
+                          <span>{timeAgo(email.receivedAt)}</span>
+                          <span>·</span>
+                          <span>{isPersonal ? 'personal gmail' : 'college gmail'}</span>
+                        </div>
+                      </div>
+                      <ChevronDown
+                        className={`h-4 w-4 shrink-0 text-zinc-600 transition-transform duration-200 ${
+                          isOpen ? 'rotate-180' : ''
+                        }`}
+                      />
+                    </button>
+
+                    <AnimatePresence>
+                      {isOpen && (
+                        <motion.div
+                          initial={{ height: 0, opacity: 0 }}
+                          animate={{ height: 'auto', opacity: 1 }}
+                          exit={{ height: 0, opacity: 0 }}
+                          transition={{ duration: 0.2 }}
+                          className="overflow-hidden"
+                        >
+                          <div className="border-t border-zinc-800/80 px-4 py-3">
+                            {/* Short, clean 1-2 line summary just like the reference designs */}
+                            <p className="text-xs leading-relaxed text-zinc-300">
+                              {getCleanEmailSummary(email.snippet, email.subject, email.classification, company.name)}
+                            </p>
+
+                            {/* Candidate Match Evidence if found */}
+                            {matchedCandidate && isShortlist && (
+                              <div
+                                data-testid={`excel-evidence-${idx}`}
+                                className="mt-3 overflow-hidden rounded-lg border border-violet-500/25"
+                              >
+                                <div className="flex items-center justify-between border-b border-zinc-800 bg-violet-500/[0.07] px-3 py-2">
+                                  <span className="flex items-center gap-2 font-mono text-[10px] text-violet-300">
+                                    <FileSpreadsheet className="h-3 w-3" /> {email.attachmentName || `${company.name.replace(/\s+/g, '_')}_Shortlist.xlsx`}
+                                  </span>
+                                  <span className="font-mono text-[9px] text-zinc-500">
+                                    shortlist verified
+                                  </span>
+                                </div>
+                                <div className="grid grid-cols-4 gap-px bg-zinc-800/70 font-mono text-[10px]">
+                                  <div className="bg-[#0b0d11] px-3 py-2 text-violet-300 truncate font-semibold">
+                                    {matchedCandidate.matchedValue || company.candidateRegId || 'Candidate ID'}
+                                  </div>
+                                  <div className="bg-[#0b0d11] px-3 py-2 text-zinc-300 truncate">
+                                    {company.candidateName || 'Candidate Verified'}
+                                  </div>
+                                  <div className="bg-[#0b0d11] px-3 py-2 text-zinc-400 truncate">
+                                    {matchedCandidate.matchLocation || 'row verified'}
+                                  </div>
+                                  <div className="bg-[#0b0d11] px-3 py-2 font-bold text-emerald-300 whitespace-nowrap">
+                                    MATCH ✓
+                                  </div>
+                                </div>
+                              </div>
+                            )}
+
+                            {/* Action links row: Direct link to original Gmail thread */}
+                            <div className="mt-3 flex items-center justify-between pt-1">
+                              <a
+                                href={getGmailLink(email)}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                data-testid={`open-email-${idx}`}
+                                className="inline-flex items-center gap-1.5 text-[11px] font-semibold text-emerald-400 hover:text-emerald-300 transition-colors"
+                              >
+                                Open original email <ExternalLink className="h-3 w-3" />
+                              </a>
+                              <span className="font-mono text-[10px] text-zinc-600 truncate max-w-[200px]">
+                                {email.sender}
+                              </span>
+                            </div>
+                          </div>
+                        </motion.div>
                       )}
-                    </div>
-
-                    <h4 className="font-bold text-white text-sm mt-1">
-                      {evt.title || evt.eventType}
-                    </h4>
-
-                    {evt.venue && (
-                      <p className="text-xs text-zinc-400 mt-1.5 flex items-center gap-1.5">
-                        <MapPin className="w-3.5 h-3.5 text-zinc-500" />
-                        {evt.venue}
-                      </p>
-                    )}
+                    </AnimatePresence>
                   </div>
                 </div>
-              ))}
-
-              {/* Show Emails as Timeline fallback if no events */}
-              {company.events.length === 0 &&
-                company.emails.map((em) => (
-                  <div key={em.id} className="relative group">
-                    <div className="absolute -left-[31px] top-1.5 w-4 h-4 rounded-full bg-zinc-700 border-4 border-[#0a0a10]" />
-                    <div className="p-4 bg-[#101018]/90 border border-zinc-800/80 rounded-2xl">
-                      <span className="text-[11px] font-mono text-zinc-500">
-                        {new Date(em.receivedAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}
-                      </span>
-                      <h4 className="font-semibold text-white text-sm mt-0.5">{em.subject}</h4>
-                      <p className="text-xs text-zinc-400 mt-1 line-clamp-2">{em.snippet}</p>
-                    </div>
-                  </div>
-                ))}
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* Tab Content: Emails */}
-      {activeTab === 'emails' && (
-        <div className="space-y-3">
-          {company.emails.length === 0 ? (
-            <div className="p-12 text-center bg-[#101018]/90 border border-zinc-800/80 rounded-3xl">
-              <Mail className="w-10 h-10 text-zinc-600 mx-auto mb-2" />
-              <p className="text-sm text-zinc-300 font-semibold">No emails linked to this company</p>
-            </div>
-          ) : (
-            company.emails.map((em) => (
-              <div key={em.id} className="p-4 bg-[#101018]/90 border border-zinc-800/80 rounded-2xl hover:border-indigo-500/30 transition-all">
-                <div className="flex items-center justify-between gap-2 mb-1.5">
-                  <span className="text-xs font-semibold text-indigo-400 truncate">{em.sender}</span>
-                  <span className="text-[11px] text-zinc-500 font-mono flex-shrink-0">{timeAgo(em.receivedAt)}</span>
-                </div>
-                <h4 className="text-sm font-bold text-white">{em.subject}</h4>
-                <p className="text-xs text-zinc-400 mt-1.5 line-clamp-3 leading-relaxed">{em.snippet}</p>
-              </div>
-            ))
-          )}
-        </div>
-      )}
+              );
+            })}
+          </div>
+        )}
+      </motion.div>
     </div>
   );
 }

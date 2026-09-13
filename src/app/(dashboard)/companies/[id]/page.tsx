@@ -20,7 +20,7 @@ export async function generateMetadata({
   const name = company?.name || 'Company Details';
   return {
     title: name,
-    description: `Detailed recruitment drive history, schedule, test rounds, and email updates for ${name} on NeoTrack.`,
+    description: `Detailed recruitment drive history, schedule, test rounds, and email updates for ${name} on Where's My Offer.`,
     alternates: {
       canonical: `/companies/${id}`,
     },
@@ -36,13 +36,16 @@ export default async function CompanyDetailPage({
   const { id: companyId } = await params;
   const supabase = createAdminClient();
 
-  // Fetch company, application, events, emails, candidate matches
+  // Fetch company, application, events, emails, candidate matches, user info, accounts, and attachments
   const [
     { data: company },
     { data: application },
     { data: events },
     { data: emails },
     { data: candidateMatches },
+    { data: userProfile },
+    { data: gmailAccounts },
+    { data: attachments },
   ] = await Promise.all([
     supabase
       .from('companies')
@@ -67,20 +70,50 @@ export default async function CompanyDetailPage({
 
     supabase
       .from('emails')
-      .select('id, subject, sender, received_at, body_snippet, classification')
+      .select('id, subject, sender, received_at, body_snippet, classification, thread_id, gmail_message_id, gmail_account_id')
       .eq('company_id', companyId)
       .eq('user_id', session.userId)
       .order('received_at', { ascending: false }),
 
     supabase
       .from('candidate_matches')
-      .select('id, match_type, matched_value, created_at, email_id')
+      .select('id, match_type, matched_value, match_location, created_at, email_id')
+      .eq('user_id', session.userId),
+
+    supabase
+      .from('users')
+      .select('name, neo_id')
+      .eq('id', session.userId)
+      .maybeSingle(),
+
+    supabase
+      .from('gmail_accounts')
+      .select('id, email, account_type')
+      .eq('user_id', session.userId),
+
+    supabase
+      .from('attachments')
+      .select('id, email_id, filename')
       .eq('user_id', session.userId),
   ]);
 
   if (!company) {
     notFound();
   }
+
+  // Map account id to email address
+  const accountMap = new Map<string, string>();
+  (gmailAccounts || []).forEach((acc) => {
+    accountMap.set(acc.id, acc.email);
+  });
+
+  // Map email id to attachment filename
+  const attachmentMap = new Map<string, string>();
+  (attachments || []).forEach((att) => {
+    if (att.email_id && !attachmentMap.has(att.email_id)) {
+      attachmentMap.set(att.email_id, att.filename);
+    }
+  });
 
   // Filter candidate matches to only those belonging to this company's emails
   const companyEmailIds = new Set((emails || []).map((e) => e.id));
@@ -93,6 +126,8 @@ export default async function CompanyDetailPage({
     name: company.name,
     legalName: company.legal_name,
     aliases: company.aliases,
+    candidateName: userProfile?.name || session.name || 'Student Candidate',
+    candidateRegId: userProfile?.neo_id || '',
     application: application
       ? {
           id: application.id,
@@ -130,16 +165,22 @@ export default async function CompanyDetailPage({
       })),
     emails: (emails || []).map((em) => ({
       id: em.id,
-      subject: em.subject,
-      sender: em.sender,
-      receivedAt: em.received_at,
-      snippet: em.body_snippet,
-      classification: em.classification,
+      subject: em.subject || 'Campus Placement Notice',
+      sender: em.sender || '',
+      receivedAt: em.received_at || new Date().toISOString(),
+      snippet: em.body_snippet || '',
+      classification: em.classification || 'general',
+      threadId: em.thread_id || null,
+      gmailMessageId: em.gmail_message_id || null,
+      accountEmail: em.gmail_account_id ? accountMap.get(em.gmail_account_id) || null : null,
+      attachmentName: attachmentMap.get(em.id) || null,
     })),
     candidateMatches: companyCandidateMatches.map((cm) => ({
       id: cm.id,
+      emailId: (cm as { email_id?: string | null }).email_id || null,
       matchType: cm.match_type,
       matchedValue: cm.matched_value,
+      matchLocation: (cm as { match_location?: string | null }).match_location || null,
       createdAt: cm.created_at,
     })),
   };

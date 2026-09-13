@@ -5,7 +5,7 @@ import SettingsClient from './settings-client';
 
 export const metadata: Metadata = {
   title: 'Settings & Preferences',
-  description: 'Manage connected Gmail accounts, Neo ID matching rules, and notification preferences in NeoTrack.',
+  description: "Manage connected Gmail accounts, Neo ID matching rules, and notification preferences in Where's My Offer.",
 };
 
 export default async function SettingsPage() {

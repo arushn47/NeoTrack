@@ -21,6 +21,7 @@ out/
 .DS_Store
 *.pem
 Thumbs.db
+emergent-design/
 
 # debug
 npm-debug.log*

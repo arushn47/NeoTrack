@@ -1,12 +1,13 @@
 'use client';
 
-import { Bell, RefreshCw, LogOut, CheckCircle, AlertCircle, X, Sparkles, User, Settings, PieChart, Calendar, Search, Building2 } from 'lucide-react';
+import { Bell, RefreshCw, LogOut, CheckCircle, AlertCircle, X, Sparkles, User, Settings, PieChart, Calendar, Search, Building2, Zap, CheckCheck, Radar, Shield, FileText } from 'lucide-react';
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { cn } from '@/lib/utils';
 import { timeAgo } from '@/lib/utils';
 import NotificationBell from '@/components/notifications/notification-bell';
+import { AppLogo } from '@/components/layout/sidebar';
 
 interface TopbarProps {
   userName: string | null;
@@ -316,26 +317,21 @@ export default function Topbar({ userName, userAvatar, lastSyncAt }: TopbarProps
 
   return (
     <>
-      <header className="flex items-center justify-between h-16 px-4 sm:px-6 bg-[#0a0a10]/85 backdrop-blur-2xl border-b border-zinc-800/80 sticky top-0 z-40 selection:bg-indigo-500/20">
+      <header className="flex items-center justify-between h-16 px-4 sm:px-6 bg-[#09090b]/85 backdrop-blur-xl border-b border-zinc-800/80 sticky top-0 z-40">
         {/* Left: Mobile logo (hidden on desktop) */}
         <div className="flex items-center gap-2.5 lg:hidden">
-          <div className="w-8 h-8 rounded-xl bg-gradient-to-tr from-indigo-600 to-violet-500 shadow-md shadow-indigo-500/20 flex items-center justify-center flex-shrink-0">
-            <span className="text-white font-bold text-sm font-mono">N</span>
-          </div>
-          <span className="text-white font-bold text-sm tracking-tight font-mono">
-            Neo<span className="text-indigo-400">Track</span>
-          </span>
+          <AppLogo />
         </div>
 
         {/* Center: Quick Search Trigger */}
         <div className="flex-1 max-w-xs md:max-w-md mx-3 hidden sm:block">
           <Link
             href="/search"
-            className="flex items-center gap-2.5 px-3 py-1.5 rounded-xl bg-zinc-900/70 border border-zinc-800/80 hover:border-indigo-500/30 text-xs text-zinc-400 hover:text-zinc-200 transition-all w-full group"
+            className="flex items-center gap-2.5 px-3.5 py-2 rounded-lg bg-zinc-900/60 border border-zinc-800 hover:border-emerald-500/40 text-xs text-zinc-400 hover:text-zinc-200 transition-all w-full group"
           >
-            <Search className="w-3.5 h-3.5 text-zinc-500 group-hover:text-indigo-400 transition-colors flex-shrink-0" />
-            <span className="truncate">Search drives, tests, shortlists...</span>
-            <kbd className="ml-auto hidden md:inline-flex items-center gap-0.5 text-[10px] font-mono text-zinc-500 bg-zinc-800/80 px-1.5 py-0.5 rounded border border-zinc-700/50">
+            <Search className="w-3.5 h-3.5 text-zinc-500 group-hover:text-emerald-400 transition-colors flex-shrink-0" />
+            <span className="truncate">Search drives, roles, CTCs…</span>
+            <kbd className="ml-auto hidden md:inline-flex items-center gap-0.5 text-[10px] font-mono text-zinc-500 bg-zinc-800 px-1.5 py-0.5 rounded border border-zinc-700">
               ⌘K
             </kbd>
           </Link>
@@ -343,47 +339,33 @@ export default function Topbar({ userName, userAvatar, lastSyncAt }: TopbarProps
 
         {/* Right: Actions */}
         <div className="flex items-center gap-2.5 sm:gap-3">
-          {/* Live Sync Button */}
+          {/* Live Sync Pill */}
           <button
             onClick={() => handleSync(false)}
             disabled={isSyncing}
             className={cn(
-              'flex items-center gap-2 px-3 py-1.5 rounded-xl text-xs font-semibold border transition-all duration-200 disabled:opacity-75',
+              'flex items-center gap-2 rounded-full border px-3 py-1.5 text-[11px] font-mono transition-all duration-200 disabled:opacity-80 select-none cursor-pointer',
               isSyncing
-                ? 'bg-indigo-500/15 border-indigo-500/35 text-indigo-300 shadow-sm shadow-indigo-500/10'
-                : syncResult?.success
-                ? 'bg-emerald-500/15 border-emerald-500/35 text-emerald-300'
-                : 'bg-zinc-900/80 border-zinc-800 hover:border-zinc-700 text-zinc-300 hover:text-white hover:bg-zinc-850'
+                ? 'border-amber-500/40 bg-amber-500/10 text-amber-300 shadow-[0_0_16px_rgba(245,158,11,0.15)]'
+                : 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300 hover:bg-emerald-500/15 hover:border-emerald-500/50'
             )}
-            aria-label="Sync emails"
+            title="Click to sync Gmail inboxes"
+            aria-label="Sync status"
           >
             {isSyncing ? (
               <>
-                <RefreshCw className="w-3.5 h-3.5 animate-spin text-indigo-400" />
-                <span>
-                  Syncing…{' '}
-                  {syncProgress && syncProgress.totalMessages > 0
-                    ? `${syncProgress.processedMessages}/${syncProgress.totalMessages}`
-                    : ''}
+                <Zap className="h-3 w-3 animate-pulse text-amber-400 shrink-0" />
+                <span className="truncate max-w-[200px]">
+                  {syncProgress?.currentPageIndex !== undefined && syncProgress?.totalPagesCount !== undefined
+                    ? `⚡ Page ${(syncProgress.currentPageIndex) + 1} of ${syncProgress.totalPagesCount}`
+                    : 'Syncing…'}
                 </span>
-              </>
-            ) : syncResult?.success ? (
-              <>
-                <CheckCircle className="w-3.5 h-3.5 text-emerald-400" />
-                <span>Synced Just Now</span>
               </>
             ) : (
               <>
-                <div
-                  className={cn(
-                    'w-2 h-2 rounded-full',
-                    mounted && lastSyncAt && Date.now() - new Date(lastSyncAt).getTime() < 3600000
-                      ? 'bg-emerald-400 shadow-sm shadow-emerald-400/50'
-                      : 'bg-amber-400'
-                  )}
-                />
-                <span>
-                  {mounted && lastSyncAt ? `Synced ${timeAgo(lastSyncAt)}` : 'Sync Now'}
+                <CheckCheck className="h-3 w-3 text-emerald-400 shrink-0" />
+                <span className="truncate">
+                  {mounted && lastSyncAt ? `All inboxes caught up (${timeAgo(lastSyncAt)})` : 'Sync inboxes'}
                 </span>
               </>
             )}
@@ -396,21 +378,19 @@ export default function Topbar({ userName, userAvatar, lastSyncAt }: TopbarProps
           <div className="relative" ref={userMenuRef}>
             <button
               onClick={() => setShowUserMenu(!showUserMenu)}
-              className="flex items-center gap-2 p-0.5 rounded-full hover:ring-2 hover:ring-indigo-500/40 transition-all"
+              className="flex items-center gap-2 p-0.5 rounded-full hover:ring-2 hover:ring-emerald-500/40 transition-all cursor-pointer"
               aria-label="User profile menu"
             >
               {userAvatar ? (
                 <img
                   src={userAvatar}
                   alt={userName || 'User'}
-                  className="w-8 h-8 rounded-full border border-zinc-700/80 object-cover"
+                  className="w-8 h-8 rounded-full border border-violet-500/30 object-cover"
                   referrerPolicy="no-referrer"
                 />
               ) : (
-                <div className="w-8 h-8 rounded-full bg-gradient-to-tr from-indigo-600 to-violet-500 p-0.5 flex items-center justify-center">
-                  <div className="w-full h-full bg-[#101018] rounded-full flex items-center justify-center text-indigo-300 font-bold text-xs">
-                    {userName?.charAt(0)?.toUpperCase() || <User className="w-3.5 h-3.5 text-indigo-400" />}
-                  </div>
+                <div className="flex h-8 w-8 items-center justify-center rounded-full border border-violet-500/30 bg-violet-500/15 font-mono text-xs font-bold text-violet-300">
+                  {userName?.split(' ').map((n) => n[0]).slice(0, 2).join('').toUpperCase() || 'ST'}
                 </div>
               )}
             </button>
@@ -446,6 +426,22 @@ export default function Topbar({ userName, userAvatar, lastSyncAt }: TopbarProps
                       <Settings className="w-4 h-4 text-indigo-400 group-hover:rotate-45 transition-transform duration-200" />
                       <span>Settings</span>
                     </Link>
+                    <Link
+                      href="/privacy"
+                      onClick={() => setShowUserMenu(false)}
+                      className="flex items-center gap-2.5 w-full px-3 py-2 text-xs font-semibold text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/60 rounded-xl transition-all"
+                    >
+                      <Shield className="w-4 h-4 text-zinc-500" />
+                      <span>Privacy Policy</span>
+                    </Link>
+                    <Link
+                      href="/terms"
+                      onClick={() => setShowUserMenu(false)}
+                      className="flex items-center gap-2.5 w-full px-3 py-2 text-xs font-semibold text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/60 rounded-xl transition-all"
+                    >
+                      <FileText className="w-4 h-4 text-zinc-500" />
+                      <span>Terms of Service</span>
+                    </Link>
                   </div>
 
                   {/* Sign Out */}
@@ -465,18 +461,20 @@ export default function Topbar({ userName, userAvatar, lastSyncAt }: TopbarProps
         </div>
       </header>
 
-      {/* Sync Progress Bar Banner */}
+      {/* Sync Progress Bar Banner — Modern Emerald Radar Theme */}
       {syncProgress && (
-        <div className="sticky top-16 z-30 bg-[#0e0e18]/95 backdrop-blur-xl border-b border-indigo-500/20 px-4 sm:px-6 py-3 animate-fade-in shadow-lg shadow-black/40">
+        <div className="sticky top-16 z-30 bg-[#09090d]/95 backdrop-blur-xl border-b border-zinc-800/80 px-4 sm:px-6 py-2.5 animate-fade-in shadow-xl shadow-black/50">
           <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
-            <div className="flex items-center gap-2">
-              <RefreshCw className="w-3.5 h-3.5 text-indigo-400 animate-spin flex-shrink-0" />
-              <span className="text-xs font-semibold text-zinc-200">
+            <div className="flex items-center gap-2.5 min-w-0">
+              <div className="flex h-5 w-5 items-center justify-center rounded-full bg-emerald-500/10 border border-emerald-500/30 shrink-0">
+                <RefreshCw className="w-3 h-3 text-emerald-400 animate-spin" />
+              </div>
+              <span className="text-xs font-semibold text-zinc-200 truncate">
                 {syncProgress.phase === 'initializing' && 'Connecting to placement mailboxes...'}
                 {syncProgress.phase === 'fetching' && (
                   <>
                     Scanning messages from{' '}
-                    <span className="text-indigo-300 font-mono text-[11px]">
+                    <span className="text-emerald-300 font-mono text-[11px] font-semibold">
                       {syncProgress.accountEmail || 'Gmail'}
                     </span>
                     ...
@@ -487,7 +485,7 @@ export default function Topbar({ userName, userAvatar, lastSyncAt }: TopbarProps
                     {syncProgress.currentPageIndex === 0 ? (
                       <>
                         Processing recent emails (Page 1 of {syncProgress.totalPagesCount || 1}):{' '}
-                        <span className="text-indigo-300 font-mono">
+                        <span className="text-emerald-400 font-mono font-bold">
                           {syncProgress.processedMessages}
                         </span>{' '}
                         of{' '}
@@ -499,7 +497,7 @@ export default function Topbar({ userName, userAvatar, lastSyncAt }: TopbarProps
                     ) : syncProgress.currentPageIndex !== undefined && syncProgress.totalPagesCount ? (
                       <>
                         Processing archive: page{' '}
-                        <span className="text-indigo-300 font-mono">
+                        <span className="text-emerald-400 font-mono font-bold">
                           {syncProgress.currentPageIndex + 1} of {syncProgress.totalPagesCount}
                         </span>{' '}
                         ({syncProgress.processedMessages}/{syncProgress.totalMessages})
@@ -507,7 +505,7 @@ export default function Topbar({ userName, userAvatar, lastSyncAt }: TopbarProps
                     ) : (
                       <>
                         Processing{' '}
-                        <span className="text-indigo-300 font-mono">
+                        <span className="text-emerald-400 font-mono font-bold">
                           {syncProgress.processedMessages}
                         </span>{' '}
                         of{' '}
@@ -518,7 +516,7 @@ export default function Topbar({ userName, userAvatar, lastSyncAt }: TopbarProps
                       </>
                     )}
                     {syncProgress.remainingMessages !== undefined && syncProgress.remainingMessages > 0 && (
-                      <span className="text-zinc-400 text-[11px] font-mono ml-1">
+                      <span className="text-zinc-500 text-[11px] font-mono ml-1">
                         · {syncProgress.remainingMessages} remaining
                       </span>
                     )}
@@ -529,53 +527,60 @@ export default function Topbar({ userName, userAvatar, lastSyncAt }: TopbarProps
                 {syncProgress.phase === 'error' && 'Sync encountered an error'}
               </span>
             </div>
-            <div className="flex items-center gap-2">
-              <span className="text-xs text-zinc-400 font-mono bg-zinc-900/80 px-2 py-0.5 rounded-md border border-zinc-800">
-                {syncProgress.newEmails} new updates · {syncProgress.newCompanies} companies
-              </span>
+            <div className="flex items-center gap-2 shrink-0">
+              <div className="flex items-center gap-1.5 text-xs text-zinc-400 font-mono bg-zinc-900/90 px-3 py-1 rounded-full border border-zinc-800 shadow-sm">
+                <span className="relative flex h-1.5 w-1.5">
+                  <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-70" />
+                  <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-emerald-400" />
+                </span>
+                <span className="text-zinc-200 font-semibold">{syncProgress.newEmails} updates</span>
+                <span className="text-zinc-600">·</span>
+                <span className="text-zinc-300">{syncProgress.newCompanies} companies</span>
+              </div>
             </div>
           </div>
 
-          {/* Progress bar */}
-          <div className="w-full h-1.5 bg-zinc-900 rounded-full overflow-hidden relative">
+          {/* Progress bar — emerald/teal luminous glow */}
+          <div className="w-full h-1.5 bg-zinc-900/90 border border-zinc-800/60 rounded-full overflow-hidden relative">
             {syncProgress.totalMessages > 0 ? (
               <div
-                className="h-full bg-gradient-to-r from-indigo-500 via-purple-500 to-cyan-400 rounded-full transition-all duration-300 ease-out"
+                className="h-full bg-gradient-to-r from-emerald-500 via-teal-400 to-emerald-300 rounded-full shadow-[0_0_12px_rgba(16,185,129,0.5)] transition-all duration-300 ease-out"
                 style={{ width: `${Math.max(progressPercent, 2)}%` }}
               />
             ) : (
-              <div className="h-full bg-gradient-to-r from-indigo-500 via-purple-500 to-cyan-400 rounded-full animate-pulse w-full" />
+              <div className="h-full bg-gradient-to-r from-emerald-500/40 via-emerald-400 to-teal-300/40 animate-pulse rounded-full w-full" />
             )}
           </div>
 
           {/* Context details: Current email and First-time sync guidance */}
-          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1 mt-1.5">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1.5 mt-2">
             {syncProgress.currentSubject ? (
-              <p className="text-[10px] text-zinc-400 truncate font-mono flex-1">
-                📧 {syncProgress.currentSubject}
+              <p className="text-[11px] text-zinc-400 truncate font-mono flex-1">
+                <span className="text-emerald-400 font-semibold mr-1.5">Indexing:</span>
+                {syncProgress.currentSubject}
               </p>
             ) : (
-              <p className="text-[10px] text-zinc-500 font-mono">
+              <p className="text-[11px] text-zinc-500 font-mono">
                 {syncProgress.phase === 'fetching' ? 'Indexing message headers...' : 'Analyzing emails...'}
               </p>
             )}
 
             {syncProgress.isResuming && syncProgress.alreadyIndexed && syncProgress.alreadyIndexed > 0 ? (
-              <span className="text-[10px] text-emerald-400 font-medium bg-emerald-500/10 border border-emerald-500/25 px-2.5 py-0.5 rounded-full inline-flex items-center gap-1.5 self-start sm:self-auto animate-fade-in">
+              <span className="text-[10px] text-emerald-400 font-medium bg-emerald-500/10 border border-emerald-500/25 px-2.5 py-0.5 rounded-full inline-flex items-center gap-1.5 self-start sm:self-auto animate-fade-in font-mono">
                 <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping" />
-                <span className="font-semibold text-emerald-300">Resumed checkpoint:</span>
-                <span className="text-zinc-300">{syncProgress.alreadyIndexed} emails already saved</span>
-                <span className="text-zinc-400 font-mono">({syncProgress.remainingMessages} remaining)</span>
+                <span className="font-semibold text-emerald-300">Resumed:</span>
+                <span className="text-zinc-300">{syncProgress.alreadyIndexed} indexed</span>
+                <span className="text-zinc-500">({syncProgress.remainingMessages} left)</span>
               </span>
             ) : syncProgress.currentPageIndex === 0 ? (
-              <span className="text-[10px] text-cyan-400/90 font-medium bg-cyan-500/10 border border-cyan-500/20 px-2 py-0.5 rounded-full inline-flex items-center gap-1 self-start sm:self-auto">
-                <span>⚡ Recency-First:</span>
-                <span className="text-zinc-400">Syncing latest circulars & shortlists first. Archive syncs in background.</span>
+              <span className="text-[10px] text-emerald-300 font-medium bg-emerald-500/10 border border-emerald-500/25 px-2.5 py-0.5 rounded-full inline-flex items-center gap-1 self-start sm:self-auto font-mono">
+                <span className="text-emerald-400">⚡ Recency-First:</span>
+                <span className="text-zinc-400">Syncing latest circulars first</span>
               </span>
             ) : syncProgress.isInitialSync ? (
-              <span className="text-[10px] text-amber-400/90 font-medium bg-amber-500/10 border border-amber-500/20 px-2 py-0.5 rounded-full inline-flex items-center gap-1 self-start sm:self-auto">
-                <span>⚡ Archive Sync:</span>
-                <span className="text-zinc-400">Scanning historical circulars in background. You can safely close this tab.</span>
+              <span className="text-[10px] text-teal-300 font-medium bg-teal-500/10 border border-teal-500/25 px-2.5 py-0.5 rounded-full inline-flex items-center gap-1 self-start sm:self-auto font-mono">
+                <span className="text-teal-400">⚡ Archive Sync:</span>
+                <span className="text-zinc-400">Scanning in background</span>
               </span>
             ) : null}
           </div>

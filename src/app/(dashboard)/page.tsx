@@ -1,6 +1,7 @@
 import type { Metadata } from 'next';
 import { requireSession } from '@/lib/auth';
 import { createAdminClient } from '@/lib/supabase/admin';
+import { detectCampus, detectBranch } from '@/lib/utils';
 import DashboardClient from './dashboard-client';
 
 export const metadata: Metadata = {
@@ -162,22 +163,30 @@ export default async function DashboardPage() {
     }
   }
 
-  // Only pass top 6 to DashboardClient to avoid UI clutter
-  const topUpcomingEvents = uniqueUpcomingEvents.slice(0, 6);
+  const companyNameMap = new Map<string, string>();
+  if (applications) {
+    for (const a of applications as any[]) {
+      if (a.companies?.name) companyNameMap.set(a.company_id, a.companies.name);
+    }
+  }
 
-  const activeAppsList = (applications || [])
-    .filter((a) => ['applied', 'shortlisted', 'test_scheduled', 'interview_scheduled', 'ppt_scheduled'].includes(a.status))
-    .map((a: any) => ({
-      id: a.id,
-      companyId: a.company_id,
-      companyName: a.companies?.name || 'Company',
-      companyLogo: null,
-      status: a.status,
-      role: a.role,
-      ctc: a.ctc,
-      stipend: a.stipend,
-      lastUpdated: a.last_updated,
-    }));
+  // Only pass top 6 to DashboardClient to avoid UI clutter, enriched with companyName
+  const topUpcomingEvents = uniqueUpcomingEvents.slice(0, 6).map((e) => ({
+    ...e,
+    companyName: companyNameMap.get(e.company_id) || 'Campus Drive',
+  }));
+
+  const allAppsList = (applications || []).map((a: any) => ({
+    id: a.id,
+    companyId: a.company_id,
+    companyName: a.companies?.name || 'Company',
+    companyLogo: null,
+    status: a.status,
+    role: a.role,
+    ctc: a.ctc,
+    stipend: a.stipend,
+    lastUpdated: a.last_updated,
+  }));
 
   const connectedAccounts = (accounts || []).filter((a) => a.is_connected);
   const hasPersonalAccount = connectedAccounts.some((a) => a.account_type === 'personal');
@@ -185,17 +194,24 @@ export default async function DashboardPage() {
   const disconnectedAccounts = (accounts || []).filter((a) => !a.is_connected);
   const hasNeoId = !!user?.neo_id;
 
+  const collegeEmail = accounts?.find((a) => a.account_type === 'college')?.email;
+  const personalEmail = accounts?.find((a) => a.account_type === 'personal')?.email || session.email;
+  const campus = detectCampus(collegeEmail || personalEmail);
+  const branch = detectBranch(collegeEmail);
+
   return (
     <DashboardClient
       stats={stats}
       upcomingEvents={topUpcomingEvents}
-      activeApplications={activeAppsList}
+      activeApplications={allAppsList}
       hasAccounts={hasPersonalAccount && hasCollegeAccount}
       hasPersonalAccount={hasPersonalAccount}
       hasCollegeAccount={hasCollegeAccount}
       disconnectedAccounts={disconnectedAccounts}
       hasNeoId={hasNeoId}
       neoId={user?.neo_id || null}
+      campus={campus}
+      branch={branch}
     />
   );
 }

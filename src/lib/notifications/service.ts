@@ -165,20 +165,20 @@ export async function notifyStatusChange(params: {
 
   const dedupeKey = `status:${userId}:${companyId}:${newStatus}:${sourceEmailId || 'sync'}`;
 
-  let title = `NeoTrack — ${companyName} Status Update`;
+  let title = `Where's My Offer — ${companyName} Status Update`;
   let body = `Your application status for ${companyName} has changed to ${newStatus.toUpperCase().replace(/_/g, ' ')}.`;
 
   if (newStatus === 'shortlisted') {
-    title = `🎉 NeoTrack — ${companyName} Shortlisted!`;
+    title = `🎉 Where's My Offer — ${companyName} Shortlisted!`;
     body = `You have been shortlisted for ${companyName}. Check your schedule for upcoming test rounds.`;
   } else if (newStatus === 'selected') {
-    title = `🏆 NeoTrack — ${companyName} Offer / Selected!`;
+    title = `🏆 Where's My Offer — ${companyName} Offer / Selected!`;
     body = `Congratulations! You have received a selection/offer update for ${companyName}!`;
   } else if (newStatus === 'withdrawn') {
-    title = `NeoTrack — ${companyName} Application Withdrawn`;
+    title = `Where's My Offer — ${companyName} Application Withdrawn`;
     body = `Your ${companyName} application has been marked as withdrawn/opted-out.`;
   } else if (newStatus === 'not_shortlisted') {
-    title = `NeoTrack — ${companyName} Selection List Released`;
+    title = `Where's My Offer — ${companyName} Selection List Released`;
     body = `Selection list released for ${companyName}. Status marked as Not Shortlisted.`;
   }
 

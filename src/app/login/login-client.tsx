@@ -1,24 +1,50 @@
 'use client';
 
+import { useEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
+import Link from 'next/link';
+import { motion, useMotionValue, useSpring } from 'framer-motion';
+import Lenis from 'lenis';
+import { AppLogoMark } from '@/components/brand/logo';
 import {
-  Briefcase,
-  Mail,
-  Shield,
-  Calendar,
-  Search,
-  Sparkles,
-  CheckCircle2,
+  Radar,
+  ShieldCheck,
   Lock,
+  Server,
   ArrowRight,
   FileSpreadsheet,
+  Mail,
+  Inbox,
+  CheckCheck,
   Zap,
-  BellRing,
-  Award,
-  Clock,
-  ExternalLink,
+  AlertCircle,
 } from 'lucide-react';
-import Link from 'next/link';
+
+const FEED = [
+  { t: '09:41:02', text: 'gmail/personal → fetching page 2 of 5 …', tone: 'text-zinc-500' },
+  { t: '09:41:04', text: 'attachment found: Amazon_OA_Shortlist.xlsx (14.2 MB)', tone: 'text-amber-300' },
+  { t: '09:41:06', text: 'excel.scan("21BCE0492") → row 1,847 · MATCH', tone: 'text-violet-300' },
+  { t: '09:41:06', text: 'AMAZON status → SHORTLISTED', tone: 'text-emerald-300' },
+  { t: '09:41:09', text: 'circular: Razorpay OA window opens 6:00 PM today', tone: 'text-zinc-400' },
+  { t: '09:41:09', text: 'calendar.sync → "Razorpay Online Assessment" created', tone: 'text-sky-300' },
+  { t: '09:41:12', text: 'gmail/college → 12 new CDC circulars queued', tone: 'text-zinc-500' },
+  { t: '09:41:15', text: 'all inboxes caught up · next sweep in 60s', tone: 'text-emerald-400' },
+];
+
+const MARQUEE = [
+  'GOLDMAN SACHS',
+  'AMAZON',
+  'MICROSOFT',
+  'D.E. SHAW',
+  'J.P. MORGAN',
+  'RAZORPAY',
+  'CRED',
+  'TEXAS INSTRUMENTS',
+  'MYNTRA',
+  'WELLS FARGO',
+  'ATLASSIAN',
+  'ADOBE',
+];
 
 const ERROR_MESSAGES: Record<string, string> = {
   no_code: 'Google authentication was cancelled. Please try again.',
@@ -27,277 +53,498 @@ const ERROR_MESSAGES: Record<string, string> = {
   auth_failed: 'Authentication failed. Please verify your Google account.',
 };
 
+const Reveal = ({ children, delay = 0, className = '' }: { children: React.ReactNode; delay?: number; className?: string }) => (
+  <span className={`block overflow-hidden ${className}`}>
+    <motion.span
+      className="block"
+      initial={{ y: '112%' }}
+      animate={{ y: 0 }}
+      transition={{ duration: 1, delay, ease: [0.16, 1, 0.3, 1] }}
+    >
+      {children}
+    </motion.span>
+  </span>
+);
+
+const GoogleMark = () => (
+  <svg viewBox="0 0 24 24" className="h-4 w-4 shrink-0">
+    <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 0 1-2.2 3.32v2.77h3.57c2.08-1.92 3.27-4.74 3.27-8.1z" />
+    <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84A11 11 0 0 0 12 23z" />
+    <path fill="#FBBC05" d="M5.84 14.1a6.6 6.6 0 0 1 0-4.2V7.06H2.18a11 11 0 0 0 0 9.88l3.66-2.84z" />
+    <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15A11 11 0 0 0 2.18 7.06l3.66 2.84C6.71 7.3 9.14 5.38 12 5.38z" />
+  </svg>
+);
+
+const TerminalCard = () => {
+  const ref = useRef<HTMLDivElement>(null);
+  const [lines, setLines] = useState([FEED[0]]);
+  const rx = useMotionValue(0);
+  const ry = useMotionValue(0);
+  const srx = useSpring(rx, { stiffness: 120, damping: 18 });
+  const sry = useSpring(ry, { stiffness: 120, damping: 18 });
+
+  useEffect(() => {
+    let i = 0;
+    setLines([FEED[0]]);
+    const id = setInterval(() => {
+      i += 1;
+      setLines((prev) => [...prev.slice(-6), FEED[i % FEED.length]]);
+    }, 1500);
+    return () => clearInterval(id);
+  }, []);
+
+  const onMove = (e: React.MouseEvent<HTMLDivElement>) => {
+    const r = ref.current?.getBoundingClientRect();
+    if (!r) return;
+    ry.set(((e.clientX - r.left) / r.width - 0.5) * 10);
+    rx.set(-((e.clientY - r.top) / r.height - 0.5) * 8);
+  };
+
+  return (
+    <div style={{ perspective: 1200 }} className="relative">
+      <div className="absolute -inset-8 rounded-full bg-emerald-500/10 blur-3xl" />
+      <motion.div
+        ref={ref}
+        onMouseMove={onMove}
+        onMouseLeave={() => {
+          rx.set(0);
+          ry.set(0);
+        }}
+        style={{ rotateX: srx, rotateY: sry, transformStyle: 'preserve-3d' }}
+        initial={{ opacity: 0, y: 40 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 1.1, delay: 0.55, ease: [0.16, 1, 0.3, 1] }}
+        className="scanline relative overflow-hidden rounded-2xl border border-zinc-800 bg-[#0d0f14]/95 shadow-2xl shadow-black/60"
+        data-testid="sync-terminal"
+      >
+        <div className="flex items-center gap-2 border-b border-zinc-800/80 px-4 py-3">
+          <span className="h-2.5 w-2.5 rounded-full bg-rose-500/70" />
+          <span className="h-2.5 w-2.5 rounded-full bg-amber-500/70" />
+          <span className="h-2.5 w-2.5 rounded-full bg-emerald-500/70" />
+          <span className="ml-3 font-mono text-[11px] text-zinc-500">wmo://sync-engine — live</span>
+          <span className="ml-auto flex items-center gap-1.5 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2 py-0.5 font-mono text-[9px] uppercase tracking-widest text-emerald-300">
+            <span className="h-1 w-1 animate-pulse rounded-full bg-emerald-400" /> parsing
+          </span>
+        </div>
+        <div className="h-64 space-y-2.5 overflow-hidden px-4 py-4 font-mono text-[11px] leading-relaxed sm:text-xs">
+          {lines.map((l, i) => (
+            <motion.div
+              key={`${l.t}-${i}-${l.text}`}
+              initial={{ opacity: 0, x: -8 }}
+              animate={{ opacity: 1, x: 0 }}
+              transition={{ duration: 0.3 }}
+              className="flex gap-3"
+            >
+              <span className="shrink-0 text-zinc-600">{l.t}</span>
+              <span className={l.tone}>{l.text}</span>
+            </motion.div>
+          ))}
+          <span className="cursor-blink text-emerald-400">▍</span>
+        </div>
+        <div className="flex items-center gap-4 border-t border-zinc-800/80 px-4 py-3 font-mono text-[10px] text-zinc-500">
+          <span className="flex items-center gap-1.5">
+            <CheckCheck className="h-3 w-3 text-emerald-400" /> personal@gmail
+          </span>
+          <span className="flex items-center gap-1.5">
+            <CheckCheck className="h-3 w-3 text-emerald-400" /> college@vit.ac.in
+          </span>
+          <span className="ml-auto flex items-center gap-1.5 text-violet-300">
+            <FileSpreadsheet className="h-3 w-3" /> excel scanner armed
+          </span>
+        </div>
+      </motion.div>
+
+      <motion.div
+        animate={{ y: [0, -10, 0] }}
+        transition={{ duration: 5, repeat: Infinity, ease: 'easeInOut' }}
+        className="absolute -right-3 -top-6 hidden rounded-xl border border-violet-500/30 bg-[#12101a]/95 px-4 py-3 shadow-xl backdrop-blur-md sm:block"
+        style={{ transform: 'translateZ(50px)' }}
+      >
+        <div className="font-mono text-[9px] uppercase tracking-widest text-zinc-500">status flip</div>
+        <div className="mt-1 flex items-center gap-2 text-xs font-semibold text-zinc-200">
+          AMAZON <ArrowRight className="h-3 w-3 text-zinc-600" /> <span className="text-violet-300">SHORTLISTED</span>
+        </div>
+      </motion.div>
+
+      <motion.div
+        animate={{ y: [0, 8, 0] }}
+        transition={{ duration: 6, repeat: Infinity, ease: 'easeInOut', delay: 1 }}
+        className="absolute -bottom-5 -left-4 hidden rounded-xl border border-amber-500/30 bg-[#14110a]/95 px-4 py-3 shadow-xl backdrop-blur-md sm:block"
+      >
+        <div className="font-mono text-[9px] uppercase tracking-widest text-zinc-500">next event</div>
+        <div className="mt-1 flex items-center gap-2 text-xs font-semibold text-zinc-200">
+          <Zap className="h-3 w-3 text-amber-400" /> Razorpay OA · <span className="font-tabular text-amber-300">in 4 hrs</span>
+        </div>
+      </motion.div>
+    </div>
+  );
+};
+
+const chapters = [
+  {
+    n: '01',
+    title: 'The Inbox Chaos',
+    copy: 'Placement season fires 30+ emails a day at you — across two Gmail accounts. Official registrations land on personal mail. Test links and CDC circulars land on college mail. Miss one, miss a drive.',
+    visual: (
+      <div className="space-y-2">
+        {[
+          { from: 'cdc@vit.ac.in', sub: '[URGENT] Razorpay OA — tonight 6 PM', tone: 'text-amber-300', hot: true },
+          { from: 'noreply@amazon.jobs', sub: 'Your application confirmation', tone: 'text-zinc-400' },
+          { from: 'cdc@vit.ac.in', sub: 'FW: Revised PPT schedule — 14 circulars', tone: 'text-zinc-400' },
+          { from: 'placements@...', sub: 'Shortlist_R2_FINAL_v3 (1).xlsx', tone: 'text-violet-300', hot: true },
+        ].map((m, i) => (
+          <div
+            key={i}
+            className={`flex items-center gap-3 rounded-lg border px-3 py-2.5 font-mono text-[11px] ${m.hot ? 'border-zinc-700 bg-zinc-900' : 'border-zinc-800/60 bg-zinc-900/40'
+              }`}
+          >
+            <Mail className={`h-3.5 w-3.5 shrink-0 ${m.hot ? 'text-amber-400' : 'text-zinc-600'}`} />
+            <span className="w-32 shrink-0 truncate text-zinc-500">{m.from}</span>
+            <span className={`truncate ${m.tone}`}>{m.sub}</span>
+          </div>
+        ))}
+      </div>
+    ),
+  },
+  {
+    n: '02',
+    title: 'The Excel Agony',
+    copy: "Every shortlist is a 15 MB spreadsheet with 4,000 roll numbers. On your phone. Outside an exam hall. Where's My Offer scans every attachment the second it lands and flips your status automatically.",
+    visual: (
+      <div className="overflow-hidden rounded-lg border border-zinc-800 font-mono text-[11px]">
+        <div className="grid grid-cols-4 gap-px bg-zinc-800/70 text-zinc-500">
+          {['NEO ID', 'NAME', 'BRANCH', 'STATUS'].map((h) => (
+            <div key={h} className="bg-[#0d0f14] px-3 py-1.5 text-[9px] tracking-widest">
+              {h}
+            </div>
+          ))}
+          {['23BCE10811', '23BCE10933', '23BCE10472', '23BCE11207'].map((id, i) => (
+            <div key={id} className="contents">
+              <div
+                className={`px-3 py-2 ${id === '23BCE10472' ? 'bg-violet-500/15 text-violet-300' : 'bg-[#0b0d11] text-zinc-500'
+                  }`}
+              >
+                {id}
+              </div>
+              <div
+                className={`px-3 py-2 ${id === '23BCE10472' ? 'bg-violet-500/15 text-zinc-200' : 'bg-[#0b0d11] text-zinc-600'
+                  }`}
+              >
+                {['K. Iyer', 'S. Menon', 'Arush N.', 'R. Das'][i]}
+              </div>
+              <div
+                className={`px-3 py-2 ${id === '23BCE10472' ? 'bg-violet-500/15 text-zinc-300' : 'bg-[#0b0d11] text-zinc-600'
+                  }`}
+              >
+                CSE
+              </div>
+              <div
+                className={`px-3 py-2 ${id === '23BCE10472' ? 'bg-violet-500/15 font-bold text-violet-300' : 'bg-[#0b0d11] text-zinc-600'
+                  }`}
+              >
+                {id === '23BCE10472' ? 'MATCH ✓' : '—'}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    ),
+  },
+  {
+    n: '03',
+    title: 'The Parser Engine',
+    copy: 'A recency-first sync engine reads every circular the moment it arrives — extracting dates, venues, deadlines and eligibility — then writes them straight onto your calendar.',
+    visual: (
+      <div className="space-y-2 rounded-lg border border-zinc-800 bg-[#0b0d11] p-3.5 font-mono text-[11px]">
+        <div className="text-zinc-500">$ wmo parse --inbox college --latest</div>
+        <div className="text-zinc-400">→ circular: "TI Digital Design — R1 interview"</div>
+        <div className="text-sky-300">→ extracted: venue=TT Lab 1 · report=8:30 AM</div>
+        <div className="text-emerald-300">→ calendar event created ✓</div>
+      </div>
+    ),
+  },
+  {
+    n: '04',
+    title: 'The Offer Radar',
+    copy: "One canonical pipeline across every drive on campus. No more 'did I apply?' — just open the radar and know exactly where you stand, from registration to offer letter.",
+    visual: (
+      <div className="flex flex-wrap items-center gap-2">
+        {['Applied', 'Shortlisted', 'Test', 'Interview', 'Offer'].map((s, i) => (
+          <div key={s} className="flex items-center gap-2">
+            <span
+              className={`rounded-full border px-3 py-1 font-mono text-[10px] tracking-wider ${i === 4
+                  ? 'border-emerald-500/50 bg-emerald-500/15 text-emerald-300 shadow-[0_0_24px_rgba(16,185,129,0.25)]'
+                  : i === 1
+                    ? 'border-violet-500/40 bg-violet-500/10 text-violet-300'
+                    : 'border-zinc-700 bg-zinc-900 text-zinc-400'
+                }`}
+            >
+              {s}
+            </span>
+            {i < 4 && <span className="h-px w-4 bg-zinc-700" />}
+          </div>
+        ))}
+      </div>
+    ),
+  },
+];
+
 export default function LoginClient() {
   const searchParams = useSearchParams();
   const error = searchParams.get('error');
 
+  const lenisRef = useRef<Lenis | null>(null);
+
+  useEffect(() => {
+    const lenis = new Lenis({ duration: 1.15, smoothWheel: true });
+    lenisRef.current = lenis;
+    let raf: number;
+    const loop = (t: number) => {
+      lenis.raf(t);
+      raf = requestAnimationFrame(loop);
+    };
+    raf = requestAnimationFrame(loop);
+    return () => {
+      cancelAnimationFrame(raf);
+      lenis.destroy();
+      lenisRef.current = null;
+    };
+  }, []);
+
+  const handleScrollToManifesto = (e: React.MouseEvent<HTMLAnchorElement>) => {
+    e.preventDefault();
+    if (lenisRef.current) {
+      lenisRef.current.scrollTo('#manifesto', {
+        duration: 1.8,
+        easing: (t: number) => 1 - Math.pow(1 - t, 3),
+        offset: 30,
+      });
+    } else {
+      const target = document.getElementById('manifesto');
+      if (target) {
+        const top = target.getBoundingClientRect().top + window.scrollY + 80;
+        window.scrollTo({ top, behavior: 'smooth' });
+      }
+    }
+  };
+
   return (
-    <div className="min-h-screen bg-[#07070a] text-zinc-100 relative overflow-hidden flex flex-col justify-between selection:bg-indigo-500/30 selection:text-indigo-200">
-      {/* Dynamic Ambient Background Glows */}
-      <div className="absolute -top-40 -left-40 w-[600px] h-[600px] bg-indigo-600/15 rounded-full blur-[140px] pointer-events-none" />
-      <div className="absolute top-1/3 -right-40 w-[550px] h-[550px] bg-purple-600/10 rounded-full blur-[140px] pointer-events-none" />
-      <div className="absolute -bottom-40 left-1/3 w-[650px] h-[650px] bg-cyan-600/10 rounded-full blur-[160px] pointer-events-none" />
-
-      {/* Subtle Grid Overlay */}
-      <div className="absolute inset-0 bg-[linear-gradient(to_right,#ffffff05_1px,transparent_1px),linear-gradient(to_bottom,#ffffff05_1px,transparent_1px)] bg-[size:4rem_4rem] [mask-image:radial-gradient(ellipse_60%_50%_at_50%_40%,#000_70%,transparent_100%)] pointer-events-none" />
-
-      {/* Navigation Header */}
-      <header className="relative z-10 w-full max-w-7xl mx-auto px-6 py-6 sm:py-8 flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-indigo-600 to-violet-500 p-0.5 shadow-lg shadow-indigo-500/25 flex items-center justify-center">
-            <div className="w-full h-full bg-[#0d0d14] rounded-[10px] flex items-center justify-center">
-              <Briefcase className="w-5 h-5 text-indigo-400" />
-            </div>
+    <div className="min-h-screen bg-[#09090b] text-zinc-100 selection:bg-emerald-500/28 selection:text-zinc-100">
+      {/* Top Bar */}
+      <header className="fixed inset-x-0 top-0 z-50 border-b border-zinc-800/60 bg-[#09090b]/80 backdrop-blur-xl">
+        <div className="mx-auto flex h-16 max-w-7xl items-center justify-between px-4 sm:px-6">
+          <div className="flex items-center gap-2.5" data-testid="landing-logo">
+            <AppLogoMark size={32} className="transition-transform duration-200 hover:scale-105" />
+            <span className="font-display text-sm font-bold tracking-tight text-white">Where&apos;s My Offer</span>
           </div>
-          <div>
-            <div className="flex items-center gap-2">
-              <span className="text-base font-bold tracking-tight text-white font-mono">NeoTrack</span>
-              <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">
-                PRO
-              </span>
-            </div>
-            <p className="text-[11px] text-zinc-500 font-medium hidden sm:block">
-              Campus Placement Command Center
-            </p>
+          <div className="flex items-center gap-5">
+            <span className="hidden font-mono text-[10px] uppercase tracking-widest text-zinc-600 sm:block">
+              placement radar · live
+            </span>
+            <a
+              data-testid="nav-signin-btn"
+              href="/api/auth/google"
+              className="rounded-full border border-zinc-700 px-4 py-1.5 text-xs font-semibold text-zinc-300 transition-colors duration-200 hover:border-zinc-500 hover:text-white"
+            >
+              Sign in
+            </a>
           </div>
-        </div>
-
-        {/* Live Status Pill */}
-        <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-zinc-900/80 border border-zinc-800 backdrop-blur-md text-xs text-zinc-400 shadow-sm">
-          <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-          <span className="font-medium text-zinc-300">2026/2027 Placement Season Live</span>
         </div>
       </header>
 
-      {/* Main Content Area */}
-      <main className="relative z-10 w-full max-w-7xl mx-auto px-6 py-4 sm:py-8 flex-1 flex items-center">
-        <div className="w-full grid lg:grid-cols-12 gap-12 lg:gap-16 items-center">
-          
-          {/* Left Column: Hero & Live Preview Showcase */}
-          <div className="lg:col-span-7 space-y-8 animate-fade-in">
-            {/* Pill Tag */}
-            <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-gradient-to-r from-indigo-500/10 via-purple-500/10 to-pink-500/10 border border-indigo-500/20 text-indigo-300 text-xs font-semibold">
-              <Sparkles className="w-3.5 h-3.5 text-indigo-400" />
-              <span>Automated NeoPAT & CDC Circular Intelligence</span>
-            </div>
-
-            {/* Headline */}
-            <div className="space-y-4">
-              <h1 className="text-3xl sm:text-5xl lg:text-5xl font-extrabold tracking-tight text-white leading-[1.15]">
-                Never miss a{' '}
-                <span className="bg-gradient-to-r from-indigo-400 via-purple-300 to-cyan-300 bg-clip-text text-transparent">
-                  Shortlist, Test, or Interview
-                </span>{' '}
-                again.
-              </h1>
-              <p className="text-zinc-400 text-sm sm:text-base leading-relaxed max-w-2xl">
-                NeoTrack connects directly to your personal & college Gmail, automatically extracts test schedules, matches your Neo ID against massive shortlist attachments, and gives you a real-time placement pipeline.
-              </p>
-            </div>
-
-            {/* Live Interactive Placement Card Simulator */}
-            <div className="relative rounded-2xl bg-gradient-to-b from-zinc-800/60 to-zinc-900/60 border border-zinc-800/80 p-5 backdrop-blur-xl shadow-2xl shadow-black/60 space-y-4 group hover:border-indigo-500/30 transition-all duration-300">
-              
-              {/* Card Header */}
-              <div className="flex items-center justify-between pb-3 border-b border-zinc-800/80">
-                <div className="flex items-center gap-2.5">
-                  <div className="w-8 h-8 rounded-lg bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center">
-                    <CheckCircle2 className="w-4 h-4 text-emerald-400" />
-                  </div>
-                  <div>
-                    <p className="text-xs font-semibold text-white">Live Intelligence Stream</p>
-                    <p className="text-[10px] text-zinc-500">Auto-parsed 2 mins ago from placementoffice@vitbhopal.ac.in</p>
-                  </div>
-                </div>
-                <span className="text-[11px] font-mono font-medium px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 flex items-center gap-1">
-                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
-                  SHORTLISTED
-                </span>
-              </div>
-
-              {/* Company & Details Row */}
-              <div className="grid sm:grid-cols-3 gap-3">
-                <div className="p-3 rounded-xl bg-zinc-950/60 border border-zinc-800/60">
-                  <p className="text-[10px] uppercase font-bold tracking-wider text-zinc-500">Company</p>
-                  <p className="text-sm font-bold text-white mt-0.5">Microsoft India</p>
-                  <p className="text-[11px] text-indigo-400 font-medium">Software Engineer (₹44.5 LPA)</p>
-                </div>
-                <div className="p-3 rounded-xl bg-zinc-950/60 border border-zinc-800/60">
-                  <p className="text-[10px] uppercase font-bold tracking-wider text-zinc-500">Next Round</p>
-                  <p className="text-sm font-bold text-zinc-200 mt-0.5">Technical Interview</p>
-                  <p className="text-[11px] text-amber-400 font-medium flex items-center gap-1">
-                    <Clock className="w-3 h-3" /> Tomorrow, 10:00 AM
-                  </p>
-                </div>
-                <div className="p-3 rounded-xl bg-zinc-950/60 border border-zinc-800/60">
-                  <p className="text-[10px] uppercase font-bold tracking-wider text-zinc-500">Attachment Match</p>
-                  <p className="text-sm font-bold text-emerald-400 mt-0.5 flex items-center gap-1">
-                    <FileSpreadsheet className="w-3.5 h-3.5" /> Neo ID Found
-                  </p>
-                  <p className="text-[11px] text-zinc-400 truncate">Round1_Selected.xlsx</p>
-                </div>
-              </div>
-
-              {/* Card Footer badges */}
-              <div className="flex flex-wrap items-center justify-between gap-2 pt-1 text-[11px] text-zinc-400">
-                <div className="flex items-center gap-3">
-                  <span className="flex items-center gap-1 text-zinc-400">
-                    <Zap className="w-3.5 h-3.5 text-amber-400" />
-                    Instant Webhooks
-                  </span>
-                  <span className="flex items-center gap-1 text-zinc-400">
-                    <BellRing className="w-3.5 h-3.5 text-cyan-400" />
-                    Browser Push Enabled
-                  </span>
-                </div>
-                <span className="text-[10px] font-mono text-zinc-500">
-                  AES-256 Zero-Knowledge
-                </span>
-              </div>
-            </div>
-
-            {/* 3 Quick Value Highlights */}
-            <div className="grid sm:grid-cols-3 gap-4 pt-2">
-              <div className="p-4 rounded-xl bg-zinc-900/40 border border-zinc-800/50 hover:bg-zinc-900/60 hover:border-zinc-700/60 transition-all">
-                <div className="w-7 h-7 rounded-lg bg-indigo-500/10 flex items-center justify-center text-indigo-400 mb-2.5">
-                  <Mail className="w-4 h-4" />
-                </div>
-                <h2 className="text-xs font-semibold text-zinc-200">Dual Gmail Sync</h2>
-                <p className="text-[11px] text-zinc-400 mt-1 leading-relaxed">
-                  Connect personal and college accounts with isolated token encryption.
-                </p>
-              </div>
-
-              <div className="p-4 rounded-xl bg-zinc-900/40 border border-zinc-800/50 hover:bg-zinc-900/60 hover:border-zinc-700/60 transition-all">
-                <div className="w-7 h-7 rounded-lg bg-emerald-500/10 flex items-center justify-center text-emerald-400 mb-2.5">
-                  <Search className="w-4 h-4" />
-                </div>
-                <h2 className="text-xs font-semibold text-zinc-200">Attachment Parser</h2>
-                <p className="text-[11px] text-zinc-400 mt-1 leading-relaxed">
-                  Fast multi-sheet Excel & PDF scanning against your registration ID.
-                </p>
-              </div>
-
-              <div className="p-4 rounded-xl bg-zinc-900/40 border border-zinc-800/50 hover:bg-zinc-900/60 hover:border-zinc-700/60 transition-all">
-                <div className="w-7 h-7 rounded-lg bg-purple-500/10 flex items-center justify-center text-purple-400 mb-2.5">
-                  <Calendar className="w-4 h-4" />
-                </div>
-                <h2 className="text-xs font-semibold text-zinc-200">Auto Calendar</h2>
-                <p className="text-[11px] text-zinc-400 mt-1 leading-relaxed">
-                  PPTs, assessments, and interview rounds pinned directly on your calendar.
-                </p>
-              </div>
-            </div>
-
+      {/* Auth Error Banner */}
+      {error && (
+        <div className="fixed top-20 left-1/2 -translate-x-1/2 z-50 w-full max-w-md px-4">
+          <div className="rounded-xl border border-rose-500/30 bg-rose-500/10 backdrop-blur-md p-4 text-xs text-rose-300 flex items-center gap-3 shadow-2xl">
+            <AlertCircle className="w-5 h-5 text-rose-400 shrink-0" />
+            <span>{ERROR_MESSAGES[error] || 'Authentication error. Please try again.'}</span>
           </div>
+        </div>
+      )}
 
-          {/* Right Column: Authentication Card */}
-          <div className="lg:col-span-5 w-full max-w-md mx-auto animate-fade-in" style={{ animationDelay: '100ms' }}>
-            <div className="relative rounded-3xl bg-gradient-to-b from-zinc-900/90 via-zinc-900/80 to-[#0c0c14]/90 border border-zinc-700/50 p-8 sm:p-9 backdrop-blur-2xl shadow-2xl shadow-indigo-950/40 space-y-6">
-              
-              {/* Subtle top light bar */}
-              <div className="absolute top-0 inset-x-12 h-px bg-gradient-to-r from-transparent via-indigo-400/50 to-transparent" />
+      {/* Hero */}
+      <section className="relative mx-auto grid max-w-7xl gap-10 lg:gap-14 px-4 pb-16 pt-24 sm:px-6 sm:pt-24 lg:grid-cols-[1.05fr_0.95fr] lg:items-center lg:pt-28">
+        <div className="pointer-events-none absolute -top-20 left-1/4 h-72 w-72 rounded-full bg-violet-600/10 blur-3xl" />
+        <div>
+          <Reveal delay={0.1}>
+            <span className="font-mono text-[11px] uppercase tracking-[0.3em] text-emerald-400">
+              {'// placement season 2026 · vit bhopal'}
+            </span>
+          </Reveal>
+          <h1 className="mt-4 font-display text-5xl font-black leading-[0.95] tracking-tight sm:text-7xl lg:text-8xl">
+            <Reveal delay={0.22}>WHERE&apos;S</Reveal>
+            <Reveal delay={0.34}>MY</Reveal>
+            <Reveal delay={0.46}>
+              <span className="text-emerald-400">OFFER?</span>
+            </Reveal>
+          </h1>
+          <motion.p
+            initial={{ opacity: 0, y: 16 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.8, delay: 0.7 }}
+            className="mt-4 max-w-md text-base leading-relaxed text-zinc-400 sm:text-lg"
+          >
+            From chaotic CDC circulars to your final offer letter — tracked in real time. Both inboxes, every Excel shortlist, one radar.
+          </motion.p>
+          <motion.div
+            initial={{ opacity: 0, y: 16 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.8, delay: 0.85 }}
+            className="mt-6 sm:mt-7"
+          >
+            <div className="flex flex-wrap items-center gap-5">
+              <a
+                href="/api/auth/google"
+                data-testid="hero-google-btn"
+                className="group flex items-center gap-3 rounded-full bg-zinc-100 px-6 py-3 text-sm font-bold text-zinc-900 transition-transform duration-200 hover:scale-[1.03] active:scale-[0.98]"
+              >
+                <GoogleMark />
+                Continue with Google
+                <ArrowRight className="h-4 w-4 transition-transform duration-200 group-hover:translate-x-1" />
+              </a>
+              <a
+                href="#manifesto"
+                onClick={handleScrollToManifesto}
+                data-testid="hero-manifesto-link"
+                className="text-sm font-medium text-zinc-500 transition-colors hover:text-zinc-200 cursor-pointer select-none"
+              >
+                Read the manifesto ↓
+              </a>
+            </div>
+            <p className="mt-2.5 text-[11px] text-zinc-500 font-mono">
+              By connecting, you agree to our{' '}
+              <Link href="/terms" className="underline underline-offset-2 hover:text-zinc-300">
+                Terms of Service
+              </Link>{' '}
+              and{' '}
+              <Link href="/privacy" className="underline underline-offset-2 hover:text-zinc-300">
+                Privacy Policy
+              </Link>.
+            </p>
+          </motion.div>
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            transition={{ duration: 1, delay: 1.05 }}
+            className="mt-7 sm:mt-8 flex flex-wrap gap-2.5"
+          >
+            {[
+              { icon: ShieldCheck, text: 'Read-only Gmail scope' },
+              { icon: Lock, text: 'AES-256 token vault' },
+              { icon: Server, text: 'Your data stays on your cloud' },
+            ].map(({ icon: Icon, text }) => (
+              <span
+                key={text}
+                data-testid={`trust-chip-${text.split(' ')[0].toLowerCase()}`}
+                className="flex items-center gap-2 rounded-full border border-zinc-800 bg-zinc-900/60 px-3 py-1.5 text-[11px] text-zinc-400"
+              >
+                <Icon className="h-3.5 w-3.5 text-emerald-400" /> {text}
+              </span>
+            ))}
+          </motion.div>
+        </div>
+        <TerminalCard />
+      </section>
 
-              {/* Card Header */}
-              <div className="space-y-2 text-center">
-                <h2 className="text-2xl font-bold tracking-tight text-white">
-                  Welcome to NeoTrack
-                </h2>
-                <p className="text-xs text-zinc-400 leading-relaxed">
-                  Sign in with Google to sync your personal placement circulars and access your live dashboard.
-                </p>
-              </div>
+      {/* Marquee */}
+      <section className="overflow-hidden border-y border-zinc-800/70 bg-[#0b0b0e] py-5" data-testid="company-marquee">
+        <div className="animate-marquee flex w-max items-center gap-12 whitespace-nowrap">
+          {[...MARQUEE, ...MARQUEE].map((c, i) => (
+            <span key={i} className="flex items-center gap-12 font-mono text-xs tracking-[0.35em] text-zinc-600">
+              {c} <span className="text-emerald-500/60">✦</span>
+            </span>
+          ))}
+        </div>
+      </section>
 
-              {/* Error Alert if any */}
-              {error && (
-                <div className="p-3.5 rounded-xl bg-red-500/10 border border-red-500/20 text-red-300 text-xs flex items-start gap-2.5 animate-fade-in">
-                  <span className="text-red-400 font-bold">⚠️</span>
-                  <span>{ERROR_MESSAGES[error] || 'An unexpected error occurred. Please try again.'}</span>
-                </div>
-              )}
+      {/* Manifesto chapters */}
+      <section id="manifesto" className="mx-auto max-w-7xl px-4 py-28 sm:px-6">
+        <motion.div
+          initial={{ opacity: 0, y: 24 }}
+          whileInView={{ opacity: 1, y: 0 }}
+          viewport={{ once: true, margin: '-80px' }}
+          transition={{ duration: 0.7 }}
+          className="mb-16"
+        >
+          <span className="font-mono text-[11px] uppercase tracking-[0.3em] text-zinc-500">the manifesto</span>
+          <h2 className="mt-4 max-w-2xl font-display text-3xl font-extrabold tracking-tight sm:text-4xl">
+            Built in a hostel room.{' '}
+            <span className="text-zinc-500">Battle-tested in placement season.</span>
+          </h2>
+        </motion.div>
+        <div className="grid gap-6 md:grid-cols-2">
+          {chapters.map((ch, i) => (
+            <motion.div
+              key={ch.n}
+              data-testid={`chapter-${ch.n}`}
+              initial={{ opacity: 0, y: 32 }}
+              whileInView={{ opacity: 1, y: 0 }}
+              viewport={{ once: true, margin: '-60px' }}
+              transition={{ duration: 0.7, delay: (i % 2) * 0.12 }}
+              className="group rounded-2xl border border-zinc-800 bg-[#0d0f14]/80 p-7 transition-colors duration-300 hover:border-zinc-700"
+            >
+              <div className="text-outline font-display text-6xl font-black leading-none">{ch.n}</div>
+              <h3 className="mt-5 font-display text-xl font-bold tracking-tight">{ch.title}</h3>
+              <p className="mt-3 text-sm leading-relaxed text-zinc-400">{ch.copy}</p>
+              <div className="mt-6">{ch.visual}</div>
+            </motion.div>
+          ))}
+        </div>
+      </section>
 
-              {/* Sign in button */}
-              <div className="space-y-4 pt-2">
-                <a
-                  href="/api/auth/google?type=personal"
-                  className="group relative flex items-center justify-center gap-3 w-full py-3.5 px-5 rounded-2xl bg-white hover:bg-zinc-100 text-zinc-900 font-semibold text-sm shadow-xl shadow-white/5 hover:shadow-indigo-500/20 transition-all duration-200 hover:scale-[1.01] active:scale-[0.99]"
-                >
-                  {/* Google G Logo */}
-                  <svg className="w-5 h-5 flex-shrink-0" viewBox="0 0 24 24">
-                    <path
-                      d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 0 1-2.2 3.32v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.1z"
-                      fill="#4285F4"
-                    />
-                    <path
-                      d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"
-                      fill="#34A853"
-                    />
-                    <path
-                      d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"
-                      fill="#FBBC05"
-                    />
-                    <path
-                      d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"
-                      fill="#EA4335"
-                    />
-                  </svg>
-                  <span>Continue with Google</span>
-                  <ArrowRight className="w-4 h-4 text-zinc-400 group-hover:text-zinc-900 group-hover:translate-x-0.5 transition-all" />
-                </a>
+      {/* Final CTA */}
+      <section className="border-t border-zinc-800/70 bg-[#0b0b0e]">
+        <div className="mx-auto max-w-7xl px-4 py-24 text-center sm:px-6">
+          <motion.div
+            initial={{ opacity: 0, y: 24 }}
+            whileInView={{ opacity: 1, y: 0 }}
+            viewport={{ once: true }}
+            transition={{ duration: 0.7 }}
+          >
+            <div className="mx-auto mb-6 flex h-12 w-12 items-center justify-center rounded-2xl border border-emerald-500/30 bg-emerald-500/10">
+              <Inbox className="h-5 w-5 text-emerald-400" />
+            </div>
+            <h2 className="mx-auto max-w-xl font-display text-3xl font-extrabold tracking-tight sm:text-4xl">
+              Stop hunting roll numbers.{' '}
+              <span className="text-emerald-400">Start collecting offers.</span>
+            </h2>
+            <a
+              href="/api/auth/google"
+              data-testid="cta-google-btn"
+              className="group mx-auto mt-8 flex items-center justify-center gap-3 rounded-full bg-zinc-100 px-7 py-3.5 text-sm font-bold text-zinc-900 transition-transform duration-200 hover:scale-[1.03] active:scale-[0.98] w-fit"
+            >
+              <GoogleMark />
+              <span>Get started with Google</span>
+              <ArrowRight className="h-4 w-4 transition-transform duration-200 group-hover:translate-x-1" />
+            </a>
+            <p className="mt-5 font-mono text-[10px] uppercase tracking-widest text-zinc-600">
+              read-only · revocable anytime · built by students, for students
+            </p>
+          </motion.div>
+        </div>
 
-                {/* Steps indicator */}
-                <div className="pt-3 border-t border-zinc-800/80 space-y-2 text-[11px] text-zinc-400">
-                  <p className="font-semibold text-zinc-300 uppercase tracking-wider text-[10px]">
-                    What happens next:
-                  </p>
-                  <div className="space-y-1.5 pl-1">
-                    <div className="flex items-center gap-2">
-                      <span className="w-4 h-4 rounded-full bg-indigo-500/20 text-indigo-300 flex items-center justify-center text-[9px] font-bold">1</span>
-                      <span>Primary sign-in with your personal Gmail</span>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <span className="w-4 h-4 rounded-full bg-zinc-800 text-zinc-400 flex items-center justify-center text-[9px] font-bold">2</span>
-                      <span>Link your college (<code className="text-zinc-300">@vitstudent.ac.in</code>) in Settings</span>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <span className="w-4 h-4 rounded-full bg-zinc-800 text-zinc-400 flex items-center justify-center text-[9px] font-bold">3</span>
-                      <span>Input your Neo ID for automated shortlist detection</span>
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              {/* Privacy & Security Trust Badge */}
-              <div className="pt-2">
-                <div className="p-3 rounded-2xl bg-zinc-950/60 border border-zinc-800/80 flex items-start gap-2.5 text-[11px] text-zinc-400">
-                  <Shield className="w-4 h-4 text-emerald-400 flex-shrink-0 mt-0.5" />
-                  <div className="leading-relaxed">
-                    <span className="font-semibold text-zinc-300">Read-Only Permission</span>: NeoTrack only reads placement-tagged CDC emails. Your credentials are never stored and tokens remain encrypted with AES-256-GCM.
-                  </div>
-                </div>
-              </div>
-
+        {/* Footer */}
+        <footer className="border-t border-zinc-800/70 py-8">
+          <div className="mx-auto flex max-w-7xl flex-col items-center justify-between gap-4 px-4 font-mono text-[11px] text-zinc-600 sm:flex-row sm:px-6">
+            <p className="tracking-wider uppercase text-[10px]">
+              Where&apos;s My Offer © 2026
+            </p>
+            <div className="flex items-center gap-6 text-[11px] text-zinc-500">
+              <Link href="/privacy" className="transition-colors hover:text-zinc-300">
+                Privacy Policy
+              </Link>
+              <span className="text-zinc-500">·</span>
+              <Link href="/terms" className="transition-colors hover:text-zinc-300">
+                Terms of Service
+              </Link>
+              <span className="text-zinc-500">·</span>
+              <Link href="/feedback" className="transition-colors hover:text-zinc-300">
+                Feedback & Support
+              </Link>
             </div>
           </div>
-
-        </div>
-      </main>
-
-      {/* Footer */}
-      <footer className="relative z-10 w-full max-w-7xl mx-auto px-6 py-6 border-t border-zinc-800/60 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-zinc-500">
-        <p>© {new Date().getFullYear()} NeoTrack · Engineered for VIT Campus Placements</p>
-        <div className="flex items-center gap-4">
-          <Link href="/privacy" className="text-zinc-400 hover:text-indigo-300 transition-colors">
-            Privacy Policy
-          </Link>
-          <span>·</span>
-          <Link href="/terms" className="text-zinc-400 hover:text-indigo-300 transition-colors">
-            Terms of Service
-          </Link>
-          <span>·</span>
-          <span className="text-zinc-500">Google OAuth 2.0</span>
-        </div>
-      </footer>
+        </footer>
+      </section>
     </div>
   );
 }

@@ -49,3 +49,57 @@ export function truncate(str: string, maxLength: number): string {
   if (str.length <= maxLength) return str;
   return str.slice(0, maxLength - 1) + '…';
 }
+
+/** Cleanly format stipend string without duplicate /mo or /month suffixes */
+export function formatStipend(stipendStr: string | null | undefined): string | null {
+  if (!stipendStr) return null;
+  let s = stipendStr.replace(/\*/g, '').trim();
+  if (!s) return null;
+  // Strip duplicate trailing suffixes like /month/mo or /mo/mo
+  s = s.replace(/\/(?:month|mo)\/mo$/i, '/month').replace(/\/mo\/mo$/i, '/mo');
+  if (/\/(?:month|mo)|pm|per month/i.test(s)) {
+    return s;
+  }
+  if (/^\d+$/.test(s)) {
+    return `₹${Number(s).toLocaleString('en-IN')}/month`;
+  }
+  return `${s}/mo`;
+}
+
+/**
+ * Dynamically detect VIT campus from college email domain.
+ * Supports VIT Bhopal, VIT Vellore, VIT Chennai, and VIT-AP.
+ */
+export function detectCampus(email?: string | null): string {
+  if (!email) return 'VIT Bhopal';
+  const lower = email.toLowerCase();
+  if (lower.includes('chennai')) return 'VIT Chennai';
+  if (lower.includes('vellore') || lower.includes('vitstudent.ac.in')) return 'VIT Vellore';
+  if (lower.includes('vitap') || lower.includes('ap.vit')) return 'VIT-AP';
+  return 'VIT Bhopal';
+}
+
+/**
+ * Extract engineering branch / specialization from VIT student email if available.
+ * e.g., 'arush.23bce10472@vitbhopal.ac.in' -> 'CSE'
+ */
+export function detectBranch(email?: string | null): string | null {
+  if (!email) return null;
+  const match = email.toLowerCase().match(/\d{2}([a-z]{3})\d+/i);
+  if (!match) return null;
+  const code = match[1].toUpperCase();
+  const branches: Record<string, string> = {
+    BCE: 'CSE',
+    BCI: 'CSE (InfoSec)',
+    BCG: 'CSE (Gaming)',
+    BAI: 'CSE (AI & ML)',
+    BDS: 'CSE (Data Science)',
+    BEC: 'ECE',
+    BEE: 'EEE',
+    BME: 'Mechanical',
+    BBI: 'Biotech',
+    BCL: 'Civil',
+  };
+  return branches[code] || code;
+}
+

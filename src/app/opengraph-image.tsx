@@ -1,7 +1,7 @@
 import { ImageResponse } from 'next/og';
 
 export const runtime = 'nodejs';
-export const alt = 'NeoTrack — Campus Placement Command Center';
+export const alt = "Where's My Offer — Campus Placement Radar";
 export const size = {
   width: 1200,
   height: 630,
@@ -29,37 +29,41 @@ export default function Image() {
       >
         {/* Top bar */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
-          <div
-            style={{
-              width: '48px',
-              height: '48px',
-              borderRadius: '12px',
-              background: 'linear-gradient(135deg, #6366f1, #a855f7)',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              fontSize: '24px',
-              fontWeight: 800,
-            }}
+          <svg
+            width="48"
+            height="48"
+            viewBox="0 0 512 512"
+            style={{ borderRadius: '12px' }}
           >
-            ⚡
-          </div>
+            <rect width="512" height="512" rx="124" fill="#090e13" />
+            <rect width="512" height="512" rx="124" fill="none" stroke="#34d399" strokeWidth="6" />
+            <circle cx="256" cy="256" r="192" fill="none" stroke="#10b981" strokeWidth="3" opacity="0.3" />
+            <circle cx="256" cy="256" r="132" fill="none" stroke="#10b981" strokeWidth="2" opacity="0.2" />
+            <path d="M 124 186 L 168 186 L 218 344 L 182 360 Z" fill="#10b981" />
+            <path d="M 182 360 L 218 344 L 256 250 L 242 232 Z" fill="#34d399" />
+            <path d="M 270 232 L 256 250 L 294 344 L 330 360 Z" fill="#34d399" />
+            <path d="M 388 186 L 344 186 L 294 344 L 330 360 Z" fill="#10b981" />
+            <path d="M 184 290 L 208 290 L 256 202 L 304 290 L 328 290 L 256 168 Z" fill="#ffffff" />
+            <circle cx="256" cy="128" r="26" fill="none" stroke="#34d399" strokeWidth="2" />
+            <path d="M 256 102 C 256 120, 248 128, 230 128 C 248 128, 256 136, 256 154 C 256 136, 264 128, 282 128 C 264 128, 256 120, 256 102 Z" fill="#ffffff" />
+            <circle cx="256" cy="128" r="5" fill="#10b981" />
+          </svg>
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
             <span style={{ fontSize: '28px', fontWeight: 800, letterSpacing: '-0.5px' }}>
-              NeoTrack
+              Where&apos;s My Offer
             </span>
             <span
               style={{
                 fontSize: '12px',
                 fontWeight: 700,
-                backgroundColor: 'rgba(99, 102, 241, 0.2)',
-                color: '#a5b4fc',
-                border: '1px solid rgba(99, 102, 241, 0.4)',
+                backgroundColor: 'rgba(16, 185, 129, 0.2)',
+                color: '#6ee7b7',
+                border: '1px solid rgba(16, 185, 129, 0.4)',
                 padding: '4px 10px',
                 borderRadius: '9999px',
               }}
             >
-              PLACEMENT INTELLIGENCE
+              CAMPUS RADAR
             </span>
           </div>
         </div>

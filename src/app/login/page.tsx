@@ -4,16 +4,16 @@ import { redirect } from 'next/navigation';
 import LoginClient from './login-client';
 
 export const metadata: Metadata = {
-  title: 'Sign In & Placement Command Center',
+  title: "Where's My Offer — Campus Placement Radar",
   description:
-    'Sign in with Google to automatically track placement drives, match shortlist attachments, and get real-time interview alerts.',
+    'Track every placement drive, shortlist, and interview from one dashboard. Connect your Gmail and let the radar do the rest.',
   alternates: {
     canonical: '/login',
   },
   openGraph: {
-    title: 'Sign In — NeoTrack Campus Placement Command Center',
+    title: "Where's My Offer",
     description:
-      'Never miss a shortlist, test, or interview. Real-time campus placement tracking and automated email parsing.',
+      'Track every placement drive, shortlist, and interview from one dashboard.',
     url: '/login',
   },
 };

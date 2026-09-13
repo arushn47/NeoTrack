@@ -1,38 +1,42 @@
 import type { Metadata, Viewport } from "next";
-import { Inter, JetBrains_Mono } from "next/font/google";
+import { Outfit, JetBrains_Mono } from "next/font/google";
 import "./globals.css";
 
-const inter = Inter({
+const outfit = Outfit({
   subsets: ["latin"],
-  variable: "--font-inter",
+  variable: "--font-outfit",
   display: "swap",
+  weight: ["300", "400", "500", "600", "700", "800", "900"],
 });
 
 const jetbrainsMono = JetBrains_Mono({
   subsets: ["latin"],
   variable: "--font-mono",
   display: "swap",
+  weight: ["400", "500", "600", "700"],
 });
 
 export const viewport: Viewport = {
-  themeColor: "#6366f1",
+  themeColor: "#10b981",
 };
 
 const siteUrl =
   process.env.NEXT_PUBLIC_APP_URL && !process.env.NEXT_PUBLIC_APP_URL.includes('localhost')
     ? process.env.NEXT_PUBLIC_APP_URL
-    : 'https://neopat-tracker.vercel.app';
+    : 'https://wheresmyoffer.vercel.app';
 
 export const metadata: Metadata = {
   metadataBase: new URL(siteUrl),
   title: {
-    default: "NeoTrack — Campus Placement Command Center",
-    template: "%s — NeoTrack",
+    default: "Where's My Offer — Campus Placement Radar",
+    template: "%s — Where's My Offer",
   },
   description:
-    "Track campus placement drives, automated NeoPAT email sync, shortlist PDF/Excel attachment matching, OA test dates, and interview rounds in one unified dashboard.",
+    "Real-time campus placement radar. Automated email sync, shortlist spreadsheet scanner, OA test alerts, and interview rounds in one unified mission-control dashboard.",
   keywords: [
-    "NeoTrack",
+    "Where's My Offer",
+    "Where's My Offer App",
+    "Campus Placement Radar",
     "Campus Placement Tracker",
     "NeoPAT Tracker",
     "VIT Placement Tracker",
@@ -42,13 +46,12 @@ export const metadata: Metadata = {
     "Shortlist Attachment Parser",
     "Online Assessment Tracker",
     "Interview Schedule Manager",
-    "Campus Recruitment Command Center",
     "Job Application Tracking System",
   ],
-  authors: [{ name: "NeoTrack Team", url: siteUrl }],
-  creator: "NeoTrack",
-  publisher: "NeoTrack",
-  applicationName: "NeoTrack",
+  authors: [{ name: "Where's My Offer Team", url: siteUrl }],
+  creator: "Where's My Offer",
+  publisher: "Where's My Offer",
+  applicationName: "Where's My Offer",
   category: "Productivity",
   manifest: "/manifest.json",
   alternates: {
@@ -58,8 +61,8 @@ export const metadata: Metadata = {
     type: "website",
     locale: "en_US",
     url: siteUrl,
-    siteName: "NeoTrack",
-    title: "NeoTrack — Campus Placement Command Center",
+    siteName: "Where's My Offer",
+    title: "Where's My Offer — Campus Placement Radar",
     description:
       "Never miss a shortlist, test, or interview. Real-time campus placement tracking and automated email parsing.",
     images: [
@@ -67,13 +70,13 @@ export const metadata: Metadata = {
         url: "/opengraph-image",
         width: 1200,
         height: 630,
-        alt: "NeoTrack — Campus Placement Command Center",
+        alt: "Where's My Offer — Campus Placement Radar",
       },
     ],
   },
   twitter: {
     card: "summary_large_image",
-    title: "NeoTrack — Campus Placement Command Center",
+    title: "Where's My Offer — Campus Placement Radar",
     description:
       "Never miss a shortlist, test, or interview. Real-time campus placement tracking and automated email parsing.",
     images: ["/opengraph-image"],
@@ -92,11 +95,16 @@ export const metadata: Metadata = {
   appleWebApp: {
     capable: true,
     statusBarStyle: "black-translucent",
-    title: "NeoTrack",
+    title: "Where's My Offer",
   },
   icons: {
-    icon: "/icon.svg",
-    apple: "/icon.svg",
+    icon: [
+      { url: "/icon.svg", type: "image/svg+xml" },
+      { url: "/icon.jpg", type: "image/jpeg" },
+    ],
+    apple: [
+      { url: "/apple-touch-icon.jpg", type: "image/jpeg" },
+    ],
   },
 };
 
@@ -106,7 +114,7 @@ const jsonLd = {
     {
       "@type": "WebApplication",
       "@id": `${siteUrl}/#webapp`,
-      name: "NeoTrack",
+      name: "Where's My Offer",
       url: siteUrl,
       applicationCategory: "EducationalApplication, BusinessApplication",
       operatingSystem: "All modern web browsers, Android, iOS",
@@ -129,9 +137,9 @@ const jsonLd = {
     {
       "@type": "Organization",
       "@id": `${siteUrl}/#organization`,
-      name: "NeoTrack",
+      name: "Where's My Offer",
       url: siteUrl,
-      logo: `${siteUrl}/icon.svg`,
+      logo: `${siteUrl}/opengraph-image`,
       description: "Smart Campus Placement and Drive Intelligence Platform.",
     },
   ],
@@ -151,7 +159,7 @@ export default function RootLayout({
         />
       </head>
       <body
-        className={`${inter.variable} ${jetbrainsMono.variable} font-sans antialiased`}
+        className={`${outfit.variable} ${jetbrainsMono.variable} font-sans antialiased bg-[#09090b] text-zinc-100`}
       >
         {children}
       </body>

@@ -5,6 +5,10 @@ import * as jose from 'jose';
 /** Routes that don't require authentication */
 const PUBLIC_ROUTES = [
   '/login',
+  '/privacy',
+  '/terms',
+  '/feedback',
+  '/support',
   '/api/auth/google',
   '/api/auth/callback',
   '/api/cron',

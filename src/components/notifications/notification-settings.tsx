@@ -115,30 +115,35 @@ export default function NotificationSettings() {
   };
 
   return (
-    <section className="rounded-xl bg-bg-surface border border-border-default overflow-hidden">
-      <div className="px-5 py-4 border-b border-border-default flex items-center justify-between">
-        <h2 className="text-sm font-semibold text-text-primary flex items-center gap-2">
-          <Bell className="w-4 h-4 text-accent" />
-          Notification Preferences
-        </h2>
+    <section className="rounded-2xl border border-zinc-800 bg-[#101014] p-6 space-y-6">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2.5">
+          <Bell className="h-4 w-4 text-emerald-400" />
+          <h2 className="font-display text-base font-bold tracking-tight text-white">
+            Notification Preferences
+          </h2>
+        </div>
         {savingPrefs && (
           <span className="text-xs text-zinc-500 flex items-center gap-1">
-            <Loader2 className="w-3 h-3 animate-spin" /> Saving...
+            <Loader2 className="w-3 h-3 animate-spin text-emerald-400" /> Saving...
           </span>
         )}
       </div>
+      <p className="text-xs leading-relaxed text-zinc-500 -mt-3">
+        Choose how the radar pings you when new shortlists, assessment links, or test schedules are parsed.
+      </p>
 
-      <div className="p-5 space-y-6">
+      <div className="space-y-6">
         {/* Browser Push Master Toggle */}
-        <div className="p-4 rounded-xl bg-white/[0.02] border border-white/10 space-y-3">
+        <div className="p-4 rounded-xl bg-zinc-900/50 border border-zinc-800 space-y-3">
           <div className="flex items-center justify-between">
             <div className="space-y-0.5">
               <div className="flex items-center gap-2">
-                <Smartphone className="w-4 h-4 text-accent" />
-                <span className="text-sm font-medium text-white">Browser Push Notifications</span>
+                <Smartphone className="w-4 h-4 text-emerald-400" />
+                <span className="text-sm font-semibold text-zinc-100">Browser Push Notifications</span>
               </div>
               <p className="text-xs text-zinc-400">
-                Receive instant alerts for test schedules and shortlists even when NeoTrack is closed.
+                Receive instant alerts for test schedules and shortlists even when Where&apos;s My Offer is closed.
               </p>
             </div>
 

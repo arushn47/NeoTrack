@@ -78,7 +78,7 @@ export async function pushEventToGoogleCalendar(params: SyncCalendarEventParams)
       location: params.venue || 'Campus / Online',
       description:
         params.description ||
-        `Placement Assessment / Event tracked by NeoTrack.\nMode: ${params.mode || 'Offline'}\nVenue: ${params.venue || 'Campus / Online'}`,
+        `Placement Assessment / Event tracked by Where's My Offer.\nMode: ${params.mode || 'Offline'}\nVenue: ${params.venue || 'Campus / Online'}`,
       start: {
         dateTime: startDate.toISOString(),
         timeZone: 'Asia/Kolkata',
@@ -385,9 +385,13 @@ export async function reconcileUserGoogleCalendar(userId: string): Promise<Recon
     }
   } while (pageToken);
 
-  // ONLY touch events created by NeoTrack (safe guard for personal events)
+  // ONLY touch events created by Where's My Offer / NeoTrack (safe guard for personal events)
   const neoTrackGcalEvents = allGcalItems.filter(
-    (item) => item.description?.includes('tracked by NeoTrack') || item.description?.includes('NeoTrack')
+    (item) =>
+      item.description?.includes("tracked by Where's My Offer") ||
+      item.description?.includes("Where's My Offer") ||
+      item.description?.includes('tracked by NeoTrack') ||
+      item.description?.includes('NeoTrack')
   );
 
   let deletedCount = 0;
@@ -441,7 +445,7 @@ export async function reconcileUserGoogleCalendar(userId: string): Promise<Recon
           requestBody: {
             summary: match.title,
             location: match.venue || 'Campus / Online',
-            description: `Placement Assessment / Event tracked by NeoTrack.\nMode: ${match.mode || 'Offline'}\nVenue: ${match.venue || 'Campus / Online'}`,
+            description: `Placement Assessment / Event tracked by Where's My Offer.\nMode: ${match.mode || 'Offline'}\nVenue: ${match.venue || 'Campus / Online'}`,
             start: { dateTime: startDate.toISOString(), timeZone: 'Asia/Kolkata' },
             end: { dateTime: endDate.toISOString(), timeZone: 'Asia/Kolkata' },
             reminders: {
@@ -496,7 +500,7 @@ export async function reconcileUserGoogleCalendar(userId: string): Promise<Recon
         requestBody: {
           summary: ins.title,
           location: ins.venue || 'Campus / Online',
-          description: `Placement Assessment / Event tracked by NeoTrack.\nMode: ${ins.mode || 'Offline'}\nVenue: ${ins.venue || 'Campus / Online'}`,
+          description: `Placement Assessment / Event tracked by Where's My Offer.\nMode: ${ins.mode || 'Offline'}\nVenue: ${ins.venue || 'Campus / Online'}`,
           start: { dateTime: startDate.toISOString(), timeZone: 'Asia/Kolkata' },
           end: { dateTime: endDate.toISOString(), timeZone: 'Asia/Kolkata' },
           reminders: {
