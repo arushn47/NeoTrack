@@ -224,10 +224,22 @@ export default function Topbar({ userName, userAvatar, lastSyncAt }: TopbarProps
                 return;
               }
 
-              if ((currentEvent === 'progress' || currentEvent === 'sync_progress') && !silent) {
-                setSyncProgress(parsed);
+              if (currentEvent === 'progress' || currentEvent === 'sync_progress') {
+                setSyncProgress((prev) => {
+                  if (silent && parsed.phase !== 'processing' && !prev) {
+                    return null;
+                  }
+                  return parsed;
+                });
               } else if (currentEvent === 'complete' || currentEvent === 'sync_complete') {
                 stopPolling();
+                if (parsed.result?.hasMorePagesPending) {
+                  setTimeout(() => {
+                    handleSync(true); // resume silently
+                  }, 1500);
+                  return;
+                }
+
                 // Smooth transition: show 100% completion in banner briefly before toast
                 setSyncProgress((prev) => (prev ? { ...prev, phase: 'complete' } : null));
 
@@ -298,9 +310,10 @@ export default function Topbar({ userName, userAvatar, lastSyncAt }: TopbarProps
             setSyncProgress(data.progress);
           }
           startPolling();
-        } else if (!lastSyncAt || Date.now() - new Date(lastSyncAt).getTime() > 60 * 60 * 1000) {
+        } else if (data.phase === 'pending' || !lastSyncAt || Date.now() - new Date(lastSyncAt).getTime() > 60 * 60 * 1000) {
           // Only trigger silent sync on mount if it hasn't synced in over 1 hour
-          // (cron-job.org handles background sync every 15 minutes)
+          // or if there are pending pages left to process
+          // (cron-job.org handles background sync every 2 hours)
           handleSync(true);
         }
       })

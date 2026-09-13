@@ -1137,10 +1137,11 @@ export async function runSync(
   activeSyncMap.delete(userId);
   try {
     const isError = result.errors.length > 0 && result.totalEmailsProcessed === 0;
+    const isComplete = !result.hasMorePagesPending;
     await supabase.from('sync_state').upsert({
       user_id: userId,
       is_syncing: false,
-      phase: isError ? 'error' : 'complete',
+      phase: isError ? 'error' : (isComplete ? 'complete' : 'pending'),
       total_messages: latestProgress.totalMessages,
       processed_messages: latestProgress.processedMessages,
       new_emails: result.newEmails,
