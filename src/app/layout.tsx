@@ -26,7 +26,7 @@ export const viewport: Viewport = {
 const siteUrl =
   process.env.NEXT_PUBLIC_APP_URL && !process.env.NEXT_PUBLIC_APP_URL.includes('localhost')
     ? process.env.NEXT_PUBLIC_APP_URL
-    : 'https://wheresmyoffer.vercel.app';
+    : 'https://www.wheresmyoffer.in';
 
 export const metadata: Metadata = {
   metadataBase: new URL(siteUrl),
