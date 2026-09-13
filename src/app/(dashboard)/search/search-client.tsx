@@ -198,7 +198,7 @@ export default function SearchClient({ data }: SearchClientProps) {
           <div className="w-12 h-12 rounded-2xl bg-zinc-900 border border-zinc-800 flex items-center justify-center mx-auto mb-3 text-zinc-600">
             <Sparkles className="w-6 h-6" />
           </div>
-          <p className="text-zinc-200 font-bold text-base">Search Anything in Where&apos;s My Offer</p>
+          <p className="text-zinc-200 font-bold text-base">Search Anything in Where&apos;s My Offer<span className="text-emerald-400">?</span></p>
           <p className="text-xs text-zinc-500 mt-1 max-w-sm mx-auto">
             Try searching for company names (e.g., &ldquo;Microsoft&rdquo;), roles (&ldquo;SDE&rdquo;), shortlist keywords, or test venues.
           </p>

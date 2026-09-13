@@ -17,7 +17,7 @@ import {
   ENGLISH_STOPWORDS,
   type ClassificationResult,
 } from '@/lib/sync/classifier';
-import { extractDriveNumber } from '@/lib/sync/events';
+import { extractDriveNumber, extractAllDriveNumbers } from '@/lib/sync/events';
 import {
   buildCircularCatalog,
   loadAllDriveResolutions,
@@ -32,6 +32,13 @@ import { createAdminClient } from '@/lib/supabase/admin';
 // ============================================
 
 export const PAGE_SIZE = 150;
+
+/**
+ * Total wall-clock budget for a background cron invocation.
+ * Set to 270s to leave a 30s margin under maxDuration = 300s.
+ * The cron loop processes pages across all accounts until this budget is consumed.
+ */
+export const CRON_TOTAL_BUDGET_MS = 270_000;
 
 export interface SyncPageRow {
   id: string;
@@ -107,10 +114,19 @@ export const TRUSTED_PLACEMENT_SENDERS = [
 // Known non-placement senders to always skip (Google, Microsoft notifications, social media, etc.)
 export const BLOCKED_SENDERS = /noreply-accounts@google|no-reply@accounts\.google|noreply@github|notifications@github|@linkedin\.com|@facebookmail|@discord|@slack|noreply@medium|noreply@.*\.zoom\.us|security-noreply|account-security|password.*reset|verify.*email|do-not-reply@|mailer-daemon/i;
 
+/**
+ * Returns true if the sender should bypass the `isPlacementRelevant` keyword filter.
+ *
+ * Personal accounts: only exact known CDC/NeoPAT addresses bypass the keyword gate.
+ * Domain-wide @vitstudent.ac.in trust is intentionally removed — if the domain hosts
+ * IT helpdesk, library notices, or other non-placement traffic, those would otherwise
+ * get silently classified as placement-relevant. Unknown senders on the domain still
+ * fall through to the isPlacementRelevant keyword check in the caller.
+ *
+ * College accounts: use the same explicit allowlist (no change).
+ */
 export const isTrustedSender = (senderEmail: string, isPersonal: boolean) =>
-  isPersonal
-    ? /@vitstudent\.ac\.in$/i.test(senderEmail)
-    : TRUSTED_PLACEMENT_SENDERS.includes(senderEmail.toLowerCase());
+  TRUSTED_PLACEMENT_SENDERS.includes(senderEmail.toLowerCase());
 
 // Retry a Gmail API call with exponential backoff on quota/rate-limit errors
 export async function withQuotaBackoff<T>(fn: () => Promise<T>, maxRetries = 3): Promise<T> {
@@ -200,10 +216,321 @@ export async function planSyncPages(
   return (inserted || []) as SyncPageRow[];
 }
 
+// ============================================
+// Per-Message Processing (parallelizable unit)
+// ============================================
+
+interface SingleMessageResult {
+  emailsProcessed: number;
+  newEmails: number;
+  newCompanies: number;
+  skippedDuplicates: number;
+  errors: string[];
+}
+
+interface LiveSyncTracker {
+  processedMessages: number;
+  newEmails: number;
+  newCompanies: number;
+  skippedDuplicates: number;
+}
+
+/**
+ * Processes a single Gmail message: metadata → full detail → classify → upsert company → insert email → status engine.
+ * Self-contained so it can be run concurrently via Promise.allSettled inside processPage.
+ * Includes per-stage timing instrumentation for diagnosing sync throughput.
+ */
+async function processSingleMessage(
+  msgId: string,
+  ctx: {
+    supabase: ReturnType<typeof createAdminClient>;
+    userId: string;
+    account: GmailAccount;
+    gmail: any;
+    fetchMessageMetadata: (gmail: any, msgId: string) => Promise<any>;
+    isPersonal: boolean;
+    isAccountInitialSync: boolean;
+    existingInDb: Set<string>;
+    deps: {
+      userNeoId: string | null;
+      userEmail: string;
+      circularCatalog: Map<string, any[]>;
+      persistedResolutions: Map<string, any>;
+      driveResolutionsMap: Map<string, string>;
+    };
+    pageIndex: number;
+    totalMessages: number;
+    onProgress?: (progress: SyncProgress) => void;
+    liveTracker: LiveSyncTracker;
+  }
+): Promise<SingleMessageResult> {
+  const result: SingleMessageResult = {
+    emailsProcessed: 0,
+    newEmails: 0,
+    newCompanies: 0,
+    skippedDuplicates: 0,
+    errors: [],
+  };
+
+  const { supabase, userId, account, gmail, fetchMessageMetadata, isPersonal, existingInDb, deps } = ctx;
+
+  if (existingInDb.has(msgId)) {
+    result.skippedDuplicates++;
+    ctx.liveTracker.skippedDuplicates++;
+    ctx.liveTracker.processedMessages++;
+    return result;
+  }
+
+  try {
+    const t0 = Date.now();
+
+    // Stage 1: Cheap metadata inspection
+    let shouldFetchFull = true;
+    const metadata = await withQuotaBackoff(() => fetchMessageMetadata(gmail, msgId));
+    const t1 = Date.now();
+    const subj = metadata.subject.toLowerCase();
+    const senderLower = metadata.senderEmail.toLowerCase();
+
+    // A. Always block known non-placement senders
+    if (BLOCKED_SENDERS.test(senderLower)) {
+      shouldFetchFull = false;
+    }
+    // B. Always allow trusted CDC/NeoPAT senders
+    else if (isTrustedSender(senderLower, isPersonal)) {
+      shouldFetchFull = true;
+    }
+    // C. For all other senders, require placement keywords in subject
+    else {
+      const isPlacementRelevant =
+        /shortlist|selection|online\s+test|coding\s+test|assessment|interview|ppt|pre-placement|super\s+dream|dream\s+core|registration|internship|placement\s+drive|campus\s+drive|hiring|cdc\s+info|candidate\s+information|offer|joining|onboarding/i.test(
+          subj
+        );
+      if (!isPlacementRelevant) {
+        shouldFetchFull = false;
+      }
+    }
+
+    if (!shouldFetchFull) {
+      ctx.liveTracker.processedMessages++;
+      return result;
+    }
+
+    // Stage 2: Full message detail & attachments
+    const parsedEmail = await withQuotaBackoff(() => fetchMessageDetail(gmail, msgId));
+    const t2 = Date.now();
+
+    ctx.onProgress?.({
+      phase: 'processing',
+      accountEmail: account.email,
+      accountType: account.account_type,
+      totalMessages: ctx.totalMessages,
+      processedMessages: ctx.liveTracker.processedMessages,
+      currentPageIndex: ctx.pageIndex,
+      currentSubject: parsedEmail.subject.slice(0, 80),
+      newEmails: ctx.liveTracker.newEmails,
+      newCompanies: ctx.liveTracker.newCompanies,
+      skippedDuplicates: ctx.liveTracker.skippedDuplicates,
+      errors: [],
+    });
+
+    const fullEmailText = `${parsedEmail.subject}\n${parsedEmail.bodyPlain || parsedEmail.bodySnippet || ''}`;
+    const driveNumber = extractDriveNumber(fullEmailText);
+    const driveNameMatch = fullEmailText.match(/Drive Name:\s*([^.\n\r]+)/i);
+    const driveName = driveNameMatch ? driveNameMatch[1].trim() : null;
+
+    // Stage 3: Classify
+    const classification = classifyEmail(parsedEmail, deps.driveResolutionsMap);
+    let companyName = classification.companyName;
+    const t3 = Date.now();
+
+    // Timing correlation
+    if (isPersonal && driveNumber && companyName) {
+      const baseClean = cleanCompanyName(companyName);
+      if (['Apple', 'Honeywell', 'Zluri', 'EY'].some((b) => b.toLowerCase() === baseClean.toLowerCase())) {
+        const resolution = await resolveDriveByTimingCorrelation(
+          supabase,
+          driveNumber,
+          baseClean,
+          parsedEmail.receivedAt,
+          deps.circularCatalog,
+          deps.persistedResolutions
+        );
+        if (resolution) {
+          companyName = resolution.resolvedCompanyName;
+          deps.driveResolutionsMap.set(driveNumber, resolution.resolvedCompanyName);
+        }
+      }
+    }
+
+    // College role cataloging
+    if (!isPersonal) {
+      const baseCompanies = ['Apple', 'Honeywell', 'Zluri', 'EY'];
+      for (const base of baseCompanies) {
+        if (new RegExp(`\\b${base}\\b`, 'i').test(parsedEmail.subject) || new RegExp(`\\b${base}\\b`, 'i').test(parsedEmail.bodyPlain || parsedEmail.bodySnippet || '')) {
+          const { extractTrackOrRole } = await import('@/lib/sync/drive-correlator');
+          const trackInfo = extractTrackOrRole(fullEmailText, base);
+          if (trackInfo) {
+            const key = base.toLowerCase();
+            if (!deps.circularCatalog.has(key)) deps.circularCatalog.set(key, []);
+            deps.circularCatalog.get(key)!.push({
+              emailId: parsedEmail.gmailMessageId,
+              companyBaseName: base,
+              role: trackInfo.role,
+              track: trackInfo.track,
+              resolvedCompanyName: trackInfo.resolvedCompanyName,
+              sourceDate: parsedEmail.receivedAt,
+              subject: parsedEmail.subject,
+            });
+          }
+        }
+      }
+    }
+
+    let companyId: string | null = null;
+    const isPlacementClassification = !['irrelevant', 'unclassified', 'general'].includes(
+      classification.classification
+    );
+
+    // Stage 4: Upsert company
+    if (companyName && isPlacementClassification) {
+      const isNeoPatEmail =
+        isPersonal &&
+        /noreply\.cdcinfo@vitstudent\.ac\.in/i.test(
+          parsedEmail.senderEmail || parsedEmail.sender
+        );
+
+      companyId = await upsertCompany(supabase, userId, companyName, isNeoPatEmail, driveNumber, driveName);
+
+      if (companyId) {
+        const { count } = await supabase
+          .from('emails')
+          .select('id', { count: 'exact', head: true })
+          .eq('company_id', companyId);
+
+        if (count === 0) {
+          result.newCompanies++;
+          ctx.liveTracker.newCompanies++;
+        }
+
+        // DUAL-WRITE FIX: Baseline initialization only!
+        // Do NOT overwrite status with 'withdrawn' or keywords here.
+        // Leave all status evaluation, withdrawals, opt-outs, and promotions
+        // strictly to processEmailForEventsAndStatus!
+        const { data: currentApp } = await supabase
+          .from('applications')
+          .select('id')
+          .eq('user_id', userId)
+          .eq('company_id', companyId)
+          .single();
+
+        if (!currentApp) {
+          // Use upsert with ignoreDuplicates so concurrent processSingleMessage calls
+          // for the same company (e.g. two emails in the same batch) don't race-crash.
+          // The first call wins; subsequent calls on the same (user_id, company_id) are no-ops.
+          await supabase.from('applications').upsert({
+            user_id: userId,
+            company_id: companyId,
+            status: 'not_applied',
+            status_source: isPersonal ? 'neopat_personal_email' : 'college_email_announcement',
+            status_confidence: 'high',
+            status_source_email_at: parsedEmail.receivedAt.toISOString(),
+            last_updated: new Date().toISOString(),
+          }, { onConflict: 'user_id,company_id', ignoreDuplicates: true });
+        }
+      }
+    }
+    const t4 = Date.now();
+
+    // Insert email into DB
+    const { data: insertedEmail, error: insertError } = await supabase
+      .from('emails')
+      .insert({
+        user_id: userId,
+        gmail_account_id: account.id,
+        company_id: companyId,
+        gmail_message_id: parsedEmail.gmailMessageId,
+        thread_id: parsedEmail.threadId,
+        subject: parsedEmail.subject,
+        sender: parsedEmail.sender,
+        received_at: parsedEmail.receivedAt.toISOString(),
+        body_snippet: (parsedEmail.bodyPlain || parsedEmail.bodySnippet || '').slice(
+          0,
+          !isPersonal && isTrustedSender(parsedEmail.senderEmail || parsedEmail.sender, isPersonal) ? 50000 : 10000
+        ),
+        classification: classification.classification,
+        is_processed: true,
+        is_relevant: classification.classification !== 'irrelevant',
+        processed_at: new Date().toISOString(),
+      })
+      .select('id')
+      .single();
+
+    if (insertError) {
+      if (insertError.code === '23505') {
+        result.skippedDuplicates++;
+        ctx.liveTracker.skippedDuplicates++;
+      } else {
+        result.errors.push(insertError.message);
+      }
+    } else {
+      result.newEmails++;
+      ctx.liveTracker.newEmails++;
+
+      // Stage 5: Status engine (with hard 8s timeout — prevents AI retry loops from stalling a page)
+      if (companyId && insertedEmail) {
+        const { processEmailForEventsAndStatus } = await import(
+          '@/lib/sync/status-engine'
+        );
+        try {
+          await Promise.race([
+            processEmailForEventsAndStatus(
+              supabase,
+              userId,
+              companyId,
+              parsedEmail,
+              insertedEmail.id,
+              deps.userNeoId,
+              account.email,
+              gmail
+            ),
+            new Promise<void>((_, reject) =>
+              setTimeout(() => reject(new Error('ai_timeout')), 8000)
+            ),
+          ]);
+        } catch (statusErr) {
+          const errMsg = statusErr instanceof Error ? statusErr.message : String(statusErr);
+          if (errMsg === 'ai_timeout') {
+            console.warn(`[processSingleMessage] Status engine timed out for msg ${msgId} ("${parsedEmail.subject.slice(0, 60)}") — skipped to protect sync budget.`);
+          } else {
+            console.error(`[processSingleMessage] Status engine error for msg ${msgId}:`, statusErr);
+          }
+        }
+      }
+    }
+
+    const t5 = Date.now();
+    console.log(
+      `[msg ${msgId}] metadata: ${t1 - t0}ms | detail: ${t2 - t1}ms | classify: ${t3 - t2}ms | upsert: ${t4 - t3}ms | status-engine: ${t5 - t4}ms | total: ${t5 - t0}ms`
+    );
+
+    result.emailsProcessed++;
+    ctx.liveTracker.processedMessages++;
+  } catch (emailErr) {
+    ctx.liveTracker.processedMessages++;
+    const errMsg = emailErr instanceof Error ? emailErr.message : String(emailErr);
+    const isQuota = /quota exceeded|rate.?limit|units.?per.?minute/i.test(errMsg);
+    if (!isQuota) {
+      result.errors.push(errMsg);
+    }
+  }
+
+  return result;
+}
+
 /**
  * Processes a single sync page.
  * Reverses ONLY this page's message_ids (giving oldest-to-newest chronological order within this page),
- * preserves per-message processing logic, and respects timeBudgetMs.
+ * processes each batch of messages concurrently via Promise.allSettled, and respects timeBudgetMs.
  */
 export async function processPage(
   supabase: ReturnType<typeof createAdminClient>,
@@ -218,7 +545,8 @@ export async function processPage(
     persistedResolutions: Map<string, any>;
     driveResolutionsMap: Map<string, string>;
   },
-  onProgress?: (progress: SyncProgress) => void
+  onProgress?: (progress: SyncProgress) => void,
+  initialCounts?: { newEmails: number; newCompanies: number; skippedDuplicates: number }
 ): Promise<ProcessPageResult> {
   // Mark page in_progress
   await supabase
@@ -255,6 +583,13 @@ export async function processPage(
   const errorsList: string[] = [];
   let currentIndex = startIndex;
 
+  const liveTracker: LiveSyncTracker = {
+    processedMessages: startIndex,
+    newEmails: initialCounts?.newEmails ?? 0,
+    newCompanies: initialCounts?.newCompanies ?? 0,
+    skippedDuplicates: initialCounts?.skippedDuplicates ?? 0,
+  };
+
   for (let i = startIndex; i < chronoSortedMsgIds.length; i += BATCH_SIZE) {
     const elapsed = Date.now() - startTime;
     // Check if time budget exceeded before processing next batch
@@ -280,221 +615,60 @@ export async function processPage(
     }
 
     const batch = chronoSortedMsgIds.slice(i, i + BATCH_SIZE);
+    currentIndex += batch.length;
 
-    for (const msgId of batch) {
-      currentIndex++;
-
-      if (existingInDb.has(msgId)) {
-        skippedDuplicatesCount++;
-        continue;
-      }
-
-      try {
-        // Stage 1: Cheap metadata inspection
-        let shouldFetchFull = true;
-        const metadata = await withQuotaBackoff(() => fetchMessageMetadata(gmail, msgId));
-        const subj = metadata.subject.toLowerCase();
-        const senderLower = metadata.senderEmail.toLowerCase();
-
-        // A. Always block known non-placement senders
-        if (BLOCKED_SENDERS.test(senderLower)) {
-          shouldFetchFull = false;
-        }
-        // B. Always allow trusted CDC/NeoPAT senders
-        else if (isTrustedSender(senderLower, isPersonal)) {
-          shouldFetchFull = true;
-        }
-        // C. For all other senders, require placement keywords in subject
-        else {
-          const isPlacementRelevant =
-            /shortlist|selection|online\s+test|coding\s+test|assessment|interview|ppt|pre-placement|super\s+dream|dream\s+core|registration|internship|placement\s+drive|campus\s+drive|hiring|cdc\s+info|candidate\s+information|offer|joining|onboarding/i.test(
-              subj
-            );
-          if (!isPlacementRelevant) {
-            shouldFetchFull = false;
-          }
-        }
-
-        if (!shouldFetchFull) {
-          continue;
-        }
-
-        // Stage 2: Full message detail & attachments
-        const parsedEmail = await withQuotaBackoff(() => fetchMessageDetail(gmail, msgId));
-
-        onProgress?.({
-          phase: 'processing',
-          accountEmail: account.email,
-          accountType: account.account_type,
+    // Process batch concurrently — one rejection won't abort others (Promise.allSettled)
+    const batchResults = await Promise.allSettled(
+      batch.map((msgId) =>
+        processSingleMessage(msgId, {
+          supabase,
+          userId,
+          account,
+          gmail,
+          fetchMessageMetadata,
+          isPersonal,
+          isAccountInitialSync,
+          existingInDb,
+          deps,
+          pageIndex: page.page_index,
           totalMessages: chronoSortedMsgIds.length,
-          processedMessages: currentIndex,
-          currentPageIndex: page.page_index,
-          currentSubject: parsedEmail.subject.slice(0, 80),
-          newEmails: newEmailsCount,
-          newCompanies: newCompaniesCount,
-          skippedDuplicates: skippedDuplicatesCount,
-          errors: errorsList,
-        });
+          onProgress,
+          liveTracker,
+        })
+      )
+    );
 
-        const fullEmailText = `${parsedEmail.subject}\n${parsedEmail.bodyPlain || parsedEmail.bodySnippet || ''}`;
-        const driveNumber = extractDriveNumber(fullEmailText);
-
-        // Classify the email with resolved drive numbers
-        const classification = classifyEmail(parsedEmail, deps.driveResolutionsMap);
-        let companyName = classification.companyName;
-
-        // Timing correlation
-        if (isPersonal && driveNumber && companyName) {
-          const baseClean = cleanCompanyName(companyName);
-          if (['Apple', 'Honeywell', 'Zluri', 'EY'].some((b) => b.toLowerCase() === baseClean.toLowerCase())) {
-            const resolution = await resolveDriveByTimingCorrelation(
-              supabase,
-              driveNumber,
-              baseClean,
-              parsedEmail.receivedAt,
-              deps.circularCatalog,
-              deps.persistedResolutions
-            );
-            if (resolution) {
-              companyName = resolution.resolvedCompanyName;
-              deps.driveResolutionsMap.set(driveNumber, resolution.resolvedCompanyName);
-            }
-          }
-        }
-
-        // College role cataloging
-        if (!isPersonal) {
-          const baseCompanies = ['Apple', 'Honeywell', 'Zluri', 'EY'];
-          for (const base of baseCompanies) {
-            if (new RegExp(`\\b${base}\\b`, 'i').test(parsedEmail.subject) || new RegExp(`\\b${base}\\b`, 'i').test(parsedEmail.bodyPlain || parsedEmail.bodySnippet || '')) {
-              const { extractTrackOrRole } = await import('@/lib/sync/drive-correlator');
-              const trackInfo = extractTrackOrRole(fullEmailText, base);
-              if (trackInfo) {
-                const key = base.toLowerCase();
-                if (!deps.circularCatalog.has(key)) deps.circularCatalog.set(key, []);
-                deps.circularCatalog.get(key)!.push({
-                  emailId: parsedEmail.gmailMessageId,
-                  companyBaseName: base,
-                  role: trackInfo.role,
-                  track: trackInfo.track,
-                  resolvedCompanyName: trackInfo.resolvedCompanyName,
-                  sourceDate: parsedEmail.receivedAt,
-                  subject: parsedEmail.subject,
-                });
-              }
-            }
-          }
-        }
-
-        let companyId: string | null = null;
-        const isPlacementClassification = !['irrelevant', 'unclassified', 'general'].includes(
-          classification.classification
-        );
-
-        if (companyName && isPlacementClassification) {
-          const isNeoPatEmail =
-            isPersonal &&
-            /noreply\.cdcinfo@vitstudent\.ac\.in/i.test(
-              parsedEmail.senderEmail || parsedEmail.sender
-            );
-
-          companyId = await upsertCompany(supabase, userId, companyName, isNeoPatEmail);
-
-          if (companyId) {
-            // Check if newly created company
-            const { count } = await supabase
-              .from('emails')
-              .select('id', { count: 'exact', head: true })
-              .eq('company_id', companyId);
-
-            if (count === 0) {
-              newCompaniesCount++;
-            }
-
-            // DUAL-WRITE FIX: Baseline initialization only!
-            // Do NOT overwrite status with 'withdrawn' or keywords here.
-            // Leave all status evaluation, withdrawals, opt-outs, and promotions
-            // strictly to processEmailForEventsAndStatus!
-            const { data: currentApp } = await supabase
-              .from('applications')
-              .select('id')
-              .eq('user_id', userId)
-              .eq('company_id', companyId)
-              .single();
-
-            if (!currentApp) {
-              await supabase.from('applications').insert({
-                user_id: userId,
-                company_id: companyId,
-                status: 'not_applied',
-                status_source: isPersonal ? 'neopat_personal_email' : 'college_email_announcement',
-                status_confidence: 'high',
-                status_source_email_at: parsedEmail.receivedAt.toISOString(),
-                last_updated: new Date().toISOString(),
-              });
-            }
-          }
-        }
-
-        // Insert email into DB
-        const { data: insertedEmail, error: insertError } = await supabase
-          .from('emails')
-          .insert({
-            user_id: userId,
-            gmail_account_id: account.id,
-            company_id: companyId,
-            gmail_message_id: parsedEmail.gmailMessageId,
-            thread_id: parsedEmail.threadId,
-            subject: parsedEmail.subject,
-            sender: parsedEmail.sender,
-            received_at: parsedEmail.receivedAt.toISOString(),
-            body_snippet: (parsedEmail.bodyPlain || parsedEmail.bodySnippet || '').slice(
-              0,
-              !isPersonal && isTrustedSender(parsedEmail.senderEmail || parsedEmail.sender, isPersonal) ? 50000 : 10000
-            ),
-            classification: classification.classification,
-            is_processed: true,
-            is_relevant: classification.classification !== 'irrelevant',
-            processed_at: new Date().toISOString(),
-          })
-          .select('id')
-          .single();
-
-        if (insertError) {
-          if (insertError.code === '23505') {
-            skippedDuplicatesCount++;
-          } else {
-            errorsList.push(insertError.message);
-          }
-        } else {
-          newEmailsCount++;
-
-          if (companyId && insertedEmail) {
-            const { processEmailForEventsAndStatus } = await import(
-              '@/lib/sync/status-engine'
-            );
-            await processEmailForEventsAndStatus(
-              supabase,
-              userId,
-              companyId,
-              parsedEmail,
-              insertedEmail.id,
-              deps.userNeoId,
-              account.email,
-              gmail
-            );
-          }
-        }
-
-        emailsProcessedCount++;
-      } catch (emailErr) {
-        const errMsg = emailErr instanceof Error ? emailErr.message : String(emailErr);
+    // Aggregate results from all settled promises
+    for (const settled of batchResults) {
+      if (settled.status === 'fulfilled') {
+        emailsProcessedCount += settled.value.emailsProcessed;
+        newEmailsCount += settled.value.newEmails;
+        newCompaniesCount += settled.value.newCompanies;
+        skippedDuplicatesCount += settled.value.skippedDuplicates;
+        errorsList.push(...settled.value.errors);
+      } else {
+        // Promise.allSettled rejection means a top-level unhandled error escaped processSingleMessage
+        const errMsg = settled.reason instanceof Error ? settled.reason.message : String(settled.reason);
         const isQuota = /quota exceeded|rate.?limit|units.?per.?minute/i.test(errMsg);
         if (!isQuota) {
           errorsList.push(errMsg);
         }
       }
     }
+
+    // Emit live aggregated progress after each batch completes
+    onProgress?.({
+      phase: 'processing',
+      accountEmail: account.email,
+      accountType: account.account_type,
+      totalMessages: chronoSortedMsgIds.length,
+      processedMessages: liveTracker.processedMessages,
+      currentPageIndex: page.page_index,
+      newEmails: liveTracker.newEmails,
+      newCompanies: liveTracker.newCompanies,
+      skippedDuplicates: liveTracker.skippedDuplicates,
+      errors: errorsList,
+    });
 
     // Persist checkpoint after each batch to survive sudden shutdowns
     await supabase
@@ -560,6 +734,8 @@ export async function runSync(
   options?: {
     isBackgroundCron?: boolean;
     timeBudgetMs?: number;
+    /** Shared wall-clock deadline (epoch ms) for the entire cron invocation. Stops dispatching new pages once reached. */
+    globalDeadline?: number;
   }
 ): Promise<SyncResult> {
   const supabase = createAdminClient();
@@ -807,22 +983,29 @@ export async function runSync(
           let messageIds: string[] = [];
           let nextHistoryId: string | null = null;
 
-          if (account.last_history_id) {
+          if (account.account_type === 'personal') {
+            // Personal account: master records for NeoPAT companies and registrations.
+            // There are only ~270 emails across the entire season (~200ms to fetch IDs).
+            // Always query all messages from 2026/07/01 so in-memory deduplication catches
+            // any missed emails from previous interruptions or history gaps.
+            const query = getPlacementSearchQuery('personal');
+            messageIds = await fetchMessageIds(gmail, query, 2500);
+            nextHistoryId = await getProfileHistoryId(gmail);
+          } else if (account.last_history_id) {
             const historyResult = await fetchHistoryChanges(gmail, account.last_history_id);
             if (!historyResult.historyExpired) {
               messageIds = historyResult.messageIds;
               nextHistoryId = historyResult.latestHistoryId;
             } else {
               const afterDate = account.last_sync_at ? new Date(account.last_sync_at) : undefined;
-              const query = getPlacementSearchQuery(account.account_type as 'personal' | 'college', afterDate);
-              const maxLimit = account.account_type === 'personal' ? 1000 : 2500;
+              const query = getPlacementSearchQuery('college', afterDate);
+              const maxLimit = 2500;
               messageIds = await fetchMessageIds(gmail, query, maxLimit);
               nextHistoryId = historyResult.latestHistoryId || (await getProfileHistoryId(gmail));
             }
           } else {
-            const afterDate = account.last_sync_at ? new Date(account.last_sync_at) : undefined;
-            const query = getPlacementSearchQuery(account.account_type as 'personal' | 'college', afterDate);
-            const maxLimit = account.account_type === 'personal' ? 2500 : 5000;
+            const query = getPlacementSearchQuery('college');
+            const maxLimit = 5000;
             messageIds = await fetchMessageIds(gmail, query, maxLimit);
             nextHistoryId = await getProfileHistoryId(gmail);
           }
@@ -857,82 +1040,178 @@ export async function runSync(
           }
         }
 
-        // If there are pending pages, process the appropriate page
+        // If there are pending pages, process them
         if (pendingPages.length > 0) {
-          // Foreground: ALWAYS target Page 0 if pending (most recent ~150 emails).
-          // If Page 0 is already complete, target the lowest pending page.
-          // Background cron: target lowest pending page.
-          let targetPage = pendingPages.find((p) => p.page_index === 0);
-          if (!targetPage || (options?.isBackgroundCron && targetPage.status === 'complete')) {
-            targetPage = pendingPages[0];
-          }
-
           const totalPagesCount = pages.length;
-          const targetIndex = targetPage.page_index;
-          progress.phase = 'processing';
-          progress.currentPageIndex = targetIndex;
-          progress.totalPagesCount = totalPagesCount;
-          progress.totalMessages = targetPage.message_ids.length;
-          progress.processedMessages = targetPage.next_offset || 0;
-          notifyProgress(progress, true);
-
-          const timeBudgetMs = options?.timeBudgetMs || (options?.isBackgroundCron ? 45_000 : 40_000);
+          const perPageBudgetMs = options?.timeBudgetMs || 45_000;
 
           // Lazy-load drive resolutions and catalog only when a page is actively being processed
           const { persistedResolutions: pRes, driveResolutionsMap: dMap } = await getDriveResolutions();
           const cCatalog = await getCircularCatalog();
 
-          const pageRes = await processPage(
-            supabase,
-            userId,
-            account,
-            targetPage,
-            timeBudgetMs,
-            {
-              userNeoId,
-              userEmail,
-              circularCatalog: cCatalog,
-              persistedResolutions: pRes,
-              driveResolutionsMap: dMap,
-            },
-            (pageProg) => {
-              pageProg.currentPageIndex = targetIndex;
-              pageProg.totalPagesCount = totalPagesCount;
-              notifyProgress(pageProg);
+          if (options?.isBackgroundCron) {
+            // ── BACKGROUND CRON PATH ──────────────────────────────────────────────────────
+            // Loop over ALL pending pages until the global deadline is consumed.
+            // Each processPage call gets up to 45s (or whatever remains until deadline).
+            // If processPage returns completed: false, it paused mid-page (will resume
+            // from next_offset on the following tick) — move on, don't block cron here.
+            const globalDeadline = options?.globalDeadline ?? (Date.now() + CRON_TOTAL_BUDGET_MS);
+
+            // Re-fetch pending pages in ascending order (oldest unprocessed first)
+            let remainingPages = [...pendingPages].sort((a, b) => a.page_index - b.page_index);
+
+            for (const targetPage of remainingPages) {
+              if (Date.now() >= globalDeadline) {
+                console.log(`[Cron Sync] Global deadline reached for account ${account.email}. Stopping page loop.`);
+                break;
+              }
+
+              const targetIndex = targetPage.page_index;
+              progress.phase = 'processing';
+              progress.currentPageIndex = targetIndex;
+              progress.totalPagesCount = totalPagesCount;
+              progress.totalMessages = targetPage.message_ids.length;
+              progress.processedMessages = targetPage.next_offset || 0;
+              notifyProgress(progress, true);
+
+              const budgetForThisPage = Math.min(perPageBudgetMs, globalDeadline - Date.now());
+              if (budgetForThisPage <= 0) break;
+
+              const pageRes = await processPage(
+                supabase,
+                userId,
+                account,
+                targetPage,
+                budgetForThisPage,
+                {
+                  userNeoId,
+                  userEmail,
+                  circularCatalog: cCatalog,
+                  persistedResolutions: pRes,
+                  driveResolutionsMap: dMap,
+                },
+                (pageProg) => {
+                  pageProg.currentPageIndex = targetIndex;
+                  pageProg.totalPagesCount = totalPagesCount;
+                  notifyProgress(pageProg);
+                },
+                {
+                  newEmails: result.newEmails,
+                  newCompanies: result.newCompanies,
+                  skippedDuplicates: result.skippedDuplicates,
+                }
+              );
+
+              accountResult.emailsProcessed += pageRes.emailsProcessed;
+              accountResult.newEmails += pageRes.newEmails;
+              accountResult.newCompanies += pageRes.newCompanies;
+              result.newEmails += pageRes.newEmails;
+              result.newCompanies += pageRes.newCompanies;
+              result.skippedDuplicates += pageRes.skippedDuplicates;
+              result.errors.push(...pageRes.errors);
+              result.currentPageIndex = targetIndex;
+              result.totalPagesCount = totalPagesCount;
+
+              if (!pageRes.completed) {
+                // Page hit its own time budget mid-page; next_offset was persisted.
+                // Move to the next account — this page will resume on the next cron tick.
+                console.log(`[Cron Sync] Page ${targetIndex} paused mid-page for ${account.email}. Advancing to next account.`);
+                break;
+              }
+
+              console.log(`[Cron Sync] Page ${targetIndex} complete for ${account.email} (${pageRes.emailsProcessed} msgs).`);
             }
-          );
 
-          accountResult.emailsProcessed += pageRes.emailsProcessed;
-          accountResult.newEmails += pageRes.newEmails;
-          accountResult.newCompanies += pageRes.newCompanies;
-          result.newEmails += pageRes.newEmails;
-          result.newCompanies += pageRes.newCompanies;
-          result.skippedDuplicates += pageRes.skippedDuplicates;
-          result.errors.push(...pageRes.errors);
+            // Update history ID if all pages are now done
+            const { data: refreshedPages } = await supabase
+              .from('sync_pages')
+              .select('status')
+              .eq('gmail_account_id', account.id);
 
-          // Check if all pages for this account are now complete
-          const { data: refreshedPages } = await supabase
-            .from('sync_pages')
-            .select('status')
-            .eq('gmail_account_id', account.id);
+            const allDone = refreshedPages && refreshedPages.length > 0 && refreshedPages.every((p) => p.status === 'complete');
+            if (allDone) {
+              const nextHistId = await getProfileHistoryId(gmail).catch(() => null);
+              await supabase
+                .from('gmail_accounts')
+                .update({
+                  last_sync_at: new Date().toISOString(),
+                  last_history_id: nextHistId || account.last_history_id,
+                })
+                .eq('id', account.id);
+            }
+            result.isPage0Complete = refreshedPages?.find((p: any) => p.page_index === 0)?.status === 'complete';
+            result.hasMorePagesPending = !allDone;
 
-          const allDone = refreshedPages && refreshedPages.length > 0 && refreshedPages.every((p) => p.status === 'complete');
-          if (allDone) {
-            const nextHistId = await getProfileHistoryId(gmail).catch(() => null);
-            await supabase
-              .from('gmail_accounts')
-              .update({
-                last_sync_at: new Date().toISOString(),
-                last_history_id: nextHistId || account.last_history_id,
-              })
-              .eq('id', account.id);
+          } else {
+            // ── FOREGROUND / MANUAL SYNC PATH ────────────────────────────────────────────
+            // Foreground: ALWAYS target Page 0 if pending (most recent ~150 emails).
+            // If Page 0 is already complete, target the lowest pending page.
+            let targetPage = pendingPages.find((p) => p.page_index === 0) || pendingPages[0];
+
+            const targetIndex = targetPage.page_index;
+            progress.phase = 'processing';
+            progress.currentPageIndex = targetIndex;
+            progress.totalPagesCount = totalPagesCount;
+            progress.totalMessages = targetPage.message_ids.length;
+            progress.processedMessages = targetPage.next_offset || 0;
+            notifyProgress(progress, true);
+
+            const pageRes = await processPage(
+              supabase,
+              userId,
+              account,
+              targetPage,
+              perPageBudgetMs,
+              {
+                userNeoId,
+                userEmail,
+                circularCatalog: cCatalog,
+                persistedResolutions: pRes,
+                driveResolutionsMap: dMap,
+              },
+              (pageProg) => {
+                pageProg.currentPageIndex = targetIndex;
+                pageProg.totalPagesCount = totalPagesCount;
+                notifyProgress(pageProg);
+              },
+              {
+                newEmails: result.newEmails,
+                newCompanies: result.newCompanies,
+                skippedDuplicates: result.skippedDuplicates,
+              }
+            );
+
+            accountResult.emailsProcessed += pageRes.emailsProcessed;
+            accountResult.newEmails += pageRes.newEmails;
+            accountResult.newCompanies += pageRes.newCompanies;
+            result.newEmails += pageRes.newEmails;
+            result.newCompanies += pageRes.newCompanies;
+            result.skippedDuplicates += pageRes.skippedDuplicates;
+            result.errors.push(...pageRes.errors);
+
+            // Check if all pages for this account are now complete
+            const { data: refreshedPages } = await supabase
+              .from('sync_pages')
+              .select('status')
+              .eq('gmail_account_id', account.id);
+
+            const allDone = refreshedPages && refreshedPages.length > 0 && refreshedPages.every((p) => p.status === 'complete');
+            if (allDone) {
+              const nextHistId = await getProfileHistoryId(gmail).catch(() => null);
+              await supabase
+                .from('gmail_accounts')
+                .update({
+                  last_sync_at: new Date().toISOString(),
+                  last_history_id: nextHistId || account.last_history_id,
+                })
+                .eq('id', account.id);
+            }
+
+            result.currentPageIndex = targetIndex;
+            result.totalPagesCount = totalPagesCount;
+            result.isPage0Complete = targetIndex === 0 && pageRes.completed;
+            result.hasMorePagesPending = !allDone;
           }
-
-          // Update result flags
-          result.currentPageIndex = targetIndex;
-          result.totalPagesCount = totalPagesCount;
-          result.isPage0Complete = targetIndex === 0 && pageRes.completed;
-          result.hasMorePagesPending = !allDone;
         }
       } catch (accountErr) {
         const errMsg =
@@ -956,7 +1235,7 @@ export async function runSync(
     try {
       const { data: unlinkedEmails } = await supabase
         .from('emails')
-        .select('id, thread_id, subject, sender, received_at')
+        .select('id, thread_id, subject, sender, received_at, body_snippet')
         .eq('user_id', userId)
         .is('company_id', null);
 
@@ -985,6 +1264,25 @@ export async function runSync(
             }
           }
 
+          // TEMPORAL FILTER: Build Drive Anchor Date map (company_id -> latest Anchor Date)
+          // An Anchor Date is the latest received_at of a NeoPAT email or an email containing pat-PL-
+          const { data: anchorEmails } = await supabase
+            .from('emails')
+            .select('company_id, received_at')
+            .eq('user_id', userId)
+            .not('company_id', 'is', null)
+            .or('sender.ilike.%noreply.cdcinfo@vitstudent.ac.in%,body_snippet.ilike.%pat-PL-%');
+          
+          const companyAnchorDates = new Map<string, number>();
+          for (const ae of anchorEmails || []) {
+            if (!ae.company_id || !ae.received_at) continue;
+            const time = new Date(ae.received_at).getTime();
+            const current = companyAnchorDates.get(ae.company_id) || 0;
+            if (time > current) {
+               companyAnchorDates.set(ae.company_id, time);
+            }
+          }
+
           // B. Build NeoPAT registration timeline map for timing correlation (±24h window)
           const { data: neoPatEmails } = await supabase
             .from('emails')
@@ -1008,17 +1306,18 @@ export async function runSync(
             let matchedCompanyId: string | null = null;
 
             // 1. Direct Company Name Extraction Match
-            // Note: Omitting body_snippet to save egress; extraction relies on subject & sender
             const compName = extractCompanyName(
               email.subject || '',
               email.sender || '',
-              '',
+              email.body_snippet || '',
               email.received_at ? new Date(email.received_at) : undefined
             );
 
             if (compName) {
               const norm = normalizeCompanyName(compName).toLowerCase();
-              const matched = allUserComps.find((c) => {
+              const unlinkedDrive = extractDriveNumber(`${email.subject}\n${email.body_snippet || ''}`);
+
+              const matchedList = allUserComps.filter((c) => {
                 const cLower = c.name.toLowerCase();
                 return (
                   cLower === norm ||
@@ -1027,8 +1326,60 @@ export async function runSync(
                   (c.aliases || []).some((a: string) => isFuzzyCompanyMatch(a, compName))
                 );
               });
+
+              let matched = null;
+              if (matchedList.length === 1) {
+                matched = matchedList[0];
+              } else if (matchedList.length > 1) {
+                // Ambiguous! Disambiguate using drive number if present
+                if (unlinkedDrive) {
+                  for (const cand of matchedList) {
+                    const { data: candEmails } = await supabase
+                      .from('emails')
+                      .select('body_snippet')
+                      .eq('company_id', cand.id)
+                      .not('body_snippet', 'is', null)
+                      .ilike('body_snippet', '%pat-PL-%')
+                      .limit(5);
+                    const drives = (candEmails || []).flatMap((e: { body_snippet: string | null }) => extractAllDriveNumbers(e.body_snippet || ''));
+                    if (drives.includes(unlinkedDrive)) {
+                      matched = cand;
+                      break;
+                    }
+                  }
+                }
+              }
+
               if (matched) {
-                matchedCompanyId = matched.id;
+                // If unlinked email carries a drive number, ensure candidate company is not bound to a different drive
+                let driveConflict = false;
+                if (unlinkedDrive) {
+                  // Check existing emails for candidate company
+                  const { data: cEmails } = await supabase
+                    .from('emails')
+                    .select('body_snippet')
+                    .eq('company_id', matched.id)
+                    .not('body_snippet', 'is', null)
+                    .ilike('body_snippet', '%pat-PL-%')
+                    .limit(5);
+
+                  const establishedDrives = (cEmails || []).flatMap((e: { body_snippet: string | null }) =>
+                    extractAllDriveNumbers(e.body_snippet || '')
+                  );
+
+                  if (establishedDrives.length > 0 && !establishedDrives.includes(unlinkedDrive)) {
+                    driveConflict = true;
+                  }
+                }
+
+                if (!driveConflict) {
+                  // TEMPORAL FILTER: Only accept if >= Anchor Date - 14 days
+                  const anchorTime = companyAnchorDates.get(matched.id);
+                  const emailTime = email.received_at ? new Date(email.received_at).getTime() : 0;
+                  if (!anchorTime || emailTime >= anchorTime - 14 * 24 * 60 * 60 * 1000) {
+                    matchedCompanyId = matched.id;
+                  }
+                }
               }
             }
 
@@ -1036,7 +1387,12 @@ export async function runSync(
             if (!matchedCompanyId && email.thread_id) {
               const candidateSet = threadCompanyMap.get(email.thread_id);
               if (candidateSet && candidateSet.size === 1) {
-                matchedCompanyId = Array.from(candidateSet)[0];
+                const candId = Array.from(candidateSet)[0];
+                const anchorTime = companyAnchorDates.get(candId);
+                const emailTime = email.received_at ? new Date(email.received_at).getTime() : 0;
+                if (!anchorTime || emailTime >= anchorTime - 14 * 24 * 60 * 60 * 1000) {
+                  matchedCompanyId = candId;
+                }
               }
             }
 
@@ -1052,7 +1408,41 @@ export async function runSync(
 
               const uniqueCandidates = Array.from(new Set(candidates.map((c) => c.companyId)));
               if (uniqueCandidates.length === 1) {
-                matchedCompanyId = uniqueCandidates[0];
+                const candidateCompanyId = uniqueCandidates[0];
+
+                // Fix B: If the candidate company already has an established drive number,
+                // require the unlinked email to share that drive number OR pass a strict
+                // normalized-key name match. Prevents stale timing-only re-associations
+                // after a company's identity is already well-anchored.
+                const { data: existingCompEmails } = await supabase
+                  .from('emails')
+                  .select('body_snippet')
+                  .eq('company_id', candidateCompanyId)
+                  .not('body_snippet', 'is', null)
+                  .limit(5);
+
+                const existingDriveNums = (existingCompEmails || [])
+                  .flatMap((e: { body_snippet: string | null }) => extractAllDriveNumbers(e.body_snippet || ''));
+
+                let timingMatchOk = true;
+                if (existingDriveNums.length > 0) {
+                  const emailDriveNums = extractAllDriveNumbers(email.subject || '');
+                  if (emailDriveNums.length > 0) {
+                    const hasMatchingDrive = emailDriveNums.some((d) => existingDriveNums.includes(d));
+                    if (!hasMatchingDrive) {
+                      timingMatchOk = false;
+                      console.log(`[Timing Correlation] Skipped attach for email "${email.subject}" → company ${candidateCompanyId}: established drive nums [${existingDriveNums.join(',')}] not found in email.`);
+                    }
+                  }
+                }
+
+                if (timingMatchOk) {
+                  const anchorTime = companyAnchorDates.get(candidateCompanyId);
+                  const emailTime = email.received_at ? new Date(email.received_at).getTime() : 0;
+                  if (!anchorTime || emailTime >= anchorTime - 14 * 24 * 60 * 60 * 1000) {
+                    matchedCompanyId = candidateCompanyId;
+                  }
+                }
               }
               // If > 1 candidates, ambiguous: do not guess!
             }
@@ -1166,9 +1556,7 @@ export async function runSync(
 
 const GENERIC_MATCH_TOKENS = new Set([
   'pvt', 'ltd', 'limited', 'private', 'inc', 'corp', 'corporation',
-  'co', 'company', 'llc', 'llp', 'solutions', 'services', 'technologies',
-  'technology', 'tech', 'group', 'india', 'global', 'international',
-  'systems', 'consulting', 'software', 'infotech', 'infosystems',
+  'co', 'company', 'llc', 'llp',
   'super', 'dream', 'regular', 'core', 'internship', 'placement', 'drive',
   'finance', 'batch', '2026', '2027', '2028', 'urgent', 'extended', 'deadline',
   'update', 'updated', 'campus', 'hiring', 'recruitment', 'talk', 'test',
@@ -1184,15 +1572,11 @@ export function isFuzzyCompanyMatch(compName: string, targetName: string): boole
   let cLower = compName.toLowerCase().trim();
   let tLower = targetName.toLowerCase().trim();
 
-  // Guard: Never merge distinct role tracks or divisions (SDET, SRE, SAP, GDS, Aerospace, Solutions Lab, Technologies) with base company or each other
-  const trackTokens = ['sdet', 'sre', 'sap', 'gds', 'aerospace', 'solutions lab', 'technologies'];
-  for (const tok of trackTokens) {
-    if (
-      (cLower.includes(tok) && !tLower.includes(tok)) ||
-      (!cLower.includes(tok) && tLower.includes(tok))
-    ) {
-      return false;
-    }
+  // Guard: Never merge "EY <Track>" with a non-EY company (e.g. "EY SAP" with "SAP")
+  const cHasEy = /\b(?:ey|ernst\s*&\s*young)\b/.test(cLower);
+  const tHasEy = /\b(?:ey|ernst\s*&\s*young)\b/.test(tLower);
+  if (cHasEy !== tHasEy) {
+    return false;
   }
 
   // Normalize known typos
@@ -1219,15 +1603,16 @@ export function isFuzzyCompanyMatch(compName: string, targetName: string): boole
   }
 
   // --- Step 2: Distinctive token overlap (handles abbreviations / partial names) ---
+  const KNOWN_SHORT_BRANDS = new Set(['ey', 'hp', 'ge', 'bp', 'gs', 'ti', 'de']);
   const cTokens = cLower
     .replace(/[^a-z0-9\s]/g, ' ')
     .split(/\s+/)
-    .filter((w) => w.length >= 3 && !GENERIC_MATCH_TOKENS.has(w));
+    .filter((w) => (w.length >= 3 || KNOWN_SHORT_BRANDS.has(w)) && !GENERIC_MATCH_TOKENS.has(w));
 
   const tTokens = tLower
     .replace(/[^a-z0-9\s]/g, ' ')
     .split(/\s+/)
-    .filter((w) => w.length >= 3 && !GENERIC_MATCH_TOKENS.has(w));
+    .filter((w) => (w.length >= 3 || KNOWN_SHORT_BRANDS.has(w)) && !GENERIC_MATCH_TOKENS.has(w));
 
   if (cTokens.length === 0 || tTokens.length === 0) {
     return false;
@@ -1255,17 +1640,63 @@ export function isFuzzyCompanyMatch(compName: string, targetName: string): boole
 
 /**
  * Creates or retrieves a company by name for a given user.
- * Handles normalization and alias checking.
+ * Handles normalization, alias checking, and drive number isolation.
  */
 async function upsertCompany(
   supabase: ReturnType<typeof createAdminClient>,
   userId: string,
   companyName: string,
-  allowCreate: boolean = true
+  allowCreate: boolean = true,
+  driveNumber?: string | null,
+  driveName?: string | null
 ): Promise<string | null> {
   const normalized = normalizeCompanyName(companyName);
 
   if (!normalized || normalized.length < 2) return null;
+
+  // Helper: check if a candidate company is already bound to a DIFFERENT drive number
+  const isBoundToOtherDrive = async (candidateCompId: string): Promise<boolean> => {
+    if (!driveNumber) return false;
+    const { data: boundEmails } = await supabase
+      .from('emails')
+      .select('body_snippet')
+      .eq('company_id', candidateCompId)
+      .not('body_snippet', 'is', null)
+      .ilike('body_snippet', '%pat-PL-%')
+      .limit(5);
+
+    const existingDrives = (boundEmails || [])
+      .flatMap((e: { body_snippet: string | null }) => extractAllDriveNumbers(e.body_snippet || ''));
+
+    return existingDrives.length > 0 && !existingDrives.includes(driveNumber);
+  };
+
+  // 0. If driveNumber is provided, check if a company already has this driveNumber directly
+  if (driveNumber) {
+    const { data: driveComp } = await supabase
+      .from('companies')
+      .select('id')
+      .eq('user_id', userId)
+      .eq('drive_number', driveNumber)
+      .maybeSingle();
+
+    if (driveComp?.id) {
+      return driveComp.id;
+    }
+
+    const { data: driveEmail } = await supabase
+      .from('emails')
+      .select('company_id')
+      .eq('user_id', userId)
+      .not('company_id', 'is', null)
+      .ilike('body_snippet', `%${driveNumber}%`)
+      .limit(1)
+      .maybeSingle();
+
+    if (driveEmail?.company_id) {
+      return driveEmail.company_id;
+    }
+  }
 
   // 1. Check exact name match for this user
   const { data: existing } = await supabase
@@ -1275,7 +1706,7 @@ async function upsertCompany(
     .eq('name', normalized)
     .single();
 
-  if (existing) {
+  if (existing && !(await isBoundToOtherDrive(existing.id))) {
     return existing.id;
   }
 
@@ -1287,16 +1718,11 @@ async function upsertCompany(
     .contains('aliases', [normalized.toLowerCase()])
     .single();
 
-  if (aliasMatch) {
+  if (aliasMatch && !(await isBoundToOtherDrive(aliasMatch.id))) {
     return aliasMatch.id;
   }
 
   // 3. Dynamic matching against existing user companies.
-  // isFuzzyCompanyMatch checks (in order):
-  //   a. Track guard: never merge distinct tracks (SDET/SRE/Aerospace/Solutions Lab)
-  //   b. Normalized-key match: catches "goldmansachs" == "Goldman Sachs", "ExxonMobil" == "Exxon Mobil"
-  //   c. Acronym / Initialism match: catches "WTW" == "Willis Towers Watson", "TCS" == "Tata Consultancy Services"
-  //   d. Token overlap: catches "PlaySimple" matching "PlaySimple Games"
   const { data: userCompanies } = await supabase
     .from('companies')
     .select('id, name, aliases')
@@ -1306,17 +1732,9 @@ async function upsertCompany(
     for (const comp of userCompanies) {
       const aliasMatch = (comp.aliases || []).some((a: string) => isFuzzyCompanyMatch(a, normalized));
       if (isFuzzyCompanyMatch(comp.name, normalized) || aliasMatch) {
-        // Automatically persist new alias on the company if not already present
-        const existingAliases: string[] = comp.aliases || [];
-        const normLower = normalized.toLowerCase();
-        if (!existingAliases.includes(normLower)) {
-          const updatedAliases = [...existingAliases, normLower];
-          await supabase
-            .from('companies')
-            .update({ aliases: updatedAliases })
-            .eq('id', comp.id);
+        if (!(await isBoundToOtherDrive(comp.id))) {
+          return comp.id;
         }
-        return comp.id;
       }
     }
   }
@@ -1328,19 +1746,43 @@ async function upsertCompany(
 
   // 5. If no match found and allowCreate is true (Personal email), create new company
   const generatedAliases = extractCompanyAliases(companyName, normalized);
+  if (driveNumber && !generatedAliases.includes(driveNumber.toLowerCase())) {
+    generatedAliases.push(driveNumber.toLowerCase());
+  }
+
   const { data: newCompany, error } = await supabase
     .from('companies')
     .insert({
       user_id: userId,
       name: normalized,
       aliases: generatedAliases,
+      drive_number: driveNumber || null,
+      drive_name: driveName || null,
     })
     .select('id')
     .single();
 
   if (error) {
-    // Unique constraint violation — race condition, fetch existing
     if (error.code === '23505') {
+      // If we rejected the existing company because it was bound to another drive,
+      // we must not return it! We must create a new isolated entry with a suffixed name.
+      if (driveNumber) {
+        const suffixedName = `${normalized} (${driveNumber.split('-').pop()})`;
+        const { data: retryComp } = await supabase
+          .from('companies')
+          .insert({
+            user_id: userId,
+            name: suffixedName,
+            aliases: generatedAliases,
+            drive_number: driveNumber || null,
+            drive_name: driveName || null,
+          })
+          .select('id')
+          .single();
+        if (retryComp) return retryComp.id;
+      }
+
+      // Otherwise, it was just a standard race condition, return the existing
       const { data: refetch } = await supabase
         .from('companies')
         .select('id')

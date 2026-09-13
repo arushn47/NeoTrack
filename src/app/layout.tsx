@@ -31,13 +31,13 @@ const siteUrl =
 export const metadata: Metadata = {
   metadataBase: new URL(siteUrl),
   title: {
-    default: "Where's My Offer — Campus Placement Radar",
-    template: "%s — Where's My Offer",
+    default: "Where's My Offer? — Campus Placement Radar",
+    template: "%s — Where's My Offer?",
   },
   description:
     "Real-time campus placement radar. Automated email sync, shortlist spreadsheet scanner, OA test alerts, and interview rounds in one unified mission-control dashboard.",
   keywords: [
-    "Where's My Offer",
+    "Where's My Offer?",
     "Where's My Offer App",
     "Campus Placement Radar",
     "Campus Placement Tracker",
@@ -51,10 +51,10 @@ export const metadata: Metadata = {
     "Interview Schedule Manager",
     "Job Application Tracking System",
   ],
-  authors: [{ name: "Where's My Offer Team", url: siteUrl }],
-  creator: "Where's My Offer",
-  publisher: "Where's My Offer",
-  applicationName: "Where's My Offer",
+  authors: [{ name: "Where's My Offer? Team", url: siteUrl }],
+  creator: "Where's My Offer?",
+  publisher: "Where's My Offer?",
+  applicationName: "Where's My Offer?",
   category: "Productivity",
   manifest: "/manifest.json",
   alternates: {
@@ -64,8 +64,8 @@ export const metadata: Metadata = {
     type: "website",
     locale: "en_US",
     url: siteUrl,
-    siteName: "Where's My Offer",
-    title: "Where's My Offer — Campus Placement Radar",
+    siteName: "Where's My Offer?",
+    title: "Where's My Offer? — Campus Placement Radar",
     description:
       "Never miss a shortlist, test, or interview. Real-time campus placement tracking and automated email parsing.",
     images: [
@@ -73,13 +73,13 @@ export const metadata: Metadata = {
         url: "/opengraph-image",
         width: 1200,
         height: 630,
-        alt: "Where's My Offer — Campus Placement Radar",
+        alt: "Where's My Offer? — Campus Placement Radar",
       },
     ],
   },
   twitter: {
     card: "summary_large_image",
-    title: "Where's My Offer — Campus Placement Radar",
+    title: "Where's My Offer? — Campus Placement Radar",
     description:
       "Never miss a shortlist, test, or interview. Real-time campus placement tracking and automated email parsing.",
     images: ["/opengraph-image"],
@@ -98,7 +98,7 @@ export const metadata: Metadata = {
   appleWebApp: {
     capable: true,
     statusBarStyle: "black-translucent",
-    title: "Where's My Offer",
+    title: "Where's My Offer?",
   },
   icons: {
     icon: [
@@ -117,7 +117,7 @@ const jsonLd = {
     {
       "@type": "WebApplication",
       "@id": `${siteUrl}/#webapp`,
-      name: "Where's My Offer",
+      name: "Where's My Offer?",
       url: siteUrl,
       applicationCategory: "EducationalApplication, BusinessApplication",
       operatingSystem: "All modern web browsers, Android, iOS",
@@ -140,7 +140,7 @@ const jsonLd = {
     {
       "@type": "Organization",
       "@id": `${siteUrl}/#organization`,
-      name: "Where's My Offer",
+      name: "Where's My Offer?",
       url: siteUrl,
       logo: `${siteUrl}/opengraph-image`,
       description: "Smart Campus Placement and Drive Intelligence Platform.",

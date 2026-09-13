@@ -19,6 +19,7 @@ import {
 } from 'lucide-react';
 import { cn, timeAgo, formatStipend } from '@/lib/utils';
 import { StatusChip, CategoryBadge } from '@/components/ui/status-chip';
+import { StageStepper, getStageIndex, getEffectiveStage } from '@/components/companies/stage-stepper';
 
 export interface CompanyWithDetails {
   id: string;
@@ -77,11 +78,35 @@ const matchFilter = (status: string, filter: string) => {
   const s = status.toLowerCase();
   if (filter === 'all') return true;
   if (filter === 'active') {
-    return ['applied', 'shortlisted', 'test', 'interview', 'offer', 'offer_received', 'selected'].includes(s);
+    // Active = everything currently in progress (applied, scheduled, completed, shortlisted, offers)
+    // Only terminal rejections, non-registrations, and withdrawals are excluded
+    return !['not_shortlisted', 'rejected', 'not_applied', 'withdrawn', 'declined'].includes(s);
   }
-  if (filter === 'shortlisted') return s === 'shortlisted';
+  if (filter === 'shortlisted') {
+    // Only active shortlists for upcoming rounds, selections, or offers (NOT completed rounds awaiting results)
+    if (s.includes('completed')) return false;
+    return [
+      'shortlisted',
+      'test_scheduled',
+      'interview_scheduled',
+      'interview',
+      'test',
+      'selected',
+      'offer',
+      'offer_received',
+    ].includes(s);
+  }
   if (filter === 'scheduled') {
-    return ['test_scheduled', 'interview_scheduled', 'ppt_scheduled', 'ppt'].includes(s);
+    // Only upcoming scheduled events (NOT completed events)
+    if (s.includes('completed')) return false;
+    return [
+      'test_scheduled',
+      'interview_scheduled',
+      'ppt_scheduled',
+      'test',
+      'ppt',
+      'interview',
+    ].includes(s);
   }
   if (filter === 'not_shortlisted') return ['rejected', 'not_shortlisted'].includes(s);
   if (filter === 'withdrawn') return ['withdrawn', 'declined', 'not_applied'].includes(s);
@@ -133,17 +158,47 @@ export default function CompaniesClient({ companies }: CompaniesClientProps) {
   const [filter, setFilter] = useState('active');
 
   const filteredCompanies = useMemo(() => {
-    return companies
-      .filter((c) => matchFilter(c.application?.status || 'applied', filter))
+    const list = companies
+      .filter((c) => {
+        const rawStatus = c.application?.status || 'applied';
+        const { effectiveStatus } = getEffectiveStage(rawStatus, c.latestEvent, c.events);
+        return matchFilter(effectiveStatus, filter);
+      })
       .filter((c) => {
         if (!q.trim()) return true;
         const haystack = `${c.name} ${c.application?.role || ''} ${c.application?.ctc || ''} ${c.application?.location || ''}`.toLowerCase();
         return haystack.includes(q.toLowerCase().trim());
       });
+
+    if (filter === 'not_shortlisted') {
+      return [...list].sort((a, b) => {
+        const getRank = (comp: CompanyWithDetails) => {
+          const rawStatus = comp.application?.status || 'applied';
+          const eff = getEffectiveStage(rawStatus, comp.latestEvent, comp.events);
+          if (eff.eliminatedStage === 3) return 4; // Interview round eliminated
+          if (eff.effectiveStatus === 'rejected' && eff.eliminatedStage === 2) return 3; // Eliminated in test round
+          if (eff.eliminatedStage === 2) return 2; // Not shortlisted for test (after PPT)
+          return 1; // Screened out in initial screening (stage 0)
+        };
+
+        const rankA = getRank(a);
+        const rankB = getRank(b);
+        if (rankB !== rankA) {
+          return rankB - rankA; // Higher progression first (test/interview eliminated at top)
+        }
+
+        // Secondary sort: most recent email/update first
+        const dateA = new Date(a.latestEmailDate || a.updated_at || 0).getTime();
+        const dateB = new Date(b.latestEmailDate || b.updated_at || 0).getTime();
+        return dateB - dateA;
+      });
+    }
+
+    return list;
   }, [companies, filter, q]);
 
   return (
-    <div data-testid="companies-page" className="mx-auto max-w-7xl w-full min-w-0 max-w-full">
+    <div data-testid="companies-page" className="mx-auto max-w-7xl w-full min-w-0">
       {/* Page Header */}
       <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-3 sm:gap-4">
         <div>
@@ -205,12 +260,15 @@ export default function CompaniesClient({ companies }: CompaniesClientProps) {
       {/* 2-Column Company Cards Grid (Emergent Style) */}
       <div className="mt-4 grid grid-cols-1 lg:grid-cols-2 gap-3 w-full min-w-0 max-w-full">
         {filteredCompanies.map((c, i) => {
-          const status = c.application?.status || 'applied';
+          const nextEv = c.latestEvent;
+          const rawStatus = c.application?.status || 'applied';
+          const effectiveResult = getEffectiveStage(rawStatus, nextEv, c.events);
+          const status = effectiveResult.effectiveStatus;
+          const stageIndex = effectiveResult.stageIndex;
           const role = c.application?.role || 'Campus Placement Drive';
           const category = c.application?.category || (/1[0-9]\s*lpa|[2-9][0-9]\s*lpa/i.test(c.application?.ctc || '') ? 'Super Dream' : 'Dream');
           const initials = c.name.slice(0, 2).toUpperCase();
           const hue = getHue(c.name);
-          const nextEv = c.latestEvent;
 
           // Mode & Travel display
           const notesStr = (c.application?.notes || '').toLowerCase();
@@ -283,6 +341,31 @@ export default function CompaniesClient({ companies }: CompaniesClientProps) {
                   <span className="ml-auto font-mono text-[10px] text-zinc-600 shrink-0">
                     {c.application?.last_updated ? timeAgo(c.application.last_updated) : 'Active'}
                   </span>
+                </div>
+
+                {/* Recruitment Stage Stepper */}
+                <div className="mt-3.5 pt-3 border-t border-zinc-800/80">
+                  <div className="mb-2 flex items-center justify-between">
+                    <span className="font-mono text-[10px] uppercase tracking-widest text-zinc-500">
+                      Recruitment Stage
+                    </span>
+                    <span
+                      className={cn(
+                        'font-mono text-[10px]',
+                        effectiveResult.eliminatedStage !== -1
+                          ? 'text-rose-400 font-semibold'
+                          : 'text-zinc-500'
+                      )}
+                    >
+                      {effectiveResult.statusSubtitle}
+                    </span>
+                  </div>
+                  <StageStepper
+                    status={rawStatus}
+                    latestEvent={nextEv}
+                    events={c.events}
+                    compact
+                  />
                 </div>
 
                 {nextEv && (

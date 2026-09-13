@@ -68,19 +68,19 @@ export default async function DashboardPage() {
     selected: 0,
   };
 
-  const activeStatuses = ['applied', 'shortlisted', 'ppt_scheduled', 'test_scheduled', 'interview_scheduled'];
+  const inactiveStatuses = ['not_shortlisted', 'rejected', 'not_applied', 'withdrawn', 'declined'];
   const appStatusMap = new Map<string, string>();
 
   if (applications) {
     for (const app of applications) {
       appStatusMap.set(app.company_id, app.status);
-      if (activeStatuses.includes(app.status)) stats.active_applications++;
+      if (!inactiveStatuses.includes(app.status)) stats.active_applications++;
       if (app.status === 'applied') stats.applied++;
-      if (app.status === 'shortlisted') stats.shortlisted++;
+      if (['shortlisted', 'test_scheduled', 'test_completed', 'interview_scheduled', 'interview_completed'].includes(app.status)) stats.shortlisted++;
       if (app.status === 'not_shortlisted') stats.not_shortlisted++;
       if (app.status === 'rejected') stats.rejected++;
       if (app.status === 'withdrawn' || app.status === 'declined') stats.withdrawn++;
-      if (app.status === 'selected') stats.selected++;
+      if (['selected', 'offer', 'offer_received'].includes(app.status)) stats.selected++;
     }
   }
 

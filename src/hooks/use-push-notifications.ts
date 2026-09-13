@@ -21,6 +21,7 @@ export function usePushNotifications() {
   const [isSupported, setIsSupported] = useState(false);
   const [permission, setPermission] = useState<NotificationPermission>('default');
   const [isSubscribed, setIsSubscribed] = useState(false);
+  const [isChecking, setIsChecking] = useState(true);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -36,44 +37,39 @@ export function usePushNotifications() {
       const perm = Notification.permission;
       setPermission(perm);
 
-      navigator.serviceWorker.ready.then(async (registration) => {
-        let subscription = await registration.pushManager.getSubscription();
+      navigator.serviceWorker.ready
+        .then(async (registration) => {
+          try {
+            const subscription = await registration.pushManager.getSubscription();
+            setIsSubscribed(!!subscription);
 
-        // If permission is already granted but no subscription exists, auto-subscribe!
-        if (!subscription && perm === 'granted') {
-          const vapidKey = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY;
-          if (vapidKey) {
-            try {
-              const convertedVapidKey = urlBase64ToUint8Array(vapidKey);
-              subscription = await registration.pushManager.subscribe({
-                userVisibleOnly: true,
-                applicationServerKey: convertedVapidKey as unknown as BufferSource,
-              });
-            } catch (e) {
-              console.warn('[Push Hook] Auto-subscribe error:', e);
+            // Sync subscription with backend database only if active
+            if (subscription) {
+              const subJson = subscription.toJSON();
+              if (subJson.endpoint && subJson.keys?.p256dh && subJson.keys?.auth) {
+                fetch('/api/notifications/subscribe', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                    endpoint: subJson.endpoint,
+                    p256dh: subJson.keys.p256dh,
+                    auth: subJson.keys.auth,
+                    userAgent: navigator.userAgent,
+                  }),
+                }).catch(console.error);
+              }
             }
+          } catch (err) {
+            console.warn('[Push Hook] Failed to inspect push subscription:', err);
+          } finally {
+            setIsChecking(false);
           }
-        }
-
-        setIsSubscribed(!!subscription);
-
-        // Sync subscription with backend database
-        if (subscription) {
-          const subJson = subscription.toJSON();
-          if (subJson.endpoint && subJson.keys?.p256dh && subJson.keys?.auth) {
-            fetch('/api/notifications/subscribe', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                endpoint: subJson.endpoint,
-                p256dh: subJson.keys.p256dh,
-                auth: subJson.keys.auth,
-                userAgent: navigator.userAgent,
-              }),
-            }).catch(console.error);
-          }
-        }
-      });
+        })
+        .catch(() => {
+          setIsChecking(false);
+        });
+    } else {
+      setIsChecking(false);
     }
   }, []);
 
@@ -213,6 +209,7 @@ export function usePushNotifications() {
     isSupported,
     permission,
     isSubscribed,
+    isChecking,
     loading,
     error,
     subscribeToPush,

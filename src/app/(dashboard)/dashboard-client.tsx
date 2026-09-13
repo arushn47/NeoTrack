@@ -122,7 +122,7 @@ export default function DashboardClient({
   // Top 4 active drives with urgent stages or high progression
   const spotlightDrives = useMemo(() => {
     const active = activeApplications.filter(
-      (a) => ['selected', 'interview_scheduled', 'test_scheduled', 'shortlisted', 'applied'].includes(a.status)
+      (a) => !['not_shortlisted', 'rejected', 'not_applied', 'withdrawn', 'declined'].includes(a.status)
     );
     return active.slice(0, 4);
   }, [activeApplications]);
@@ -132,11 +132,11 @@ export default function DashboardClient({
     { id: 'active', label: 'Active Drives', value: stats.active_applications, sub: 'across both inboxes', accent: 'sky' as const },
     { id: 'tests', label: 'Upcoming Tests', value: stats.upcoming_tests + stats.upcoming_interviews, sub: upcomingEvents.length > 0 ? `next ${formatEventTime(upcomingEvents[0].start_time)}` : 'all caught up', accent: 'amber' as const },
     { id: 'shortlists', label: 'Shortlists', value: stats.shortlisted, sub: 'matched in Excel files', accent: 'violet' as const },
-    { id: 'offers', label: 'Offers Won', value: stats.selected, sub: stats.selected > 0 ? 'congratulations 🎉' : 'radar tracking', accent: 'emerald' as const },
+    { id: 'offers', label: 'Offers Received', value: stats.selected, sub: stats.selected > 0 ? 'congratulations 🎉' : 'radar tracking', accent: 'emerald' as const },
   ];
 
   return (
-    <div data-testid="dashboard-page" className="mx-auto max-w-7xl space-y-5 sm:space-y-6 w-full min-w-0 max-w-full">
+    <div data-testid="dashboard-page" className="mx-auto max-w-7xl space-y-5 sm:space-y-6 w-full min-w-0">
       {/* Onboarding Alert Banner if missing requirements */}
       {(!hasCollegeAccount || !hasNeoId) && (
         <div className="rounded-2xl border border-amber-500/30 bg-amber-500/[0.05] p-3.5 sm:p-5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 sm:gap-4">
@@ -149,7 +149,7 @@ export default function DashboardClient({
               <p className="text-[11px] sm:text-xs text-zinc-400 mt-0.5">
                 {!hasCollegeAccount
                   ? 'Connect your @vitstudent.ac.in account in Settings so the engine can parse shortlists and test links.'
-                  : "Add your roll number in Settings so Where's My Offer can match your name in shortlist Excel files."}
+                  : "Add your roll number in Settings so Where's My Offer? can match your name in shortlist Excel files."}
               </p>
             </div>
           </div>

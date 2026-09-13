@@ -97,6 +97,52 @@ export async function processEmailForEventsAndStatus(
   const htmlText = htmlToPlainText(email.bodyHtml);
   const fullText = `${email.subject}\n${email.bodyPlain || ''}\n${htmlText}\n${email.bodySnippet || ''}`;
 
+  const { classifyEmail } = await import('@/lib/sync/classifier');
+  const emailClass = classifyEmail(email).classification;
+
+  // ─── TEMPORAL FILTER: Drive Anchor Date ──────────────────────────────────────
+  // Fetch the latest NeoPAT registration email or drive number email for this company.
+  // This ensures that if a company visits twice (e.g. July and Sept), old emails from July
+  // do not corrupt the timeline and status of the current Sept drive.
+  const { data: anchorEmail } = await supabase
+    .from('emails')
+    .select('received_at')
+    .eq('user_id', userId)
+    .eq('company_id', companyId)
+    .or('sender.ilike.%noreply.cdcinfo@vitstudent.ac.in%,body_snippet.ilike.%pat-PL-%')
+    .order('received_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (anchorEmail?.received_at && email.receivedAt) {
+    const anchorTime = new Date(anchorEmail.received_at).getTime();
+    const emailTime = new Date(email.receivedAt).getTime();
+    // Use a 14-day grace period to allow college circulars that pre-date the NeoPAT email
+    if (emailTime < anchorTime - 14 * 24 * 60 * 60 * 1000) {
+      console.log(`[Status Engine] Email "${email.subject.slice(0, 30)}" is too old for current drive (Anchor: ${new Date(anchorTime).toISOString()}). Skipping.`);
+      return;
+    }
+  }
+
+  // 0. Early check of existing application status from DB
+  const { data: existingApp } = await supabase
+    .from('applications')
+    .select('status, manual_override, applied_at, location, ctc, role, stipend, notes, status_source_email_at')
+    .eq('user_id', userId)
+    .eq('company_id', companyId)
+    .maybeSingle();
+
+  const currentStatus = existingApp?.status || 'not_applied';
+  const isOptedOut = currentStatus === 'withdrawn' || currentStatus === 'declined';
+  const isNotApplied = currentStatus === 'not_applied';
+
+  const isConfirmation =
+    emailClass === 'registration_confirmation' ||
+    /confirmed:\s*your\s+registration/i.test(subjLower) ||
+    /registration\s+(confirmed|successful|received)/i.test(fullText) ||
+    /successfully\s+registered|thank\s+you\s+for\s+(registering|applying)/i.test(fullText) ||
+    /confirms?\s+(that\s+)?(you(r|'re)|your)\s+(successful\s+)?(registration|application)/i.test(fullText);
+
   // 1. Check for Neo ID match in email body / HTML tables / subject
   const bodyMatch = checkNeoIdMatch(fullText, userNeoId, userEmail);
   let isNeoMatched = bodyMatch.matched;
@@ -120,7 +166,10 @@ export async function processEmailForEventsAndStatus(
         /shortlist|selection[_\s-]*list|test[_\s-]*shortlist|selected[_\s-]*student/i.test(a.filename)
       ));
 
-  // 2. If attachments exist and gmail client is available, scan Excel attachments ONLY if relevant!
+  // 2. Scan Excel attachments whenever the email contains a shortlist/test/candidate list.
+  // CRITICAL: Even if a student previously withdrew or opted out on NeoPAT, CDC often fails to
+  // purge them from the database roster and still includes them in the official test shortlist (e.g. EY GDS).
+  // If their Neo ID is present in the shortlist, they ARE shortlisted and must be notified!
   const isAttachmentRelevant =
     /shortlist|selection|eligible|candidate|student|list|test|assessment|interview|ppt|schedule|result|round|score/i.test(
       subjLower
@@ -204,9 +253,6 @@ export async function processEmailForEventsAndStatus(
     }
   }
 
-  const { classifyEmail } = await import('@/lib/sync/classifier');
-  const emailClass = classifyEmail(email).classification;
-
   // Downgrade body-text Neo ID matches inside elimination/rejection emails.
   // A Neo ID match inside a rejection-list body means "you were in the applicant
   // pool that got eliminated," not "you're confirmed for the next stage."
@@ -217,14 +263,6 @@ export async function processEmailForEventsAndStatus(
   if (isEliminationEmail && matchType === 'email_body') {
     isNeoMatched = false;
   }
-
-  // Check existing application status from DB
-  const { data: existingApp } = await supabase
-    .from('applications')
-    .select('status, manual_override, applied_at, location, ctc, role, stipend, notes, status_source_email_at')
-    .eq('user_id', userId)
-    .eq('company_id', companyId)
-    .single();
 
   if (isNeoMatched) {
     // Record candidate match in DB
@@ -432,7 +470,7 @@ export async function processEmailForEventsAndStatus(
         companyId,
         canonicalName: compRecord?.name || '',
         ctc: existingApp.ctc || null,
-        status: existingApp.status || 'unknown',
+        status: isNeoMatched ? 'shortlisted' : (existingApp.status || 'unknown'),
       }
     : null;
 
@@ -500,12 +538,6 @@ export async function processEmailForEventsAndStatus(
   // If email was received before the user registered (with a 2-minute clock skew grace), it's from a previous round/cycle!
   const isEmailAfterApplication = !appliedTime || emailReceivedTime >= (appliedTime - 2 * 60 * 1000);
 
-  const isConfirmation =
-    emailClass === 'registration_confirmation' ||
-    /confirmed:\s*your\s+registration/i.test(subjLower) ||
-    /registration\s+(confirmed|successful|received)/i.test(fullText) ||
-    /successfully\s+registered|thank\s+you\s+for\s+(registering|applying)/i.test(fullText) ||
-    /confirms?\s+(that\s+)?(you(r|'re)|your)\s+(successful\s+)?(registration|application)/i.test(fullText);
 
   let newStatus: string | null = null;
 
@@ -546,7 +578,10 @@ export async function processEmailForEventsAndStatus(
     // "Confirmed: Your Registration for EY Placement Drive"
     // When a new registration confirmation arrives, it resets status back to applied
     const current = existingApp?.status || 'not_applied';
-    if (current === 'not_applied' || current === 'unknown' || current === 'not_shortlisted' || isEmailAfterApplication) {
+    if (
+      (current === 'not_applied' || current === 'unknown' || current === 'not_shortlisted' || isEmailAfterApplication) &&
+      !['ppt_scheduled', 'test_scheduled', 'interview_scheduled', 'selected', 'offer'].includes(current)
+    ) {
       newStatus = 'applied';
     }
   } else if (
@@ -555,35 +590,38 @@ export async function processEmailForEventsAndStatus(
     isEmailAfterApplication
   ) {
     // RULE: Only downgrade if candidate actually APPLIED or was in the process!
+    // Do NOT downgrade companies where the user never applied or has opted out / withdrawn.
     const currentStatus = existingApp?.status || 'not_applied';
-    
-    // Check if this is a post-test round announcement (interview, next round, selection list)
-    const isPostTestRound =
-      emailClass === 'interview' ||
-      /interview\s+(?:is\s+)?scheduled|technical\s+interview|hr\s+interview|final\s+interview/i.test(subjLower) ||
-      /next\s+round/i.test(subjLower) ||
-      /selection\s+list|final\s+shortlist|congratulations.*(?:selection\s+list|selects)/i.test(subjLower) ||
-      /interview\s+shortlist|shortlist\s+for\s+interview|next\s+round\s+shortlist|shortlisted\s+for\s+next\s+round/i.test(fullText);
+    if (!['not_applied', 'withdrawn', 'declined'].includes(currentStatus)) {
+      // Check if this is a post-test round announcement (interview, next round, selection list)
+      const isPostTestRound =
+        emailClass === 'interview' ||
+        /interview\s+(?:is\s+)?scheduled|technical\s+interview|hr\s+interview|final\s+interview/i.test(subjLower) ||
+        /next\s+round/i.test(subjLower) ||
+        /selection\s+list|final\s+shortlist|congratulations.*(?:selection\s+list|selects)/i.test(subjLower) ||
+        /interview\s+shortlist|shortlist\s+for\s+interview|next\s+round\s+shortlist|shortlisted\s+for\s+next\s+round/i.test(fullText);
 
-    if (isPostTestRound) {
-      if (['test_scheduled', 'interview_scheduled'].includes(currentStatus)) {
-        // User was in the test/interview and was eliminated in a subsequent round
-        newStatus = 'rejected';
+      if (isPostTestRound) {
+        if (['test_scheduled', 'interview_scheduled'].includes(currentStatus)) {
+          // User was in the test/interview and was eliminated in a subsequent round
+          newStatus = 'rejected';
+        } else {
+          newStatus = 'not_shortlisted';
+        }
       } else {
+        // It is a test or screening shortlist email (e.g. initial test shortlist or updated test shortlist)
+        // If the candidate was not found in this shortlist, they did NOT qualify for the test!
         newStatus = 'not_shortlisted';
       }
-    } else {
-      // It is a test or screening shortlist email (e.g. initial test shortlist or updated test shortlist)
-      // If the candidate was not found in this shortlist, they did NOT qualify for the test!
-      newStatus = 'not_shortlisted';
     }
   } else if (
     // F. PPT event found in email — upgrade status for registered candidates
     extractedEvents.length > 0
   ) {
     const current = existingApp?.status || 'not_applied';
-    const hasPpt = extractedEvents.some((e) => e.eventType === 'ppt');
-    if (hasPpt && ['applied', 'not_applied', 'unknown'].includes(current)) {
+    const hasPpt = extractedEvents.some((e) => /ppt/i.test(e.eventType));
+    // Only candidates who actively applied get ppt_scheduled
+    if (hasPpt && current === 'applied') {
       newStatus = 'ppt_scheduled';
     }
   }

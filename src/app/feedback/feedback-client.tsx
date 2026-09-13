@@ -173,7 +173,7 @@ export default function FeedbackClient({ session }: FeedbackClientProps) {
             <Link href="/" className="flex items-center gap-2 sm:gap-2.5 group shrink-0">
               <AppLogoMark size={28} className="transition-transform group-hover:scale-105 shrink-0" />
               <span className="font-bold text-xs sm:text-sm tracking-tight text-white group-hover:text-emerald-300 transition-colors truncate">
-                Where&apos;s My Offer
+                Where&apos;s My Offer<span className="text-emerald-400 font-extrabold ml-0.5">?</span>
               </span>
             </Link>
             <span className="text-zinc-700 hidden sm:inline">/</span>
@@ -596,7 +596,7 @@ export default function FeedbackClient({ session }: FeedbackClientProps) {
 
         {/* Footer info */}
         <footer className="mt-8 border-t border-zinc-800/70 pt-5 flex flex-col sm:flex-row items-center justify-between gap-3 font-mono text-[11px] text-zinc-600">
-          <p>© 2026 Where&apos;s My Offer · Dedicated Placement Support Desk</p>
+          <p>© 2026 Where&apos;s My Offer? · Dedicated Placement Support Desk</p>
           <div className="flex items-center justify-center gap-3 sm:gap-4 text-zinc-500 whitespace-nowrap text-[11px]">
             <Link href="/privacy" className="hover:text-zinc-300 transition-colors whitespace-nowrap">
               Privacy Policy

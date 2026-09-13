@@ -324,32 +324,24 @@ export function classifyEmail(
 // ============================================
 
 /**
- * Common suffixes/noise words to strip from company names.
+ * Common corporate legal entity suffixes.
+ * Substantive business and brand words (e.g. "India", "Tech", "Technologies",
+ * "Technology", "Solutions", "Services", "Systems", "Software", "Consulting", "Group")
+ * are DELIBERATELY EXCLUDED so companies like "WorkIndia", "Tech Mahindra",
+ * "Cognizant Technology Solutions", "Tata Consultancy Services" are never mutilated.
  */
 const COMPANY_NOISE_WORDS = [
   'pvt', 'ltd', 'limited', 'private', 'inc', 'corp', 'corporation',
-  'co', 'company', 'llc', 'llp', 'solutions', 'services', 'technologies',
-  'technology', 'tech', 'group', 'india', 'global', 'international',
-  'systems', 'consulting', 'software', 'infotech', 'infosystems',
+  'co', 'company', 'llc', 'llp',
 ];
 
 /**
- * Legal/geographic suffixes that are NEVER a distinctive part of a company name.
- * Only strip words that are purely administrative noise, not brand/track words.
- *
- * Deliberately excluded (they CAN be distinctive):
- *   technologies, solutions, lab, labs, analytics, digital, systems, software,
- *   consulting, ventures — e.g. "Honeywell Technology Solutions Lab" vs "Honeywell Technologies"
+ * Legal corporate suffixes stripped during canonical key computation.
+ * Distinctive brand words like 'india' (e.g. WorkIndia), 'tech' (Tech Mahindra),
+ * 'solutions', 'technologies', 'services' are never stripped.
  */
 const KEY_NOISE_WORDS = new Set([
-  // Legal entity suffixes
   'pvt', 'ltd', 'limited', 'private', 'inc', 'corp', 'corporation', 'llc', 'llp',
-  // Overly generic relational/org words
-  'co', 'company', 'group',
-  // Geographic qualifiers that never distinguish a company
-  'india', 'global', 'international',
-  // Finance/services words only when pure suffix noise (e.g. "Tresvista Financial Services")
-  'financial', 'industries',
 ]);
 
 /**
@@ -626,6 +618,10 @@ export function checkAcronymMatch(shortStr: string, longStr: string): boolean {
   }
 
   // 3. Algorithmic initials matching from substantive words in base company name
+  // Must have at least 3 characters to prevent catastrophic 2-letter collisions (e.g. TA, AE, EM)
+  // Two-letter acronyms (like EY, GS, HP) MUST be explicitly listed in KNOWN_ACRONYMS.
+  if (candidate.length < 3) return false;
+
   // Strip parenthetical content first so "(WTW India)" doesn't pollute base words
   const baseStr = longLower.replace(/\([^)]*\)/g, ' ').replace(/[^a-z0-9\s]/g, ' ');
   const rawWords = baseStr.split(/\s+/).filter(Boolean);
@@ -633,19 +629,19 @@ export function checkAcronymMatch(shortStr: string, longStr: string): boolean {
 
   const connectorWords = new Set(['of', 'and', 'for', 'in', 'the', 'at', 'on', 'to', 'a', 'an']);
   const meaningfulWords = rawWords.filter((w) => !connectorWords.has(w));
-  if (meaningfulWords.length < 2) return false;
+  if (meaningfulWords.length < 3) return false;
 
   // A. All meaningful words' initials (e.g. "Willis Towers Watson" -> "wtw", "Tata Consultancy Services" -> "tcs")
   const initialsAll = meaningfulWords.map((w) => w[0]).join('');
   if (initialsAll === candidate) return true;
 
-  // B. Initials excluding legal/country noise words (e.g. "Willis Towers Watson India" -> "wtw")
-  const legalWords = new Set([
-    'india', 'pvt', 'ltd', 'limited', 'private', 'inc', 'corp', 'corporation',
-    'llc', 'tech', 'technologies', 'technology', 'solutions'
+  // B. Initials excluding corporate legal entity suffixes (e.g. "Tata Consultancy Services Pvt Ltd" -> "tcs")
+  // Substantive words like 'india', 'tech', 'technology', 'solutions' are NEVER stripped
+  const corporateLegalWords = new Set([
+    'pvt', 'ltd', 'limited', 'private', 'inc', 'corp', 'corporation', 'llc', 'llp'
   ]);
-  const withoutLegal = meaningfulWords.filter((w) => !legalWords.has(w));
-  if (withoutLegal.length >= 2 && withoutLegal.length < meaningfulWords.length) {
+  const withoutLegal = meaningfulWords.filter((w) => !corporateLegalWords.has(w));
+  if (withoutLegal.length >= 3 && withoutLegal.length < meaningfulWords.length) {
     const initialsCore = withoutLegal.map((w) => w[0]).join('');
     if (initialsCore === candidate) return true;
   }
@@ -681,32 +677,32 @@ export function extractCompanyAliases(rawName: string, canonicalName: string): s
         add(w);
       }
     }
-    if (pWords.length >= 2) {
+    if (pWords.length >= 3) {
       const pInitials = pWords.map((w) => w[0]).join('').toLowerCase();
-      if (pInitials.length >= 2 && !ENGLISH_STOPWORDS.has(pInitials)) {
+      if (pInitials.length >= 3 && !ENGLISH_STOPWORDS.has(pInitials)) {
         add(pInitials);
       }
     }
   }
 
-  // 2. Multi-word acronym generation: e.g. "Willis Towers Watson" -> "wtw"
+  // 2. Multi-word acronym generation: e.g. "Willis Towers Watson" -> "wtw" (must be >= 3 chars)
   const base = canonicalName.replace(/\([^)]*\)/g, ' ').replace(/[^a-zA-Z0-9\s]/g, ' ');
   const words = base.split(/\s+/).filter(Boolean);
-  if (words.length >= 2) {
+  if (words.length >= 3) {
     const connectors = new Set(['of', 'and', 'for', 'in', 'the', 'at', 'on', 'to']);
     const meaningful = words.filter((w) => !connectors.has(w.toLowerCase()));
-    if (meaningful.length >= 2 && meaningful.length <= 6) {
+    if (meaningful.length >= 3 && meaningful.length <= 6) {
       const acronym = meaningful.map((w) => w[0]).join('').toLowerCase();
-      if (acronym.length >= 2 && !ENGLISH_STOPWORDS.has(acronym)) {
+      if (acronym.length >= 3 && !ENGLISH_STOPWORDS.has(acronym)) {
         add(acronym);
       }
     }
 
-    const legalWords = new Set(['india', 'pvt', 'ltd', 'limited', 'private', 'inc', 'corp', 'corporation', 'llc', 'tech', 'technologies']);
-    const withoutLegal = meaningful.filter((w) => !legalWords.has(w.toLowerCase()));
-    if (withoutLegal.length >= 2 && withoutLegal.length < meaningful.length) {
+    const corporateLegalWords = new Set(['pvt', 'ltd', 'limited', 'private', 'inc', 'corp', 'corporation', 'llc', 'llp']);
+    const withoutLegal = meaningful.filter((w) => !corporateLegalWords.has(w.toLowerCase()));
+    if (withoutLegal.length >= 3 && withoutLegal.length < meaningful.length) {
       const acronymCore = withoutLegal.map((w) => w[0]).join('').toLowerCase();
-      if (acronymCore.length >= 2 && !ENGLISH_STOPWORDS.has(acronymCore)) {
+      if (acronymCore.length >= 3 && !ENGLISH_STOPWORDS.has(acronymCore)) {
         add(acronymCore);
       }
     }
@@ -888,13 +884,22 @@ export function extractCompanyName(
     /\b(?:ey\s+sap|ey\s+gds|ey\s*\(ernst\s*&\s*young\))\b/i.test(lowerCleaned);
 
   if (isEyEmail) {
-    if (lowerCleaned.includes('sap') || lowerBody.includes('ey sap')) {
+    if (
+      lowerCleaned.includes('sap') ||
+      lowerBody.includes('ey sap') ||
+      lowerBody.includes('pat-pl-2026-1191')
+    ) {
       return 'EY SAP';
     }
-    if (lowerCleaned.includes('gds') || lowerBody.includes('ey gds') || lowerBody.includes('global delivery')) {
+    if (
+      lowerCleaned.includes('gds') ||
+      lowerBody.includes('ey gds') ||
+      lowerBody.includes('global delivery') ||
+      lowerBody.includes('pat-pl-2026-1210')
+    ) {
       return 'EY GDS';
     }
-    return 'EY GDS';
+    return 'EY';
   }
 
   // Disambiguate Honeywell Aerospace vs Honeywell Technology Solutions Lab
@@ -1061,12 +1066,12 @@ export function cleanCompanyName(name: string): string {
   // 3. Remove content in remaining parentheses e.g. "(Mitsubishi UFJ Financial Group)"
   str = str.replace(/\(.*?\)/g, '').trim();
 
-  // Remove trailing noise legal words
-  const words = str.split(/\s+/);
-  const filteredWords = words.filter(
-    (w) => !COMPANY_NOISE_WORDS.includes(w.toLowerCase().replace(/[.,]/g, ''))
-  );
-  str = filteredWords.join(' ').trim();
+  // Strip trailing corporate legal entity suffixes (e.g. "Euler Motors Pvt. Ltd." -> "Euler Motors")
+  // Only strip from the END so brand words (e.g. "India", "Tech", "Technologies", "Solutions", "Services") are fully preserved
+  const LEGAL_ENTITY_TRAILING_REGEX = /\s+(?:pvt\.?\s*ltd\.?|private\s+limited|pvt\.?|private|ltd\.?|limited|inc\.?|corp\.?|corporation|llc|llp)\.?$/i;
+  while (LEGAL_ENTITY_TRAILING_REGEX.test(str)) {
+    str = str.replace(LEGAL_ENTITY_TRAILING_REGEX, '').trim();
+  }
 
   // Remove leading/trailing punctuation
   str = str.replace(/^[:\-\s\|,.\/]+|[:\-\s\|,.\/]+$/g, '').trim();
@@ -1089,11 +1094,15 @@ export function normalizeCompanyName(name: string): string {
 
   const corrected = name.replace(/\bunthikable\b/gi, 'Unthinkable');
 
-  // Title-case: keep all-caps short tokens (abbreviations) as-is
+  const UPPERCASE_TRACKS = new Set(['SDET', 'SRE', 'SAP', 'GDS', 'TCS', 'IBM', 'UBS', 'EY', 'CDC', 'JPMC', 'PWC', 'BAML', 'MUFG', 'LTI', 'CTS', 'HP', 'GS', 'MS']);
+
+  // Title-case: keep all-caps short tokens (abbreviations) and known track acronyms as-is
   return corrected
     .trim()
     .split(/\s+/)
     .map((word) => {
+      const upper = word.toUpperCase();
+      if (UPPERCASE_TRACKS.has(upper)) return upper;
       if (word.length <= 3 && word === word.toUpperCase()) return word; // Keep TCS, IBM, UBS, etc.
       return word.charAt(0).toUpperCase() + word.slice(1).toLowerCase();
     })

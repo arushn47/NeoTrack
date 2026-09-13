@@ -6,6 +6,8 @@ export interface CompanyWithApplication {
   id: string;
   name: string;
   legal_name: string | null;
+  drive_number?: string | null;
+  drive_name?: string | null;
   status: ApplicationStatus;
   status_confidence: string;
   role: string | null;
@@ -70,6 +72,8 @@ export interface CompanyDetail {
   name: string;
   legal_name: string | null;
   aliases: string[];
+  drive_number?: string | null;
+  drive_name?: string | null;
   application: {
     id: string;
     status: ApplicationStatus;

@@ -176,7 +176,7 @@ export const AppLogo: React.FC<AppLogoProps> = ({
       </div>
       <div className="leading-none min-w-0">
         <div className="font-display text-sm font-bold tracking-tight text-zinc-100 truncate group-hover:text-white transition-colors">
-          Where&apos;s My Offer
+          Where&apos;s My Offer<span className="text-emerald-400 font-extrabold ml-0.5 drop-shadow-[0_0_6px_rgba(52,211,153,0.55)]">?</span>
         </div>
         {showSubtitle && (
           <div className="mt-0.5 hidden font-mono text-[9px] uppercase tracking-widest text-zinc-500 sm:block group-hover:text-zinc-400 transition-colors">

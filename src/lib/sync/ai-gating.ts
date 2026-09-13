@@ -16,6 +16,11 @@ export interface ExistingDriveState {
   driveNumber?: string | null;
 }
 
+// Short company names that are well-known and unambiguous — don't need AI to clarify
+const KNOWN_UNAMBIGUOUS_SHORT_NAMES = new Set([
+  'tcs', 'ibm', 'ltm', 'hcl', 'cts', 'ntt', 'sap', 'nec', 'dxc', 'ptc', 'acn',
+]);
+
 /**
  * Deterministic Gating Function:
  * Returns TRUE only if Tier 1 produced an incomplete or contradictory result.
@@ -26,6 +31,11 @@ export function shouldInvokeAiFallback(
 ): { shouldInvoke: boolean; reason: string | null } {
   // Never invoke on non-placement emails or noise
   if (['irrelevant', 'unclassified', 'general'].includes(tier1.classification)) {
+    return { shouldInvoke: false, reason: null };
+  }
+
+  // Never waste AI resources on companies where the user has not applied or has opted out / withdrawn
+  if (existingState && ['not_applied', 'withdrawn', 'declined'].includes(existingState.status)) {
     return { shouldInvoke: false, reason: null };
   }
 
@@ -56,6 +66,18 @@ export function shouldInvokeAiFallback(
   // Trigger 4: Labeled match where the value could not be resolved into a known pattern
   if (tier1.rawMatchedFields?.['ctc_raw'] && !tier1.ctc) {
     return { shouldInvoke: true, reason: 'unparseable_compensation_format' };
+  }
+
+  // Trigger 5: Company name resolved, but it's a short ambiguous token (e.g. bare "EY", "3M")
+  // with no distinguishing track signal, on a clearly placement-classified email.
+  // Well-known short names (TCS, IBM, etc.) are excluded from this check.
+  if (
+    tier1.companyName &&
+    tier1.companyName.length <= 3 &&
+    !KNOWN_UNAMBIGUOUS_SHORT_NAMES.has(tier1.companyName.toLowerCase()) &&
+    ['registration', 'jd', 'shortlist'].includes(tier1.classification)
+  ) {
+    return { shouldInvoke: true, reason: 'ambiguous_short_company_name' };
   }
 
   // Clean Tier 1 hit -> Do NOT touch the LLM

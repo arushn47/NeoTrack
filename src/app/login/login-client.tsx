@@ -6,7 +6,7 @@ import Link from 'next/link';
 import { motion, useMotionValue, useSpring } from 'framer-motion';
 import Lenis from 'lenis';
 import { cn } from '@/lib/utils';
-import { AppLogoMark } from '@/components/brand/logo';
+import { AppLogo, AppLogoMark } from '@/components/brand/logo';
 import {
   Radar,
   ShieldCheck,
@@ -215,7 +215,7 @@ const chapters = [
   {
     n: '02',
     title: 'The Excel Agony',
-    copy: "Every shortlist is a 15 MB spreadsheet with 4,000 roll numbers. On your phone. Outside an exam hall. Where's My Offer scans every attachment the second it lands and flips your status automatically.",
+    copy: "Every shortlist is a 15 MB spreadsheet with 4,000 roll numbers. On your phone. Outside an exam hall. Where's My Offer? scans every attachment the second it lands and flips your status automatically.",
     visual: (
       <div className="overflow-x-auto rounded-lg border border-zinc-800 font-mono text-[10px] sm:text-[11px]">
         <div className="grid grid-cols-4 min-w-[280px] gap-px bg-zinc-800/70 text-zinc-500">
@@ -347,7 +347,7 @@ export default function LoginClient() {
           <div className="flex items-center gap-2 sm:gap-2.5 min-w-0" data-testid="landing-logo">
             <AppLogoMark size={28} className="transition-transform duration-200 hover:scale-105 shrink-0" />
             <span className="font-display text-xs sm:text-sm font-bold tracking-tight text-white truncate">
-              Where&apos;s My Offer
+              Where&apos;s My Offer<span className="text-emerald-400 font-extrabold ml-0.5 drop-shadow-[0_0_6px_rgba(52,211,153,0.55)]">?</span>
             </span>
           </div>
           <div className="flex items-center gap-3 sm:gap-5 shrink-0">
@@ -540,7 +540,7 @@ export default function LoginClient() {
         <footer className="border-t border-zinc-800/70 py-8">
           <div className="mx-auto flex max-w-7xl flex-col items-center justify-between gap-4 px-4 font-mono text-[11px] text-zinc-600 sm:flex-row sm:px-6">
             <p className="tracking-wider uppercase text-[10px]">
-              Where&apos;s My Offer © 2026
+              Where&apos;s My Offer? © 2026
             </p>
             <div className="flex items-center gap-6 text-[11px] text-zinc-500">
               <Link href="/privacy" className="transition-colors hover:text-zinc-300">

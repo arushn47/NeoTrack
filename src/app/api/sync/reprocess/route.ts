@@ -28,8 +28,17 @@ export const maxDuration = 120;
  * Tier 2: College circulars (@vitbhopal.ac.in) ONLY enrich existing NeoPAT drives with CTC, JDs,
  *         test dates, and shortlist verification. Non-NeoPAT drives (e.g. Datagrokr) are discarded.
  */
-export async function performReprocess(userId: string) {
+export async function performReprocess(
+  userId: string,
+  onProgress?: (p: { step: number; totalSteps: number; message: string }) => void
+) {
   const supabase = createAdminClient();
+
+  onProgress?.({
+    step: 1,
+    totalSteps: 5,
+    message: 'Cleaning recipient matches & fetching stored circulars…',
+  });
 
   // Fetch user details
   const { data: userData } = await supabase
@@ -117,6 +126,12 @@ export async function performReprocess(userId: string) {
 
   // 3. Phase 1: Establish Official NeoPAT Companies ONLY
   // ONLY emails from noreply.cdcinfo@vitstudent.ac.in define the company drives in NeoTrack!
+  onProgress?.({
+    step: 2,
+    totalSteps: 5,
+    message: `Analyzing ${neoPatEmails.length} official NeoPAT drives & resolving track numbers…`,
+  });
+
   const validCompanyMap = new Map<string, { id: string; canonicalName: string; activeDriveDate: Date }>(); // name -> { id, canonicalName, activeDriveDate }
   const driveNumberToCompanyMap = new Map<string, { id: string; canonicalName: string; activeDriveDate: Date }>(); // drive_number (pat-PL-*) -> comp
   const validCompanyIdSet = new Set<string>();
@@ -129,6 +144,8 @@ export async function performReprocess(userId: string) {
     const emailDate = email.received_at ? new Date(email.received_at) : new Date();
     const fullEmailText = `${subject}\n${bodySnippet}`;
     const driveNumber = extractDriveNumber(fullEmailText);
+    const driveNameMatch = fullEmailText.match(/Drive Name:\s*([^.\n\r]+)/i);
+    const driveName = driveNameMatch ? driveNameMatch[1].trim() : null;
 
     const classification = classifyEmail({
       gmailMessageId: email.id,
@@ -178,6 +195,21 @@ export async function performReprocess(userId: string) {
       // 1. Primary Identity Anchor: Check if drive_number matches an already established company
       if (driveNumber && driveNumberToCompanyMap.has(driveNumber)) {
         comp = driveNumberToCompanyMap.get(driveNumber);
+      }
+
+      // 1.5 Check if an existing company in DB has this drive_number directly
+      if (!comp && driveNumber) {
+        const { data: driveComp } = await supabase
+          .from('companies')
+          .select('id, name')
+          .eq('user_id', userId)
+          .eq('drive_number', driveNumber)
+          .maybeSingle();
+
+        if (driveComp) {
+          comp = { id: driveComp.id, canonicalName: driveComp.name, activeDriveDate: emailDate };
+          driveNumberToCompanyMap.set(driveNumber, comp);
+        }
       }
 
       // 2. Name-based lookup if no drive_number match
@@ -265,8 +297,19 @@ export async function performReprocess(userId: string) {
             if (userComps && userComps.length > 0) {
               for (const uc of userComps) {
                 if (isFuzzyCompanyMatch(uc.name, normalized)) {
-                  dbFuzzyMatch = uc;
-                  break;
+                  let ucBoundToAnother = false;
+                  if (driveNumber) {
+                    for (const [dNum, cObj] of driveNumberToCompanyMap.entries()) {
+                      if (cObj.id === uc.id && dNum !== driveNumber) {
+                        ucBoundToAnother = true;
+                        break;
+                      }
+                    }
+                  }
+                  if (!ucBoundToAnother) {
+                    dbFuzzyMatch = uc;
+                    break;
+                  }
                 }
               }
             }
@@ -280,18 +323,41 @@ export async function performReprocess(userId: string) {
             } else {
               // Create new legitimate NeoPAT company
               const generatedAliases = extractCompanyAliases(companyName, normalized);
-              const { data: newComp } = await supabase
+              if (driveNumber && !generatedAliases.includes(driveNumber.toLowerCase())) {
+                generatedAliases.push(driveNumber.toLowerCase());
+              }
+
+              let { data: newComp, error: insertError } = await supabase
                 .from('companies')
                 .insert({
                   user_id: userId,
                   name: normalized,
                   aliases: generatedAliases,
+                  drive_number: driveNumber || null,
+                  drive_name: driveName || null,
                 })
-                .select('id')
+                .select('id, name')
                 .single();
 
+              // If unique constraint violation (same name, different drive), append drive number and retry
+              if (insertError && insertError.code === '23505' && driveNumber) {
+                const suffixedName = `${normalized} (${driveNumber.split('-').pop()})`;
+                const { data: retryComp } = await supabase
+                  .from('companies')
+                  .insert({
+                    user_id: userId,
+                    name: suffixedName,
+                    aliases: generatedAliases,
+                    drive_number: driveNumber || null,
+                    drive_name: driveName || null,
+                  })
+                  .select('id, name')
+                  .single();
+                newComp = retryComp;
+              }
+
               if (newComp) {
-                comp = { id: newComp.id, canonicalName: normalized, activeDriveDate: emailDate };
+                comp = { id: newComp.id, canonicalName: newComp.name, activeDriveDate: emailDate };
               }
             }
           }
@@ -313,6 +379,9 @@ export async function performReprocess(userId: string) {
         }
         // Register all generated aliases into validCompanyMap for direct resolution
         const aliases = extractCompanyAliases(companyName, comp.canonicalName);
+        if (driveNumber && !aliases.includes(driveNumber.toLowerCase())) {
+          aliases.push(driveNumber.toLowerCase());
+        }
         for (const alias of aliases) {
           if (!validCompanyMap.has(alias.toLowerCase())) {
             validCompanyMap.set(alias.toLowerCase(), comp);
@@ -320,6 +389,27 @@ export async function performReprocess(userId: string) {
         }
         if (driveNumber) {
           driveNumberToCompanyMap.set(driveNumber, comp);
+
+          // Update company aliases and drive identity in DB
+          await supabase
+            .from('companies')
+            .update({
+              aliases,
+              drive_number: driveNumber,
+              ...(driveName ? { drive_name: driveName } : {}),
+            })
+            .eq('id', comp.id);
+
+          // Persist in drive_resolutions so unique drive number is tracked in the system
+          await supabase.from('drive_resolutions').upsert({
+            drive_number: driveNumber,
+            company_base_name: cleanCompanyName(companyName),
+            resolved_role: comp.canonicalName,
+            resolved_company_name: comp.canonicalName,
+            resolved_via: 'direct_role_text',
+            confidence: 'high',
+            updated_at: new Date().toISOString(),
+          }, { onConflict: 'drive_number' });
         }
         validCompanyIdSet.add(comp.id);
 
@@ -342,6 +432,12 @@ export async function performReprocess(userId: string) {
 
   // 4. Phase 2: Purge ANY Company in DB that is NOT in the Official NeoPAT List
   // This permanently removes Datagrokr, Google, PS Associate Engineer, and all non-NeoPAT broadcast drives.
+  onProgress?.({
+    step: 3,
+    totalSteps: 5,
+    message: `Verified ${validCompanyIdSet.size} official NeoPAT drives. Purging non-NeoPAT entries…`,
+  });
+
   const { data: currentDbCompanies } = await supabase
     .from('companies')
     .select('id, name')
@@ -360,6 +456,12 @@ export async function performReprocess(userId: string) {
   }
 
   // 5. Phase 3: Match College Emails against Official NeoPAT Companies ONLY
+  onProgress?.({
+    step: 4,
+    totalSteps: 5,
+    message: `Matching ${collegeEmails.length} college circulars, test links & shortlists…`,
+  });
+
   let collegeLinkedCount = 0;
   let collegeDiscardedCount = 0;
 
@@ -395,17 +497,24 @@ export async function performReprocess(userId: string) {
     } else if (companyName) {
       const normalized = normalizeCompanyName(companyName).toLowerCase();
 
-      // 2. Exact match first
-      if (validCompanyMap.has(normalized)) {
-        matchedCompanyId = validCompanyMap.get(normalized)!.id;
-      } else {
-        // 3. Token-based fuzzy match against legitimate NeoPAT companies
-        for (const comp of Array.from(validCompanyMap.values())) {
-          if (isFuzzyCompanyMatch(comp.canonicalName, companyName)) {
-            matchedCompanyId = comp.id;
-            break;
-          }
-        }
+      // 2. Identify candidate matches across valid NeoPAT companies
+      const uniqueComps = Array.from(new Map(Array.from(validCompanyMap.values()).map(c => [c.id, c])).values());
+      const exactMatches = uniqueComps.filter(c => c.canonicalName.toLowerCase() === normalized);
+      const fuzzyMatches = uniqueComps.filter(c => isFuzzyCompanyMatch(c.canonicalName, companyName));
+
+      const candidateComps = exactMatches.length > 0 ? exactMatches : fuzzyMatches;
+
+      if (candidateComps.length === 1) {
+        matchedCompanyId = candidateComps[0].id;
+      } else if (candidateComps.length > 1) {
+        // If multiple drives match (e.g. July Zluri vs Sept Zluri SDET, or Apple SDET vs Apple SRE),
+        // pick the drive whose active cycle is chronologically closest to this circular
+        candidateComps.sort(
+          (a, b) =>
+            Math.abs(a.activeDriveDate.getTime() - emailDate.getTime()) -
+            Math.abs(b.activeDriveDate.getTime() - emailDate.getTime())
+        );
+        matchedCompanyId = candidateComps[0].id;
       }
     }
 
@@ -476,6 +585,12 @@ export async function performReprocess(userId: string) {
   }
 
   // 6. Phase 4: Recalculate Stage Progression & Events for Official NeoPAT Companies
+  onProgress?.({
+    step: 5,
+    totalSteps: 5,
+    message: `Recalculating application stages, CTCs & calendar events for official drives…`,
+  });
+
   const { data: remainingCompanies } = await supabase
     .from('companies')
     .select('id, name')
@@ -497,6 +612,12 @@ export async function performReprocess(userId: string) {
       .eq('company_id', comp.id);
 
     if (!companyEmails || companyEmails.length === 0) continue;
+
+    onProgress?.({
+      step: 5,
+      totalSteps: 5,
+      message: `Recalculating application stages, CTCs & calendar events for official drives (${updatedAppsCount} / ${remainingCompanies?.length || 0})…`,
+    });
 
     const emailIds = new Set(companyEmails.map((e) => e.id));
     const matchedEmailIds = new Set(
@@ -1182,6 +1303,47 @@ export async function POST(req: Request) {
 
   if (!userId) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+
+  const isStream =
+    req.headers.get('accept')?.includes('text/event-stream') ||
+    new URL(req.url).searchParams.get('stream') === 'true';
+
+  if (isStream) {
+    const encoder = new TextEncoder();
+    const stream = new ReadableStream({
+      async start(controller) {
+        let isClosed = false;
+        const sendEvent = (event: string, data: unknown) => {
+          if (isClosed) return;
+          try {
+            controller.enqueue(encoder.encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`));
+          } catch {
+            isClosed = true;
+          }
+        };
+
+        try {
+          sendEvent('start', { message: 'Starting placement archive re-index…' });
+          const res = await performReprocess(userId!, (progress) => {
+            sendEvent('progress', progress);
+          });
+          sendEvent('complete', res);
+        } catch (err: any) {
+          sendEvent('error', { message: err instanceof Error ? err.message : 'Reprocess failed' });
+        } finally {
+          controller.close();
+        }
+      },
+    });
+
+    return new Response(stream, {
+      headers: {
+        'Content-Type': 'text/event-stream',
+        'Cache-Control': 'no-cache',
+        Connection: 'keep-alive',
+      },
+    });
   }
 
   try {

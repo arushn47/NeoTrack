@@ -1,6 +1,7 @@
 import { google } from 'googleapis';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { decrypt } from '@/lib/crypto/tokens';
+import { getNotificationPreferences } from '@/lib/notifications/preferences';
 
 export interface SyncCalendarEventParams {
   userId: string;
@@ -73,6 +74,20 @@ export async function pushEventToGoogleCalendar(params: SyncCalendarEventParams)
       endDate = new Date(startDate.getTime() + 60 * 60 * 1000);
     }
 
+    // Fetch user reminder preferences for Google Calendar alert popups
+    const prefs = await getNotificationPreferences(params.userId);
+    const reminderOverrides =
+      prefs.notifyReminders && prefs.reminderLeadTimeMins?.length
+        ? prefs.reminderLeadTimeMins.map((mins) => ({
+            method: mins >= 1440 ? 'email' : 'popup',
+            minutes: mins,
+          }))
+        : [
+            { method: 'popup', minutes: 30 },
+            { method: 'popup', minutes: 120 },
+            { method: 'email', minutes: 1440 },
+          ];
+
     const eventPayload = {
       summary: params.title,
       location: params.venue || 'Campus / Online',
@@ -89,11 +104,7 @@ export async function pushEventToGoogleCalendar(params: SyncCalendarEventParams)
       },
       reminders: {
         useDefault: false,
-        overrides: [
-          { method: 'popup', minutes: 30 },
-          { method: 'popup', minutes: 120 },
-          { method: 'email', minutes: 1440 }, // 24 hours before
-        ],
+        overrides: reminderOverrides,
       },
     };
 
@@ -309,6 +320,14 @@ export async function reconcileUserGoogleCalendar(userId: string): Promise<Recon
     // NEVER sync registration deadlines to Google Calendar
     if (evt.event_type === 'registration_deadline') continue;
     if (!evt.start_time) continue;
+
+    // Filter by user reminder preferences if configured
+    const userPrefs = await getNotificationPreferences(userId);
+    if (userPrefs.notifyReminders && userPrefs.reminderEventTypes?.length) {
+      if (!userPrefs.reminderEventTypes.includes(evt.event_type)) {
+        continue;
+      }
+    }
 
     const status = appStatusMap.get(evt.company_id) || 'not_applied';
     const isManual = (evt as unknown as { manual_override?: boolean }).manual_override;

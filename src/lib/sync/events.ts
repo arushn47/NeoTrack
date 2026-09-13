@@ -42,6 +42,29 @@ export function extractDriveNumber(text: string): string | null {
   return m ? m[1].trim() : null;
 }
 
+/**
+ * Extracts ALL drive numbers found anywhere in the text.
+ * Used for cross-checking whether an unlinked email shares a drive number
+ * with an already-established company (timing-correlation Fix B).
+ */
+export function extractAllDriveNumbers(text: string): string[] {
+  if (!text) return [];
+  const results: string[] = [];
+  // Match all pat-* style drive IDs
+  const patPattern = /\b(pat-[A-Za-z0-9]+-\d{4}-\d{3,6})\b/gi;
+  let m: RegExpExecArray | null;
+  while ((m = patPattern.exec(text)) !== null) {
+    results.push(m[1].trim().toLowerCase());
+  }
+  // Match "drive number: <token>" style references
+  const driveNumPattern = /drive\s+number\s*[:\-–—\t]?\s*([a-z0-9\-_]+)/gi;
+  while ((m = driveNumPattern.exec(text)) !== null) {
+    const candidate = m[1].trim().toLowerCase();
+    if (!results.includes(candidate)) results.push(candidate);
+  }
+  return results;
+}
+
 // ============================================
 // Indian Date & Time Parser
 // ============================================

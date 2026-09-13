@@ -70,26 +70,40 @@ export default function NotificationBell() {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [isOpen]);
 
-  // Mark all as read
+  // Mark all as read with keepalive and optimistic state
   const handleMarkAllRead = async () => {
+    setNotifications((prev) => prev.map((n) => ({ ...n, is_read: true })));
+    setUnreadCount(0);
     try {
-      await fetch('/api/notifications', { method: 'POST' });
-      setNotifications((prev) => prev.map((n) => ({ ...n, is_read: true })));
-      setUnreadCount(0);
+      await fetch('/api/notifications', { method: 'POST', keepalive: true });
     } catch (err) {
       console.error('Failed to mark all as read:', err);
+    }
+  };
+
+  // Mark single notification as read without navigating
+  const handleMarkSingleRead = async (id: string, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    setNotifications((prev) =>
+      prev.map((n) => (n.id === id ? { ...n, is_read: true } : n))
+    );
+    setUnreadCount((c) => Math.max(0, c - 1));
+    try {
+      await fetch(`/api/notifications/${id}/read`, { method: 'PATCH', keepalive: true });
+    } catch (err) {
+      console.error('Failed to mark notification read:', err);
     }
   };
 
   // Mark individual notification as read and navigate
   const handleNotificationClick = async (notif: InAppNotification) => {
     if (!notif.is_read) {
+      setNotifications((prev) =>
+        prev.map((n) => (n.id === notif.id ? { ...n, is_read: true } : n))
+      );
+      setUnreadCount((c) => Math.max(0, c - 1));
       try {
-        await fetch(`/api/notifications/${notif.id}/read`, { method: 'PATCH' });
-        setNotifications((prev) =>
-          prev.map((n) => (n.id === notif.id ? { ...n, is_read: true } : n))
-        );
-        setUnreadCount((c) => Math.max(0, c - 1));
+        fetch(`/api/notifications/${notif.id}/read`, { method: 'PATCH', keepalive: true }).catch(console.error);
       } catch (err) {
         console.error('Failed to mark notification read:', err);
       }
@@ -131,7 +145,7 @@ export default function NotificationBell() {
           setIsOpen(!isOpen);
           if (!isOpen) fetchNotifications();
         }}
-        className="relative p-2 rounded-lg text-text-tertiary hover:text-text-primary hover:bg-bg-surface-hover transition-all"
+        className="relative p-2 rounded-lg text-text-tertiary hover:text-text-primary hover:bg-bg-surface-hover transition-all cursor-pointer"
         aria-label="Notifications"
       >
         <Bell className="w-4 h-4" />
@@ -159,7 +173,7 @@ export default function NotificationBell() {
             {unreadCount > 0 && (
               <button
                 onClick={handleMarkAllRead}
-                className="flex items-center gap-1.5 text-xs text-zinc-400 hover:text-white transition-colors"
+                className="flex items-center gap-1.5 text-xs text-zinc-400 hover:text-white transition-colors cursor-pointer"
               >
                 <CheckCheck className="w-3.5 h-3.5" />
                 <span>Mark all read</span>
@@ -204,7 +218,17 @@ export default function NotificationBell() {
                         {notif.title}
                       </p>
                       {!notif.is_read && (
-                        <span className="w-2 h-2 rounded-full bg-accent flex-shrink-0" />
+                        <div className="flex items-center gap-1 shrink-0">
+                          <button
+                            type="button"
+                            onClick={(e) => handleMarkSingleRead(notif.id, e)}
+                            title="Mark as read"
+                            className="p-1 rounded-md text-zinc-500 hover:text-emerald-400 hover:bg-emerald-500/10 opacity-70 group-hover:opacity-100 transition-all cursor-pointer"
+                          >
+                            <CheckCircle2 className="w-3.5 h-3.5" />
+                          </button>
+                          <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 flex-shrink-0" />
+                        </div>
                       )}
                     </div>
 

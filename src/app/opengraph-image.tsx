@@ -1,7 +1,7 @@
 import { ImageResponse } from 'next/og';
 
 export const runtime = 'nodejs';
-export const alt = "Where's My Offer — Campus Placement Radar";
+export const alt = "Where's My Offer? — Campus Placement Radar";
 export const size = {
   width: 1200,
   height: 630,
@@ -50,7 +50,7 @@ export default function Image() {
           </svg>
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
             <span style={{ fontSize: '28px', fontWeight: 800, letterSpacing: '-0.5px' }}>
-              Where&apos;s My Offer
+              Where&apos;s My Offer<span style={{ color: '#34d399' }}>?</span>
             </span>
             <span
               style={{

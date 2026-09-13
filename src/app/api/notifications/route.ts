@@ -27,12 +27,12 @@ export async function GET() {
     return NextResponse.json({ error: 'Failed to fetch notifications' }, { status: 500 });
   }
 
-  // Count unread
+  // Count unread (handles both false and null)
   const { count: unreadCount } = await supabase
     .from('notifications')
     .select('id', { count: 'exact', head: true })
     .eq('user_id', session.userId)
-    .eq('is_read', false);
+    .or('is_read.eq.false,is_read.is.null');
 
   return NextResponse.json({
     notifications: notifications || [],
@@ -56,7 +56,7 @@ export async function POST() {
     .from('notifications')
     .update({ is_read: true })
     .eq('user_id', session.userId)
-    .eq('is_read', false);
+    .or('is_read.eq.false,is_read.is.null');
 
   if (error) {
     console.error('[API Notifications] Mark all read error:', error);

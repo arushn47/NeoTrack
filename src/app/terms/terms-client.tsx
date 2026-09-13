@@ -17,7 +17,7 @@ import {
 import { AppLogoMark } from '@/components/brand/logo';
 
 const LAST_UPDATED = 'September 12, 2026';
-const APP_NAME = "Where's My Offer";
+const APP_NAME = "Where's My Offer?";
 const APP_URL = 'https://wheresmyoffer.vercel.app';
 
 function AnimatedSection({ children, delay = 0 }: { children: React.ReactNode; delay?: number }) {

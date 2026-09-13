@@ -179,7 +179,7 @@ export default function CalendarClient({ events }: CalendarClientProps) {
   };
 
   return (
-    <div data-testid="calendar-page" className="mx-auto max-w-6xl w-full min-w-0 max-w-full">
+    <div data-testid="calendar-page" className="mx-auto max-w-6xl w-full min-w-0">
       {/* Header Bar */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 sm:gap-4">
         <div>

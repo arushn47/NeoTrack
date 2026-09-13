@@ -213,7 +213,7 @@ export default function AnalyticsClient({
   const totalCategorized = superDreamCount + dreamCount + regularCount || 1;
 
   return (
-    <div data-testid="analytics-page" className="space-y-5 sm:space-y-6 w-full min-w-0 max-w-full">
+    <div data-testid="analytics-page" className="mx-auto max-w-7xl space-y-5 sm:space-y-6 w-full min-w-0">
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-3 sm:gap-4">
         <div>

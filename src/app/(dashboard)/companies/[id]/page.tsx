@@ -20,7 +20,7 @@ export async function generateMetadata({
   const name = company?.name || 'Company Details';
   return {
     title: name,
-    description: `Detailed recruitment drive history, schedule, test rounds, and email updates for ${name} on Where's My Offer.`,
+    description: `Detailed recruitment drive history, schedule, test rounds, and email updates for ${name} on Where's My Offer?.`,
     alternates: {
       canonical: `/companies/${id}`,
     },
@@ -45,7 +45,6 @@ export default async function CompanyDetailPage({
     { data: candidateMatches },
     { data: userProfile },
     { data: gmailAccounts },
-    { data: attachments },
   ] = await Promise.all([
     supabase
       .from('companies')
@@ -90,11 +89,6 @@ export default async function CompanyDetailPage({
       .from('gmail_accounts')
       .select('id, email, account_type')
       .eq('user_id', session.userId),
-
-    supabase
-      .from('attachments')
-      .select('id, email_id, filename')
-      .eq('user_id', session.userId),
   ]);
 
   if (!company) {
@@ -105,14 +99,6 @@ export default async function CompanyDetailPage({
   const accountMap = new Map<string, string>();
   (gmailAccounts || []).forEach((acc) => {
     accountMap.set(acc.id, acc.email);
-  });
-
-  // Map email id to attachment filename
-  const attachmentMap = new Map<string, string>();
-  (attachments || []).forEach((att) => {
-    if (att.email_id && !attachmentMap.has(att.email_id)) {
-      attachmentMap.set(att.email_id, att.filename);
-    }
   });
 
   // Filter candidate matches to only those belonging to this company's emails
@@ -173,7 +159,7 @@ export default async function CompanyDetailPage({
       threadId: em.thread_id || null,
       gmailMessageId: em.gmail_message_id || null,
       accountEmail: em.gmail_account_id ? accountMap.get(em.gmail_account_id) || null : null,
-      attachmentName: attachmentMap.get(em.id) || null,
+      attachmentName: null,
     })),
     candidateMatches: companyCandidateMatches.map((cm) => ({
       id: cm.id,

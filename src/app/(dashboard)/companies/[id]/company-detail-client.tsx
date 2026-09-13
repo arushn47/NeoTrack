@@ -16,6 +16,7 @@ import {
 } from 'lucide-react';
 import { cn, timeAgo } from '@/lib/utils';
 import { CategoryBadge, STATUS_META } from '@/components/ui/status-chip';
+import { StageStepper, getStageIndex, getEffectiveStage } from '@/components/companies/stage-stepper';
 
 export interface CompanyDetail {
   id: string;
@@ -78,7 +79,8 @@ const STAGES = ['Applied', 'Shortlisted', 'Test', 'Interview', 'Offer'];
 
 const ALL_STATUSES = [
   { value: 'applied', label: 'Applied' },
-  { value: 'shortlisted', label: 'Shortlisted' },
+  { value: 'ppt_scheduled', label: 'PPT Scheduled' },
+  { value: 'shortlisted', label: 'Shortlisted for Test' },
   { value: 'test_scheduled', label: 'Test Scheduled' },
   { value: 'interview_scheduled', label: 'Interview Scheduled' },
   { value: 'selected', label: 'Selected 🎉' },
@@ -103,53 +105,8 @@ function getHue(name: string) {
   return HUES[hash % HUES.length];
 }
 
-function getStageIndex(status: string): number {
-  if (['selected', 'offer'].includes(status)) return 4;
-  if (status === 'interview_scheduled') return 3;
-  if (status === 'test_scheduled') return 2;
-  if (['shortlisted', 'not_shortlisted'].includes(status)) return 1;
-  if (['applied', 'withdrawn', 'declined'].includes(status)) return 0;
-  return -1;
-}
-
 const Stepper = ({ stage, status }: { stage: number; status: string }) => (
-  <div data-testid="stage-stepper" className="flex items-center">
-    {STAGES.map((s, i) => {
-      const done = stage > i || (stage === 4 && i === 4);
-      const current = stage === i && status !== 'selected';
-      return (
-        <div key={s} className="flex flex-1 items-center last:flex-none">
-          <div className="flex flex-col items-center">
-            <div
-              className={`flex h-7 w-7 items-center justify-center rounded-full border font-mono text-[10px] font-bold transition-colors ${
-                done
-                  ? 'border-emerald-500/50 bg-emerald-500/15 text-emerald-300'
-                  : current
-                  ? 'border-violet-500/60 bg-violet-500/15 text-violet-300 pulse-dot'
-                  : 'border-zinc-700 bg-zinc-900 text-zinc-600'
-              }`}
-            >
-              {done ? '✓' : i + 1}
-            </div>
-            <span
-              className={`mt-1.5 hidden text-[10px] font-medium sm:block ${
-                done ? 'text-emerald-300' : current ? 'text-violet-300 font-bold' : 'text-zinc-600'
-              }`}
-            >
-              {s}
-            </span>
-          </div>
-          {i < STAGES.length - 1 && (
-            <div
-              className={`mx-1.5 mb-0 h-px flex-1 sm:mb-4 transition-colors ${
-                stage > i ? 'bg-emerald-500/50' : 'bg-zinc-800'
-              }`}
-            />
-          )}
-        </div>
-      );
-    })}
-  </div>
+  <StageStepper stage={stage} status={status} />
 );
 
 function getCleanEmailSummary(
@@ -224,13 +181,20 @@ function getGmailLink(email: {
 
 export default function CompanyDetailClient({ company }: CompanyDetailClientProps) {
   const router = useRouter();
-  const [status, setStatus] = useState(company.application?.status || 'applied');
+  const rawStatus = company.application?.status || 'applied';
+  const effective = useMemo(
+    () => getEffectiveStage(rawStatus, null, company.events),
+    [rawStatus, company.events]
+  );
+  const [status, setStatus] = useState(
+    company.application?.manualOverride ? rawStatus : effective.effectiveStatus
+  );
   const [isUpdating, setIsUpdating] = useState(false);
   const [showStatusMenu, setShowStatusMenu] = useState(false);
   const [openAccordion, setOpenAccordion] = useState<number | null>(0);
   const [isDeleting, setIsDeleting] = useState(false);
 
-  const stage = getStageIndex(status);
+  const stage = getEffectiveStage(status, null, company.events).stageIndex;
   const terminal = status === 'rejected' || status === 'not_shortlisted' || status === 'withdrawn' || status === 'declined';
   const hue = useMemo(() => getHue(company.name), [company.name]);
   const initials = company.name.slice(0, 2).toUpperCase();
@@ -530,22 +494,25 @@ export default function CompanyDetailClient({ company }: CompanyDetailClientProp
       </motion.div>
 
       {/* Recruitment Stage Stepper */}
-      {!terminal && (
-        <motion.div
-          initial={{ opacity: 0, y: 16 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.45, delay: 0.1 }}
-          className="rounded-2xl border border-zinc-800 bg-[#101014] p-6"
-        >
-          <div className="mb-5 flex items-center justify-between">
-            <h2 className="font-mono text-[10px] uppercase tracking-widest text-zinc-500">Recruitment Stage</h2>
-            <span className="font-mono text-[10px] text-zinc-500">
-              Stage {Math.max(stage, 0) + 1} of 5
-            </span>
-          </div>
-          <Stepper stage={stage} status={status} />
-        </motion.div>
-      )}
+      <motion.div
+        initial={{ opacity: 0, y: 16 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.45, delay: 0.1 }}
+        className="rounded-2xl border border-zinc-800 bg-[#101014] p-6"
+      >
+        <div className="mb-5 flex items-center justify-between">
+          <h2 className="font-mono text-[10px] uppercase tracking-widest text-zinc-500">Recruitment Stage</h2>
+          <span
+            className={cn(
+              'font-mono text-[10px]',
+              effective.eliminatedStage !== -1 ? 'text-rose-400 font-semibold' : 'text-zinc-500'
+            )}
+          >
+            {effective.statusSubtitle}
+          </span>
+        </div>
+        <StageStepper status={status} events={company.events} />
+      </motion.div>
 
       {/* Circular & Email Timeline */}
       <motion.div

@@ -59,16 +59,14 @@ export function getPlacementSearchQuery(
       ? ` after:${afterDate.toISOString().split('T')[0].replace(/-/g, '/')}`
       : ' after:2026/07/01';
 
-    // College accounts — STRICTLY official placement office and batch placement group
-    return `(from:placementoffice@vitbhopal.ac.in OR from:vitlions2027@vitbhopal.ac.in)${collegeDateFilter} -category:promotions -category:social`;
+    // College accounts — STRICTLY official batch placement group
+    return `from:vitlions2027@vitbhopal.ac.in${collegeDateFilter} -category:promotions -category:social`;
   }
 
   // Personal accounts — STRICTLY official NeoPAT / CDC emails from vitstudent.ac.in starting July 2026
-  const personalDateFilter = afterDate
-    ? ` after:${afterDate.toISOString().split('T')[0].replace(/-/g, '/')}`
-    : ' after:2026/07/01';
-
-  return `from:noreply.cdcinfo@vitstudent.ac.in${personalDateFilter}`;
+  // Never truncate by afterDate because total personal drive circulars are small (~270 emails)
+  // and deduplicated in memory, ensuring no missed drives across sessions or interruptions.
+  return 'from:noreply.cdcinfo@vitstudent.ac.in after:2026/07/01';
 }
 
 // ============================================

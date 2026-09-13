@@ -12,6 +12,7 @@ __pycache__/
 
 # local scripts & database runners
 scripts/
+scratch/
 
 # next.js
 .next/

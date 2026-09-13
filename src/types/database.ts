@@ -36,6 +36,8 @@ export interface DbCompany {
   name: string;
   legal_name: string | null;
   aliases: string[];
+  drive_number?: string | null;
+  drive_name?: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -60,6 +62,8 @@ export interface DbApplication {
   manual_override: boolean;
   notes: string | null;
   applied_at: string | null;
+  category?: string | null;
+  status_source_email_at?: string | null;
   last_updated: string;
   created_at: string;
 }
@@ -123,6 +127,7 @@ export interface DbEvent {
   source_email_id: string | null;
   confidence: 'high' | 'medium' | 'low' | 'ai';
   manual_override: boolean;
+  gcal_event_id?: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -157,5 +162,101 @@ export interface DbNotification {
   message: string | null;
   company_id: string | null;
   is_read: boolean;
+  body?: string | null;
+  link?: string | null;
+  event_id?: string | null;
+  application_id?: string | null;
+  dedupe_key?: string | null;
   created_at: string;
+}
+
+export interface DbPushSubscription {
+  id: string;
+  user_id: string;
+  endpoint: string;
+  p256dh: string;
+  auth: string;
+  user_agent?: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface DbNotificationPreferences {
+  user_id: string;
+  browser_push_enabled: boolean;
+  in_app_enabled: boolean;
+  notify_status_change: boolean;
+  notify_shortlist: boolean;
+  notify_tests: boolean;
+  notify_interviews: boolean;
+  notify_ppt: boolean;
+  notify_new_jds: boolean;
+  notify_reminders: boolean;
+  reminder_event_types: string[];
+  reminder_lead_time_mins: number[];
+  created_at: string;
+  updated_at: string;
+}
+
+export interface DbDriveResolution {
+  id: string;
+  drive_number: string;
+  company_base_name: string;
+  resolved_role: string;
+  resolved_company_name: string;
+  resolved_via: 'timing_correlation' | 'direct_role_text' | 'manual_review' | 'historical_rule';
+  confidence: 'high' | 'medium' | 'low' | 'needs_review';
+  time_diff_seconds?: number | null;
+  candidate_circular_id?: string | null;
+  notes?: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface DbSyncState {
+  user_id: string;
+  is_syncing: boolean;
+  phase: string;
+  account_email?: string | null;
+  account_type?: string | null;
+  total_messages: number;
+  processed_messages: number;
+  new_emails: number;
+  new_companies: number;
+  skipped_duplicates: number;
+  current_subject?: string | null;
+  is_initial_sync: boolean;
+  current_page_index: number;
+  total_pages: number;
+  started_at?: string | null;
+  updated_at: string;
+  completed_at?: string | null;
+  last_error?: string | null;
+}
+
+export interface DbSyncPage {
+  id: string;
+  user_id?: string | null;
+  gmail_account_id?: string | null;
+  page_index: number;
+  message_ids: string[];
+  next_offset: number;
+  status: 'pending' | 'in_progress' | 'complete';
+  created_at: string;
+  updated_at: string;
+}
+
+export interface DbFeedbackReport {
+  id: string;
+  user_id?: string | null;
+  user_email: string;
+  user_name?: string | null;
+  category: 'bug' | 'feature' | 'sync_issue' | 'general';
+  severity: 'low' | 'normal' | 'high' | 'critical';
+  subject: string;
+  message: string;
+  metadata?: Record<string, unknown>;
+  status: 'new' | 'in_progress' | 'resolved' | 'closed';
+  created_at: string;
+  updated_at: string;
 }

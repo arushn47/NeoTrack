@@ -1,14 +1,24 @@
 import { NextRequest, NextResponse, after } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/admin';
-import { runSync } from '@/lib/sync/engine';
+import { runSync, CRON_TOTAL_BUDGET_MS } from '@/lib/sync/engine';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 300; // 5 min — handles multi-user sync on Vercel Pro
 
 async function executeBackgroundSync(userIds: string[]) {
+  // Shared wall-clock deadline for this entire cron invocation.
+  // All runSync calls share this deadline so serial per-user work
+  // can't stack and exceed maxDuration when there are multiple users.
+  const globalDeadline = Date.now() + CRON_TOTAL_BUDGET_MS;
+
   for (const userId of userIds) {
+    if (Date.now() >= globalDeadline) {
+      console.log(`[Cron Sync] Global deadline reached. Skipping remaining ${userIds.length - userIds.indexOf(userId)} user(s) — they will be picked up on the next tick.`);
+      break;
+    }
+
     try {
-      const res = await runSync(userId, undefined, { isBackgroundCron: true });
+      const res = await runSync(userId, undefined, { isBackgroundCron: true, globalDeadline });
       if (res?.alreadyRunning) {
         console.log(`[Cron Sync] User ${userId} is currently syncing. Skipped concurrent run.`);
       } else {
