@@ -666,7 +666,7 @@ export default function Topbar({ userName, userAvatar, lastSyncAt }: TopbarProps
               <div className="flex items-center gap-2 text-zinc-300 min-w-0">
                 <Sparkles className="w-3.5 h-3.5 text-emerald-400 shrink-0 animate-pulse" />
                 <p className="leading-snug text-[11px] sm:text-xs">
-                  <span className="font-semibold text-emerald-300">Initial Archive Indexing:</span> Processing drives in short cloud chunks. <span className="text-zinc-400">Every batch checkpoints to database so progress is never lost.</span>
+                  <span className="font-semibold text-emerald-300">First-Time Setup:</span> Scanning your entire placement history takes time on the initial run. <span className="text-zinc-400">Once indexed, all future syncs are near-instant (2s delta updates).</span>
                 </p>
               </div>
               <div className="flex items-center gap-1.5 text-[10px] sm:text-[11px] font-mono text-zinc-400 bg-zinc-900/90 px-2.5 py-1 rounded-md border border-zinc-800 shrink-0">
