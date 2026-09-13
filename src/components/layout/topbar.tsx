@@ -234,9 +234,14 @@ export default function Topbar({ userName, userAvatar, lastSyncAt }: TopbarProps
               } else if (currentEvent === 'complete' || currentEvent === 'sync_complete') {
                 stopPolling();
                 if (parsed.result?.hasMorePagesPending) {
+                  // Keep progress banner smoothly visible with next batch indicator
+                  setSyncProgress((prev) => prev ? {
+                    ...prev,
+                    currentSubject: 'Chunk checkpointed. Advancing to next batch...',
+                  } : null);
                   setTimeout(() => {
-                    handleSync(true); // resume silently
-                  }, 1500);
+                    handleSync(false); // Seamlessly trigger next chunk without hiding banner
+                  }, 800);
                   return;
                 }
 
@@ -249,7 +254,7 @@ export default function Topbar({ userName, userAvatar, lastSyncAt }: TopbarProps
                     show: true,
                     success: true,
                     message: syncProgress?.isInitialSync
-                      ? 'First-time sync complete! Your newest drives are ready. Older archives will continue indexing in the background.'
+                      ? 'Sync complete! All placement drives are up to date.'
                       : 'Placement sync complete',
                     newEmails: parsed.newEmails ?? parsed.result?.newEmails ?? 0,
                     newCompanies: parsed.newCompanies ?? parsed.result?.newCompanies ?? 0,
@@ -274,6 +279,23 @@ export default function Topbar({ userName, userAvatar, lastSyncAt }: TopbarProps
             }
           }
         }
+      }
+
+      // If stream ended without complete event, verify with /api/sync/status
+      if (isSyncingRef.current) {
+        try {
+          const res = await fetch('/api/sync/status');
+          if (res.ok) {
+            const data = await res.json();
+            if (data.phase === 'pending' || (data.progress && data.progress.totalPagesCount > 1)) {
+              console.log('[Topbar Sync] Stream closed with pending pages. Auto-advancing...');
+              setTimeout(() => {
+                handleSync(false);
+              }, 1200);
+              return;
+            }
+          }
+        } catch {}
       }
     } catch (err) {
       stopPolling();
@@ -632,8 +654,8 @@ export default function Topbar({ userName, userAvatar, lastSyncAt }: TopbarProps
               </span>
             ) : syncProgress.isInitialSync ? (
               <span className="text-[10px] text-teal-300 font-medium bg-teal-500/10 border border-teal-500/25 px-2.5 py-0.5 rounded-full inline-flex items-center gap-1 self-start sm:self-auto font-mono">
-                <span className="text-teal-400">⚡ Archive Sync:</span>
-                <span className="text-zinc-400">Scanning in background</span>
+                <span className="text-teal-400">⚡ Archive Indexing:</span>
+                <span className="text-zinc-400">Syncing past semester history</span>
               </span>
             ) : null}
           </div>
@@ -644,12 +666,12 @@ export default function Topbar({ userName, userAvatar, lastSyncAt }: TopbarProps
               <div className="flex items-center gap-2 text-zinc-300 min-w-0">
                 <Sparkles className="w-3.5 h-3.5 text-emerald-400 shrink-0 animate-pulse" />
                 <p className="leading-snug text-[11px] sm:text-xs">
-                  <span className="font-semibold text-emerald-300">First-Time Setup:</span> Indexing all past drives takes a few minutes. <span className="text-zinc-400">Only the first scan takes time — future syncs are instant (2s delta updates).</span>
+                  <span className="font-semibold text-emerald-300">Initial Archive Indexing:</span> Processing drives in short cloud chunks. <span className="text-zinc-400">Every batch checkpoints to database so progress is never lost.</span>
                 </p>
               </div>
               <div className="flex items-center gap-1.5 text-[10px] sm:text-[11px] font-mono text-zinc-400 bg-zinc-900/90 px-2.5 py-1 rounded-md border border-zinc-800 shrink-0">
                 <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping" />
-                <span>Runs in background · Safe to close tab</span>
+                <span>Auto-chaining chunks · Fully Resumable</span>
               </div>
             </div>
           )}

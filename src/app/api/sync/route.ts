@@ -35,6 +35,17 @@ export async function POST() {
         }
       };
 
+      // Keep-alive heartbeat ping every 2s so Vercel edge proxy never drops the SSE stream
+      const keepAliveTimer = setInterval(() => {
+        if (isClosed) return;
+        try {
+          controller.enqueue(encoder.encode(': keep-alive\n\n'));
+        } catch {
+          isClosed = true;
+          clearInterval(keepAliveTimer);
+        }
+      }, 2000);
+
       try {
         sendEvent('sync_start', {
           message: 'Starting email sync...',
@@ -46,6 +57,9 @@ export async function POST() {
           (progress: SyncProgress) => {
             sendEvent('sync_progress', progress);
             sendEvent('progress', progress);
+          },
+          {
+            timeBudgetMs: 25_000, // 25s — comfortably fits within Vercel serverless execution limits
           }
         );
 
@@ -84,6 +98,7 @@ export async function POST() {
           message: errorMessage,
         });
       } finally {
+        clearInterval(keepAliveTimer);
         controller.close();
       }
     },

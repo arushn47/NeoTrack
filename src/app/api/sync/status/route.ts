@@ -54,8 +54,8 @@ export async function GET() {
 
   if (dbSyncState?.is_syncing) {
     const updatedAt = new Date(dbSyncState.updated_at || 0).getTime();
-    // 2.5 minutes timeout: if the process died (laptop shut down), recover quickly
-    const isStale = Date.now() - updatedAt > 150 * 1000;
+    // 60 seconds timeout: active syncs touch updated_at every ~1.5s. If untouched for > 60s, the process was killed/disconnected
+    const isStale = Date.now() - updatedAt > 60 * 1000;
     if (!isStale) {
       const totalMessages = dbSyncState.total_messages || 0;
       const processedMessages = dbSyncState.processed_messages || 0;
@@ -86,6 +86,12 @@ export async function GET() {
         },
         lastSyncAt,
       });
+    } else {
+      // Heal stale lock in DB immediately so subsequent syncs or auto-resume are not blocked
+      await supabase
+        .from('sync_state')
+        .update({ is_syncing: false, phase: 'pending', updated_at: new Date().toISOString() })
+        .eq('user_id', session.userId);
     }
   }
 

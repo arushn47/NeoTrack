@@ -187,7 +187,8 @@ export async function createGmailClient(
 export async function fetchMessageIds(
   gmail: gmail_v1.Gmail,
   query: string,
-  maxResults: number = 200
+  maxResults: number = 200,
+  onBatch?: (fetched: number) => void
 ): Promise<string[]> {
   const messageIds: string[] = [];
   let pageToken: string | undefined;
@@ -206,6 +207,7 @@ export async function fetchMessageIds(
           messageIds.push(msg.id);
         }
       }
+      onBatch?.(messageIds.length);
     }
 
     pageToken = response.data.nextPageToken || undefined;

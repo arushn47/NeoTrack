@@ -546,7 +546,8 @@ export async function processPage(
     driveResolutionsMap: Map<string, string>;
   },
   onProgress?: (progress: SyncProgress) => void,
-  initialCounts?: { newEmails: number; newCompanies: number; skippedDuplicates: number }
+  initialCounts?: { newEmails: number; newCompanies: number; skippedDuplicates: number },
+  globalDeadline?: number
 ): Promise<ProcessPageResult> {
   // Mark page in_progress
   await supabase
@@ -592,9 +593,11 @@ export async function processPage(
 
   for (let i = startIndex; i < chronoSortedMsgIds.length; i += BATCH_SIZE) {
     const elapsed = Date.now() - startTime;
-    // Check if time budget exceeded before processing next batch
-    if (elapsed >= timeBudgetMs && i > startIndex) {
-      console.log(`[processPage] Time budget (${timeBudgetMs}ms) reached for page ${page.page_index} at offset ${i}/${chronoSortedMsgIds.length}. Pausing page.`);
+    const isDeadlineReached = globalDeadline ? Date.now() >= globalDeadline - 3500 : false;
+
+    // Check if time budget or global deadline exceeded before processing next batch
+    if ((elapsed >= timeBudgetMs || isDeadlineReached) && i > startIndex) {
+      console.log(`[processPage] Time budget/deadline reached for page ${page.page_index} at offset ${i}/${chronoSortedMsgIds.length}. Pausing page.`);
       await supabase
         .from('sync_pages')
         .update({
@@ -801,8 +804,8 @@ export async function runSync(
 
     if (dbLock?.is_syncing) {
       const lastUpdated = new Date(dbLock.updated_at || 0).getTime();
-      // Active syncs touch updated_at every ~1.5s. If untouched for > 2.5 min, the process died (e.g. laptop shut down)
-      const isStale = Date.now() - lastUpdated > 150 * 1000;
+      // Active syncs touch updated_at every ~1.5s. If untouched for > 60s, the process was killed/interrupted
+      const isStale = Date.now() - lastUpdated > 60 * 1000;
       if (!isStale) {
         console.log(`[Sync Engine] User ${userId} sync is already active in database (phase: ${dbLock.phase}, updated: ${dbLock.updated_at}). Gracefully skipping concurrent invocation.`);
         return {
@@ -816,7 +819,7 @@ export async function runSync(
           accounts: [],
         };
       } else {
-        console.warn(`[Sync Engine] Stale sync lock found for user ${userId} (>2.5m untouched, likely crash/shutdown). Overriding lock.`);
+        console.warn(`[Sync Engine] Stale sync lock found for user ${userId} (>60s untouched, likely cloud timeout/restart). Overriding lock.`);
       }
     }
   } catch {
@@ -825,6 +828,11 @@ export async function runSync(
 
   // Acquire active lock
   activeSyncLocks.add(userId);
+
+  // Global wall-clock deadline for this entire invocation
+  const defaultBudgetMs = options?.isBackgroundCron ? CRON_TOTAL_BUDGET_MS : 25_000;
+  const totalBudgetMs = options?.timeBudgetMs ?? defaultBudgetMs;
+  const globalDeadline = options?.globalDeadline ?? (Date.now() + totalBudgetMs);
 
   // Determine if this is an initial discovery sync across any connected account
   const isInitialSync = connectedAccounts.some((a) => !a.last_history_id);
@@ -937,6 +945,11 @@ export async function runSync(
 
     // 2. Process each account using count-based, resumable pages
     for (const account of sortedAccounts) {
+      if (Date.now() >= globalDeadline - 4000) {
+        console.log(`[SyncEngine] Budget nearing expiry for user ${userId}. Pausing before account ${account.email}.`);
+        break;
+      }
+
       const accountResult = {
         email: account.email,
         accountType: account.account_type,
@@ -983,13 +996,21 @@ export async function runSync(
           let messageIds: string[] = [];
           let nextHistoryId: string | null = null;
 
+          const onFetchBatch = (fetchedCount: number) => {
+            progress.totalMessages = fetchedCount;
+            notifyProgress({
+              ...progress,
+              totalMessages: fetchedCount,
+            });
+          };
+
           if (account.account_type === 'personal') {
             // Personal account: master records for NeoPAT companies and registrations.
             // There are only ~270 emails across the entire season (~200ms to fetch IDs).
             // Always query all messages from 2026/07/01 so in-memory deduplication catches
             // any missed emails from previous interruptions or history gaps.
             const query = getPlacementSearchQuery('personal');
-            messageIds = await fetchMessageIds(gmail, query, 2500);
+            messageIds = await fetchMessageIds(gmail, query, 2500, onFetchBatch);
             nextHistoryId = await getProfileHistoryId(gmail);
           } else if (account.last_history_id) {
             const historyResult = await fetchHistoryChanges(gmail, account.last_history_id);
@@ -1000,13 +1021,13 @@ export async function runSync(
               const afterDate = account.last_sync_at ? new Date(account.last_sync_at) : undefined;
               const query = getPlacementSearchQuery('college', afterDate);
               const maxLimit = 2500;
-              messageIds = await fetchMessageIds(gmail, query, maxLimit);
+              messageIds = await fetchMessageIds(gmail, query, maxLimit, onFetchBatch);
               nextHistoryId = historyResult.latestHistoryId || (await getProfileHistoryId(gmail));
             }
           } else {
             const query = getPlacementSearchQuery('college');
             const maxLimit = 5000;
-            messageIds = await fetchMessageIds(gmail, query, maxLimit);
+            messageIds = await fetchMessageIds(gmail, query, maxLimit, onFetchBatch);
             nextHistoryId = await getProfileHistoryId(gmail);
           }
 
@@ -1156,12 +1177,14 @@ export async function runSync(
             progress.processedMessages = targetPage.next_offset || 0;
             notifyProgress(progress, true);
 
+            const remainingBudget = Math.max(2000, globalDeadline - Date.now() - 3000);
+
             const pageRes = await processPage(
               supabase,
               userId,
               account,
               targetPage,
-              perPageBudgetMs,
+              remainingBudget,
               {
                 userNeoId,
                 userEmail,
@@ -1178,7 +1201,8 @@ export async function runSync(
                 newEmails: result.newEmails,
                 newCompanies: result.newCompanies,
                 skippedDuplicates: result.skippedDuplicates,
-              }
+              },
+              globalDeadline
             );
 
             accountResult.emailsProcessed += pageRes.emailsProcessed;
@@ -1210,7 +1234,6 @@ export async function runSync(
             result.currentPageIndex = targetIndex;
             result.totalPagesCount = totalPagesCount;
             result.isPage0Complete = targetIndex === 0 && pageRes.completed;
-            result.hasMorePagesPending = !allDone;
           }
         }
       } catch (accountErr) {
@@ -1226,12 +1249,26 @@ export async function runSync(
       result.totalEmailsFetched += accountResult.emailsFetched;
       result.totalEmailsProcessed += accountResult.emailsProcessed;
       result.accounts.push(accountResult);
+
+      if (Date.now() >= globalDeadline - 4000) {
+        console.log(`[SyncEngine] Budget consumed for user ${userId}. Finishing current chunk.`);
+        break;
+      }
     }
 
+    // Check whether any sync_pages across ANY accounts remain pending
+    const { data: allPendingPages } = await supabase
+      .from('sync_pages')
+      .select('status')
+      .eq('user_id', userId);
+
+    const hasAnyPending = (allPendingPages || []).some((p) => p.status !== 'complete');
+    result.hasMorePagesPending = hasAnyPending;
+
   // 5. Circular reconciliation: reconcile unlinked college circulars against user companies
-  // IDLE GUARD: Only run reconciliation if emails were actually processed in this sync run!
-  // If no new emails arrived and no pending pages were processed, the DB is unchanged.
-  if (result.totalEmailsProcessed > 0) {
+  // IDLE & ARCHIVE GUARD: Only run reconciliation when ALL pages are complete and emails were processed.
+  // Running this during intermediate archive pages wastes 15 seconds per chunk!
+  if (!result.hasMorePagesPending && result.totalEmailsProcessed > 0) {
     try {
       const { data: unlinkedEmails } = await supabase
         .from('emails')
@@ -1540,7 +1577,7 @@ export async function runSync(
       is_initial_sync: isInitialSync,
       current_page_index: latestProgress.currentPageIndex ?? 0,
       total_pages: latestProgress.totalPagesCount ?? 1,
-      completed_at: new Date().toISOString(),
+      completed_at: isComplete ? new Date().toISOString() : null,
       updated_at: new Date().toISOString(),
       last_error: result.errors.length > 0 ? result.errors[result.errors.length - 1] : null,
     });
