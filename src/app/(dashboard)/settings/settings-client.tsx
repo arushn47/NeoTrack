@@ -233,6 +233,7 @@ export default function SettingsClient({ accounts, neoId: initialNeoId, userEmai
       toast.error('Reprocess failed', { description: err?.message || 'Network error' });
     } finally {
       setReprocessing(false);
+      setReprocessProgress(null);
     }
   };
 
