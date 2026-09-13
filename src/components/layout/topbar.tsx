@@ -65,10 +65,10 @@ export default function Topbar({ userName, userAvatar, lastSyncAt }: TopbarProps
     }
   }, []);
 
-  const startPolling = useCallback(() => {
+  const startPolling = useCallback((immediate: boolean = false) => {
     if (pollIntervalRef.current) return;
 
-    pollIntervalRef.current = setInterval(async () => {
+    const poll = async () => {
       try {
         const res = await fetch('/api/sync/status');
         if (!res.ok) return;
@@ -110,7 +110,12 @@ export default function Topbar({ userName, userAvatar, lastSyncAt }: TopbarProps
       } catch {
         // Ignore polling errors
       }
-    }, 2500);
+    };
+
+    if (immediate) {
+      poll();
+    }
+    pollIntervalRef.current = setInterval(poll, 2500);
   }, [router, stopPolling]);
 
   // Clean up polling interval on unmount
@@ -162,6 +167,8 @@ export default function Topbar({ userName, userAvatar, lastSyncAt }: TopbarProps
     isSyncingRef.current = true;
     setIsSyncing(true);
     setSyncResult(null);
+
+    let willAdvanceNextChunk = false;
 
     if (!silent) {
       setSyncProgress({
@@ -219,8 +226,9 @@ export default function Topbar({ userName, userAvatar, lastSyncAt }: TopbarProps
               const parsed = JSON.parse(currentData);
 
               if (currentEvent === 'sync_active' || currentEvent === 'active') {
-                // A background sync (e.g. from 15-min cron) is already actively running
-                startPolling();
+                // A background sync (e.g. from cron) is already actively running
+                willAdvanceNextChunk = true;
+                startPolling(true);
                 return;
               }
 
@@ -235,6 +243,7 @@ export default function Topbar({ userName, userAvatar, lastSyncAt }: TopbarProps
                 stopPolling();
                 if (parsed.result?.hasMorePagesPending) {
                   // Keep progress banner smoothly visible with next batch indicator
+                  willAdvanceNextChunk = true;
                   setSyncProgress((prev) => prev ? {
                     ...prev,
                     currentSubject: 'Chunk checkpointed. Advancing to next batch...',
@@ -289,6 +298,7 @@ export default function Topbar({ userName, userAvatar, lastSyncAt }: TopbarProps
             const data = await res.json();
             if (data.phase === 'pending' || (data.progress && data.progress.totalPagesCount > 1)) {
               console.log('[Topbar Sync] Stream closed with pending pages. Auto-advancing...');
+              willAdvanceNextChunk = true;
               setTimeout(() => {
                 handleSync(false);
               }, 1200);
@@ -309,8 +319,10 @@ export default function Topbar({ userName, userAvatar, lastSyncAt }: TopbarProps
       });
       setTimeout(() => setSyncResult(null), 8000);
     } finally {
-      isSyncingRef.current = false;
-      setIsSyncing(false);
+      if (!willAdvanceNextChunk) {
+        isSyncingRef.current = false;
+        setIsSyncing(false);
+      }
     }
   }, [router, startPolling, stopPolling]);
 
@@ -319,7 +331,7 @@ export default function Topbar({ userName, userAvatar, lastSyncAt }: TopbarProps
     window.location.href = '/login';
   };
 
-  // On mount: check if a sync is currently active (e.g. after page reload or triggered by 15-min background cron)
+  // On mount: check if a sync is currently active (e.g. after page reload or triggered by background cron)
   useEffect(() => {
     if (hasMountedAutoSyncRef.current) return;
     hasMountedAutoSyncRef.current = true;
@@ -337,12 +349,73 @@ export default function Topbar({ userName, userAvatar, lastSyncAt }: TopbarProps
         } else if (data.phase === 'pending' || !lastSyncAt || Date.now() - new Date(lastSyncAt).getTime() > 60 * 60 * 1000) {
           // Only trigger silent sync on mount if it hasn't synced in over 1 hour
           // or if there are pending pages left to process
-          // (cron-job.org handles background sync every 2 hours)
           handleSync(true);
         }
       })
       .catch(() => {});
   }, [lastSyncAt, handleSync, startPolling]);
+
+  // Page Visibility guard: handle browser tab backgrounding and foregrounding
+  // Survives tab throttling when user navigates away and resumes seamlessly when returning
+  useEffect(() => {
+    const handleVisibilityChange = async () => {
+      if (document.visibilityState === 'hidden') {
+        // Tab backgrounded: switch to lightweight polling instead of chained setTimeouts
+        // which get heavily throttled or frozen by browsers when hidden
+        if (isSyncingRef.current) {
+          startPolling();
+        }
+      } else if (document.visibilityState === 'visible') {
+        // Tab foregrounded: query server directly to get immediate ground truth
+        try {
+          const res = await fetch('/api/sync/status');
+          if (!res.ok) return;
+          const data = await res.json();
+
+          if (data.isSyncing) {
+            setIsSyncing(true);
+            isSyncingRef.current = true;
+            if (data.progress) {
+              setSyncProgress(data.progress);
+            }
+            startPolling();
+          } else if (data.phase === 'pending') {
+            // Pending chunks remain! Seamlessly resume the sync chain now that the tab is active
+            stopPolling();
+            handleSync(false);
+          } else if (data.phase === 'complete') {
+            stopPolling();
+            if (isSyncingRef.current) {
+              isSyncingRef.current = false;
+              setIsSyncing(false);
+              setSyncProgress(null);
+              setSyncResult({
+                show: true,
+                success: true,
+                message: 'Placement sync complete',
+                newEmails: data.progress?.newEmails || 0,
+                newCompanies: data.progress?.newCompanies || 0,
+              });
+              router.refresh();
+              setTimeout(() => setSyncResult(null), 5000);
+            }
+          } else {
+            if (isSyncingRef.current && !data.isSyncing) {
+              stopPolling();
+              isSyncingRef.current = false;
+              setIsSyncing(false);
+              setSyncProgress(null);
+            }
+          }
+        } catch {
+          // Ignore network errors on visibility change
+        }
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
+  }, [handleSync, router, startPolling, stopPolling]);
 
   // Listen for global sync requests (e.g. from Settings page re-sync button)
   useEffect(() => {
