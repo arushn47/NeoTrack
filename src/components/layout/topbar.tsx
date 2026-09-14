@@ -56,6 +56,14 @@ export default function Topbar({ userName, userAvatar, lastSyncAt }: TopbarProps
     newCompanies: number;
   } | null>(null);
 
+  const [currentLastSyncAt, setCurrentLastSyncAt] = useState<string | null>(lastSyncAt);
+
+  useEffect(() => {
+    if (lastSyncAt) {
+      setCurrentLastSyncAt(lastSyncAt);
+    }
+  }, [lastSyncAt]);
+
   useEffect(() => {
     setMounted(true);
   }, []);
@@ -76,6 +84,10 @@ export default function Topbar({ userName, userAvatar, lastSyncAt }: TopbarProps
         if (!res.ok) return;
         const data = await res.json();
 
+        if (data.lastSyncAt) {
+          setCurrentLastSyncAt(data.lastSyncAt);
+        }
+
         if (data.isSyncing) {
           setIsSyncing(true);
           isSyncingRef.current = true;
@@ -87,26 +99,18 @@ export default function Topbar({ userName, userAvatar, lastSyncAt }: TopbarProps
           stopPolling();
           isSyncingRef.current = false;
           setIsSyncing(false);
+          setSyncProgress(null);
 
-          if (data.progress && data.phase === 'complete') {
-            setSyncProgress({
-              ...data.progress,
-              phase: 'complete',
+          if (data.phase === 'complete') {
+            setSyncResult({
+              show: true,
+              success: true,
+              message: 'Placement sync complete',
+              newEmails: data.progress?.newEmails || 0,
+              newCompanies: data.progress?.newCompanies || 0,
             });
-            setTimeout(() => {
-              setSyncProgress(null);
-              setSyncResult({
-                show: true,
-                success: true,
-                message: 'Placement sync complete',
-                newEmails: data.progress.newEmails || 0,
-                newCompanies: data.progress.newCompanies || 0,
-              });
-              router.refresh();
-              setTimeout(() => setSyncResult(null), 5000);
-            }, 1200);
-          } else {
-            setSyncProgress(null);
+            router.refresh();
+            setTimeout(() => setSyncResult(null), 5000);
           }
         }
       } catch {
@@ -238,7 +242,6 @@ export default function Topbar({ userName, userAvatar, lastSyncAt }: TopbarProps
 
                 if (currentEvent === 'sync_active' || currentEvent === 'active') {
                   // A background sync (e.g. from cron) is already actively running
-                  willAdvanceNextChunk = true;
                   startPolling(true);
                   return;
                 }
@@ -251,8 +254,12 @@ export default function Topbar({ userName, userAvatar, lastSyncAt }: TopbarProps
                     return parsed;
                   });
                 } else if (currentEvent === 'complete' || currentEvent === 'sync_complete') {
+                  if (receivedComplete) return;
                   receivedComplete = true;
                   stopPolling();
+                  if (parsed.lastSyncAt || parsed.result?.lastSyncAt) {
+                    setCurrentLastSyncAt(parsed.lastSyncAt || parsed.result?.lastSyncAt);
+                  }
                   if (parsed.result?.hasMorePagesPending) {
                     // Keep progress banner smoothly visible with next batch indicator
                     willAdvanceNextChunk = true;
@@ -313,18 +320,18 @@ export default function Topbar({ userName, userAvatar, lastSyncAt }: TopbarProps
           const res = await fetch('/api/sync/status');
           if (res.ok) {
             const data = await res.json();
-            if (data.phase === 'pending' || (data.progress && data.progress.totalPagesCount > 1)) {
-              console.log('[Topbar Sync] Stream closed with pending pages. Auto-advancing...');
-              willAdvanceNextChunk = true;
-              if (chainedTimeoutRef.current) clearTimeout(chainedTimeoutRef.current);
-              chainedTimeoutRef.current = setTimeout(() => {
-                chainedTimeoutRef.current = null;
-                handleSync(false, true);
-              }, 1200);
+            if (data.lastSyncAt) {
+              setCurrentLastSyncAt(data.lastSyncAt);
+            }
+            if (data.isSyncing) {
+              // Sync is still actively executing on server; smoothly switch to polling
+              startPolling(true);
               return;
             }
           }
         } catch {}
+        // Stream ended and server is not syncing; reset state cleanly
+        setSyncProgress(null);
       }
     } catch (err) {
       stopPolling();
@@ -358,6 +365,9 @@ export default function Topbar({ userName, userAvatar, lastSyncAt }: TopbarProps
     fetch('/api/sync/status')
       .then((res) => res.json())
       .then((data) => {
+        if (data.lastSyncAt) {
+          setCurrentLastSyncAt(data.lastSyncAt);
+        }
         if (data.isSyncing) {
           setIsSyncing(true);
           isSyncingRef.current = true;
@@ -365,14 +375,10 @@ export default function Topbar({ userName, userAvatar, lastSyncAt }: TopbarProps
             setSyncProgress(data.progress);
           }
           startPolling();
-        } else if (data.phase === 'pending' || !lastSyncAt || Date.now() - new Date(lastSyncAt).getTime() > 60 * 60 * 1000) {
-          // Only trigger silent sync on mount if it hasn't synced in over 1 hour
-          // or if there are pending pages left to process
-          handleSync(true);
         }
       })
       .catch(() => {});
-  }, [lastSyncAt, handleSync, startPolling]);
+  }, [startPolling]);
 
   // Page Visibility guard: handle browser tab backgrounding and foregrounding
   // Avoids fighting active SSE streams, survives tab throttling, and resumes seamlessly when returning
@@ -380,8 +386,6 @@ export default function Topbar({ userName, userAvatar, lastSyncAt }: TopbarProps
     const handleVisibilityChange = async () => {
       if (document.visibilityState === 'hidden') {
         // Tab backgrounded:
-        // If an SSE stream is actively connected, it is already receiving server events pushed in real time.
-        // DO NOT start polling — running polling concurrently with an active SSE stream creates two competing loops.
         // Only start polling if marked syncing BUT without an active SSE stream (e.g. background cron was running).
         if (isSyncingRef.current && !isSseActiveRef.current) {
           startPolling();
@@ -397,6 +401,10 @@ export default function Topbar({ userName, userAvatar, lastSyncAt }: TopbarProps
           if (!res.ok) return;
           const data = await res.json();
 
+          if (data.lastSyncAt) {
+            setCurrentLastSyncAt(data.lastSyncAt);
+          }
+
           if (data.isSyncing) {
             setIsSyncing(true);
             isSyncingRef.current = true;
@@ -404,36 +412,14 @@ export default function Topbar({ userName, userAvatar, lastSyncAt }: TopbarProps
               setSyncProgress(data.progress);
             }
             startPolling();
-          } else if (data.phase === 'pending') {
-            // Pending chunks remain! Cancel any throttled timer and resume the next chunk immediately
-            stopPolling();
-            if (chainedTimeoutRef.current) {
-              clearTimeout(chainedTimeoutRef.current);
-              chainedTimeoutRef.current = null;
-            }
-            handleSync(false, true);
-          } else if (data.phase === 'complete') {
+          } else {
+            // Not syncing
             stopPolling();
             if (isSyncingRef.current) {
               isSyncingRef.current = false;
               setIsSyncing(false);
               setSyncProgress(null);
-              setSyncResult({
-                show: true,
-                success: true,
-                message: 'Placement sync complete',
-                newEmails: data.progress?.newEmails || 0,
-                newCompanies: data.progress?.newCompanies || 0,
-              });
               router.refresh();
-              setTimeout(() => setSyncResult(null), 5000);
-            }
-          } else {
-            if (isSyncingRef.current && !data.isSyncing) {
-              stopPolling();
-              isSyncingRef.current = false;
-              setIsSyncing(false);
-              setSyncProgress(null);
             }
           }
         } catch {
@@ -444,7 +430,7 @@ export default function Topbar({ userName, userAvatar, lastSyncAt }: TopbarProps
 
     document.addEventListener('visibilitychange', handleVisibilityChange);
     return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
-  }, [handleSync, router, startPolling, stopPolling]);
+  }, [router, startPolling, stopPolling]);
 
   // Idle Background Polling: Detect if a sync was started by the external cron job
   // while the user is just sitting on the page without switching tabs.
@@ -458,17 +444,18 @@ export default function Topbar({ userName, userAvatar, lastSyncAt }: TopbarProps
         if (!res.ok) return;
         const data = await res.json();
 
+        if (data.lastSyncAt) {
+          setCurrentLastSyncAt(data.lastSyncAt);
+        }
+
         if (data.isSyncing) {
-          // A sync started in the background!
+          // A sync started in the background (e.g. from 15-min external cron)!
           setIsSyncing(true);
           isSyncingRef.current = true;
           if (data.progress) {
             setSyncProgress(data.progress);
           }
           startPolling();
-        } else if (data.phase === 'pending') {
-          // Pending chunks remaining, resume them
-          handleSync(true);
         }
       } catch {
         // Ignore network errors on background polling
@@ -476,7 +463,7 @@ export default function Topbar({ userName, userAvatar, lastSyncAt }: TopbarProps
     }, 30000); // Check every 30 seconds
 
     return () => clearInterval(idleInterval);
-  }, [startPolling, handleSync]);
+  }, [startPolling]);
 
   // Listen for global sync requests (e.g. from Settings page re-sync button)
   useEffect(() => {
@@ -544,7 +531,7 @@ export default function Topbar({ userName, userAvatar, lastSyncAt }: TopbarProps
                 ? 'border-amber-500/40 bg-amber-500/10 text-amber-300 shadow-[0_0_16px_rgba(245,158,11,0.15)]'
                 : 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300 hover:bg-emerald-500/15 hover:border-emerald-500/50'
             )}
-            title={mounted && lastSyncAt ? `All inboxes caught up (${timeAgo(lastSyncAt)})` : 'Click to sync Gmail inboxes'}
+            title={mounted && currentLastSyncAt ? `All inboxes caught up (${timeAgo(currentLastSyncAt)})` : 'Click to sync Gmail inboxes'}
             aria-label="Sync status"
           >
             {isSyncing ? (
@@ -561,7 +548,7 @@ export default function Topbar({ userName, userAvatar, lastSyncAt }: TopbarProps
               <>
                 <CheckCheck className="h-3 w-3 text-emerald-400 shrink-0" />
                 <span className="hidden sm:inline truncate">
-                  {mounted && lastSyncAt ? `All inboxes caught up (${timeAgo(lastSyncAt)})` : 'Sync inboxes'}
+                  {mounted && currentLastSyncAt ? `All inboxes caught up (${timeAgo(currentLastSyncAt)})` : 'Sync inboxes'}
                 </span>
                 <span className="sm:hidden font-medium">Sync</span>
               </>

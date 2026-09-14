@@ -87,11 +87,30 @@ export async function GET() {
         lastSyncAt,
       });
     } else {
-      // Heal stale lock in DB immediately so subsequent syncs or auto-resume are not blocked
+      // Heal stale lock in DB immediately so subsequent syncs are not blocked.
+      // Only set phase to 'pending' if there are genuinely unprocessed pages in sync_pages.
+      const { data: pendingPages } = await supabase
+        .from('sync_pages')
+        .select('id')
+        .eq('user_id', session.userId)
+        .neq('status', 'complete')
+        .limit(1);
+
+      const hasPending = Boolean(pendingPages && pendingPages.length > 0);
+
       await supabase
         .from('sync_state')
-        .update({ is_syncing: false, phase: 'pending', updated_at: new Date().toISOString() })
+        .update({
+          is_syncing: false,
+          phase: hasPending ? 'pending' : 'idle',
+          updated_at: new Date().toISOString(),
+        })
         .eq('user_id', session.userId);
+
+      if (dbSyncState) {
+        dbSyncState.is_syncing = false;
+        dbSyncState.phase = hasPending ? 'pending' : 'idle';
+      }
     }
   }
 
