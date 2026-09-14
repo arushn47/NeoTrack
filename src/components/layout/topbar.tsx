@@ -205,6 +205,7 @@ export default function Topbar({ userName, userAvatar, lastSyncAt }: TopbarProps
       isSseActiveRef.current = true;
       const decoder = new TextDecoder();
       let buffer = '';
+      let receivedComplete = false;
 
       try {
         while (true) {
@@ -250,6 +251,7 @@ export default function Topbar({ userName, userAvatar, lastSyncAt }: TopbarProps
                     return parsed;
                   });
                 } else if (currentEvent === 'complete' || currentEvent === 'sync_complete') {
+                  receivedComplete = true;
                   stopPolling();
                   if (parsed.result?.hasMorePagesPending) {
                     // Keep progress banner smoothly visible with next batch indicator
@@ -306,7 +308,7 @@ export default function Topbar({ userName, userAvatar, lastSyncAt }: TopbarProps
       }
 
       // If stream ended without complete event, verify with /api/sync/status
-      if (isSyncingRef.current) {
+      if (isSyncingRef.current && !receivedComplete) {
         try {
           const res = await fetch('/api/sync/status');
           if (res.ok) {
