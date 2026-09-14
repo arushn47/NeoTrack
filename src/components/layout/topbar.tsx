@@ -444,6 +444,38 @@ export default function Topbar({ userName, userAvatar, lastSyncAt }: TopbarProps
     return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
   }, [handleSync, router, startPolling, stopPolling]);
 
+  // Idle Background Polling: Detect if a sync was started by the external cron job
+  // while the user is just sitting on the page without switching tabs.
+  useEffect(() => {
+    const idleInterval = setInterval(async () => {
+      // If we are already actively syncing or the tab is hidden, skip the idle check
+      if (isSyncingRef.current || document.visibilityState === 'hidden') return;
+
+      try {
+        const res = await fetch('/api/sync/status');
+        if (!res.ok) return;
+        const data = await res.json();
+
+        if (data.isSyncing) {
+          // A sync started in the background!
+          setIsSyncing(true);
+          isSyncingRef.current = true;
+          if (data.progress) {
+            setSyncProgress(data.progress);
+          }
+          startPolling();
+        } else if (data.phase === 'pending') {
+          // Pending chunks remaining, resume them
+          handleSync(true);
+        }
+      } catch {
+        // Ignore network errors on background polling
+      }
+    }, 30000); // Check every 30 seconds
+
+    return () => clearInterval(idleInterval);
+  }, [startPolling, handleSync]);
+
   // Listen for global sync requests (e.g. from Settings page re-sync button)
   useEffect(() => {
     const handleTriggerSync = () => {
