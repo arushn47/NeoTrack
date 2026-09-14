@@ -4,6 +4,8 @@ import { requireSession } from '@/lib/auth';
 import { createAdminClient } from '@/lib/supabase/admin';
 import CompaniesClient, { type CompanyWithDetails } from './companies-client';
 
+import { detectCampus } from '@/lib/utils';
+
 export const metadata: Metadata = {
   title: 'Companies & Recruitment Drives',
   description: 'View and track all campus recruitment drives, company CTCs, stipends, job roles, and application statuses.',
@@ -16,8 +18,15 @@ export default async function CompaniesPage() {
   const session = await requireSession();
   const supabase = createAdminClient();
 
-  // Fetch companies, applications, latest events, and candidate matches for the user
-  const [{ data: companies }, { data: applications }, { data: events }, { data: matches }, { data: emails }] = await Promise.all([
+  // Fetch companies, applications, latest events, candidate matches, and connected accounts for the user
+  const [
+    { data: companies },
+    { data: applications },
+    { data: events },
+    { data: matches },
+    { data: emails },
+    { data: accounts },
+  ] = await Promise.all([
     supabase
       .from('companies')
       .select('id, name, drive_number, drive_name, aliases, updated_at')
@@ -44,7 +53,16 @@ export default async function CompaniesPage() {
       .from('emails')
       .select('id, company_id, received_at')
       .eq('user_id', session.userId),
+
+    supabase
+      .from('gmail_accounts')
+      .select('email, account_type')
+      .eq('user_id', session.userId)
+      .eq('is_connected', true),
   ]);
+
+  const collegeAccount = accounts?.find((a) => a.account_type === 'college');
+  const userCampus = detectCampus(collegeAccount?.email);
 
   // Maps for efficient lookups
   const appMap = new Map((applications || []).map((app) => [app.company_id, app]));
@@ -134,7 +152,7 @@ export default async function CompaniesPage() {
 
   return (
     <Suspense fallback={<div className="p-6 text-text-tertiary">Loading companies...</div>}>
-      <CompaniesClient companies={formattedCompanies} />
+      <CompaniesClient companies={formattedCompanies} userCampus={userCampus} />
     </Suspense>
   );
 }

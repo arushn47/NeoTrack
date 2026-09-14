@@ -2,6 +2,7 @@ import type { Metadata } from 'next';
 import { requireSession } from '@/lib/auth';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { detectCampus, detectBranch } from '@/lib/utils';
+import { getEffectiveStage } from '@/lib/stages';
 import DashboardClient from './dashboard-client';
 
 export const metadata: Metadata = {
@@ -38,7 +39,6 @@ export default async function DashboardPage() {
       .from('events')
       .select('id, company_id, event_type, title, start_time, end_time, venue, mode')
       .eq('user_id', session.userId)
-      .gte('start_time', new Date().toISOString())
       .order('start_time', { ascending: true }),
     supabase
       .from('gmail_accounts')
@@ -58,6 +58,7 @@ export default async function DashboardPage() {
   const stats = {
     total_companies: totalCompanies || 0,
     active_applications: 0,
+    total_applied: 0,
     applied: 0,
     shortlisted: 0,
     not_shortlisted: 0,
@@ -68,12 +69,14 @@ export default async function DashboardPage() {
     selected: 0,
   };
 
+  const nonAppliedStatuses = ['not_applied', 'withdrawn', 'declined'];
   const inactiveStatuses = ['not_shortlisted', 'rejected', 'not_applied', 'withdrawn', 'declined'];
   const appStatusMap = new Map<string, string>();
 
   if (applications) {
     for (const app of applications) {
       appStatusMap.set(app.company_id, app.status);
+      if (!nonAppliedStatuses.includes(app.status)) stats.total_applied++;
       if (!inactiveStatuses.includes(app.status)) stats.active_applications++;
       if (app.status === 'applied') stats.applied++;
       if (['shortlisted', 'test_scheduled', 'test_completed', 'interview_scheduled', 'interview_completed'].includes(app.status)) stats.shortlisted++;
@@ -176,17 +179,33 @@ export default async function DashboardPage() {
     companyName: companyNameMap.get(e.company_id) || 'Campus Drive',
   }));
 
-  const allAppsList = (applications || []).map((a: any) => ({
-    id: a.id,
-    companyId: a.company_id,
-    companyName: a.companies?.name || 'Company',
-    companyLogo: null,
-    status: a.status,
-    role: a.role,
-    ctc: a.ctc,
-    stipend: a.stipend,
-    lastUpdated: a.last_updated,
-  }));
+  const eventsByCompany = new Map<string, any[]>();
+  if (rawUpcomingEvents) {
+    for (const ev of rawUpcomingEvents) {
+      const list = eventsByCompany.get(ev.company_id) || [];
+      list.push(ev);
+      eventsByCompany.set(ev.company_id, list);
+    }
+  }
+
+  const allAppsList = (applications || []).map((a: any) => {
+    const compEvents = eventsByCompany.get(a.company_id) || [];
+    const latestEvent = compEvents[compEvents.length - 1] || null;
+    const { effectiveStatus, statusSubtitle } = getEffectiveStage(a.status, latestEvent, compEvents);
+
+    return {
+      id: a.id,
+      companyId: a.company_id,
+      companyName: a.companies?.name || 'Company',
+      companyLogo: null,
+      status: effectiveStatus,
+      statusSubtitle,
+      role: a.role,
+      ctc: a.ctc,
+      stipend: a.stipend,
+      lastUpdated: a.last_updated,
+    };
+  });
 
   const connectedAccounts = (accounts || []).filter((a) => a.is_connected);
   const hasPersonalAccount = connectedAccounts.some((a) => a.account_type === 'personal');

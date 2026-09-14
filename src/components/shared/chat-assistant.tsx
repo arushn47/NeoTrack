@@ -26,10 +26,10 @@ interface ChatMessage {
 }
 
 const SUGGESTIONS = [
-  'Mark Value Labs as shortlisted',
   'What are my upcoming tests?',
   'Show shortlisted companies',
-  'What is the CTC for Value Labs?',
+  'What are my active pipeline drives?',
+  'Sync with Google Calendar',
 ];
 
 /**
@@ -75,7 +75,7 @@ export default function ChatAssistant() {
     {
       id: 'welcome',
       sender: 'bot',
-      text: "👋 Hi Arush! I'm your Placement Assistant. You can chat with me to update drive statuses (e.g. **Mark Value Labs as shortlisted**) or check upcoming tests and CTC details!",
+      text: "👋 Hi! I'm your Placement Assistant. You can chat with me to update drive statuses (e.g. **Mark [Company] as shortlisted**), schedule tests, or check CTC details!",
       timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
     },
   ]);
@@ -146,7 +146,7 @@ export default function ChatAssistant() {
       <button
         onClick={() => setIsOpen(!isOpen)}
         className={cn(
-          'fixed bottom-20 right-4 lg:bottom-6 lg:right-6 z-40 p-3.5 rounded-2xl shadow-xl flex items-center justify-center transition-all duration-300 group',
+          'fixed bottom-20 right-4 lg:bottom-6 lg:right-6 z-40 p-3.5 rounded-2xl shadow-xl flex items-center justify-center transition-all duration-300 group cursor-pointer',
           isOpen
             ? 'bg-bg-elevated border border-border-default text-text-primary scale-90'
             : 'bg-gradient-to-tr from-accent to-accent-hover text-white shadow-accent/25 hover:scale-105 hover:shadow-2xl'
@@ -191,14 +191,14 @@ export default function ChatAssistant() {
             <div className="flex items-center gap-1">
               <button
                 onClick={() => setIsExpanded(!isExpanded)}
-                className="p-1.5 rounded-lg text-text-tertiary hover:text-text-primary hover:bg-bg-surface-hover transition-colors hidden sm:flex items-center justify-center"
+                className="p-1.5 rounded-lg text-text-tertiary hover:text-text-primary hover:bg-bg-surface-hover transition-colors hidden sm:flex items-center justify-center cursor-pointer"
                 title={isExpanded ? 'Collapse window size' : 'Expand window size'}
               >
                 {isExpanded ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
               </button>
               <button
                 onClick={() => setIsOpen(false)}
-                className="p-1.5 rounded-lg text-text-tertiary hover:text-text-primary hover:bg-bg-surface-hover transition-colors"
+                className="p-1.5 rounded-lg text-text-tertiary hover:text-text-primary hover:bg-bg-surface-hover transition-colors cursor-pointer"
                 title="Close Assistant"
               >
                 <X className="w-4 h-4" />
@@ -263,7 +263,7 @@ export default function ChatAssistant() {
               <button
                 key={i}
                 onClick={() => handleSendMessage(s)}
-                className="px-2.5 py-1 rounded-lg text-[10px] font-medium bg-bg-surface hover:bg-bg-surface-hover text-text-secondary hover:text-text-primary border border-border-default whitespace-nowrap transition-all"
+                className="px-2.5 py-1 rounded-lg text-[10px] font-medium bg-bg-surface hover:bg-bg-surface-hover text-text-secondary hover:text-text-primary border border-border-default whitespace-nowrap transition-all cursor-pointer"
               >
                 {s}
               </button>
@@ -283,7 +283,7 @@ export default function ChatAssistant() {
             <button
               onClick={() => handleSendMessage()}
               disabled={!input.trim() || loading}
-              className="p-2 rounded-xl bg-accent hover:bg-accent-hover text-white disabled:opacity-40 transition-all flex-shrink-0"
+              className="p-2 rounded-xl bg-accent hover:bg-accent-hover text-white disabled:opacity-40 transition-all flex-shrink-0 cursor-pointer disabled:cursor-not-allowed"
               aria-label="Send message"
             >
               <Send className="w-4 h-4" />

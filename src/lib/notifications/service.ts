@@ -165,20 +165,20 @@ export async function notifyStatusChange(params: {
 
   const dedupeKey = `status:${userId}:${companyId}:${newStatus}:${sourceEmailId || 'sync'}`;
 
-  let title = `Where's My Offer — ${companyName} Status Update`;
+  let title = `${companyName} — Status Update`;
   let body = `Your application status for ${companyName} has changed to ${newStatus.toUpperCase().replace(/_/g, ' ')}.`;
 
   if (newStatus === 'shortlisted') {
-    title = `🎉 Where's My Offer — ${companyName} Shortlisted!`;
+    title = `🎉 ${companyName} — Shortlisted!`;
     body = `You have been shortlisted for ${companyName}. Check your schedule for upcoming test rounds.`;
   } else if (newStatus === 'selected') {
-    title = `🏆 Where's My Offer — ${companyName} Offer / Selected!`;
+    title = `🏆 ${companyName} — Offer / Selected!`;
     body = `Congratulations! You have received a selection/offer update for ${companyName}!`;
   } else if (newStatus === 'withdrawn') {
-    title = `Where's My Offer — ${companyName} Application Withdrawn`;
+    title = `${companyName} — Application Withdrawn`;
     body = `Your ${companyName} application has been marked as withdrawn/opted-out.`;
   } else if (newStatus === 'not_shortlisted') {
-    title = `Where's My Offer — ${companyName} Selection List Released`;
+    title = `${companyName} — Selection List Released`;
     body = `Selection list released for ${companyName}. Status marked as Not Shortlisted.`;
   }
 
@@ -303,4 +303,58 @@ export async function notifyAccountDisconnected(params: {
       },
     },
   });
+}
+
+/**
+ * Checks for upcoming or ongoing events starting right now (within the last 20m or next 10m)
+ * and dispatches a Live Now notification to the candidate.
+ */
+export async function checkAndNotifyLiveEvents(userId: string) {
+  try {
+    const supabase = createAdminClient();
+    const now = new Date();
+    const windowStart = new Date(now.getTime() - 20 * 60 * 1000).toISOString();
+    const windowEnd = new Date(now.getTime() + 10 * 60 * 1000).toISOString();
+
+    const { data: liveEvents } = await supabase
+      .from('events')
+      .select('id, company_id, event_type, title, start_time, venue, companies(name)')
+      .eq('user_id', userId)
+      .gte('start_time', windowStart)
+      .lte('start_time', windowEnd);
+
+    if (!liveEvents || liveEvents.length === 0) return;
+
+    for (const ev of liveEvents) {
+      const compName = (ev as any).companies?.name || 'Company';
+      const dedupeKey = `live_event:${userId}:${ev.id}`;
+      let title = `🔴 ${compName} — Placement Round Starting Now`;
+      let body = `Your event for ${compName} has commenced. Best of luck!`;
+
+      const evType = (ev.event_type || '').toLowerCase();
+      if (/test|coding|assessment|hackerearth|mettl|shl/i.test(evType)) {
+        title = `📝 ${compName} — Assessment Live Now`;
+        body = `Your online test for ${compName} is live. Check your test platform link and begin.`;
+      } else if (/interview/i.test(evType)) {
+        title = `💼 ${compName} — Interview Live Now`;
+        body = `Your interview round for ${compName} has started. Join your meeting room.`;
+      } else if (/ppt/i.test(evType)) {
+        title = `📢 ${compName} — Pre-Placement Talk Live Now`;
+        body = `The pre-placement talk for ${compName} is underway. Join the presentation session.`;
+      }
+
+      await sendNotification({
+        userId,
+        type: 'test_scheduled',
+        title,
+        body,
+        companyId: ev.company_id,
+        eventId: ev.id,
+        link: `/companies/${ev.company_id}`,
+        dedupeKey,
+      });
+    }
+  } catch (err: any) {
+    console.warn('[Notification Service] checkAndNotifyLiveEvents error:', err.message);
+  }
 }

@@ -179,7 +179,7 @@ export default function CalendarClient({ events }: CalendarClientProps) {
   };
 
   return (
-    <div data-testid="calendar-page" className="mx-auto max-w-6xl w-full min-w-0">
+    <div data-testid="calendar-page" className="mx-auto max-w-7xl w-full min-w-0">
       {/* Header Bar */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 sm:gap-4">
         <div>
@@ -207,7 +207,7 @@ export default function CalendarClient({ events }: CalendarClientProps) {
                 key={v}
                 data-testid={`view-${v}-btn`}
                 onClick={() => setView(v)}
-                className={`rounded-full px-3 sm:px-4 py-1 sm:py-1.5 text-xs font-semibold capitalize transition-colors duration-200 cursor-pointer ${
+                className={`rounded-full px-4 sm:px-5 py-1.5 sm:py-2 text-xs font-semibold capitalize transition-colors duration-200 cursor-pointer ${
                   view === v ? 'bg-zinc-800 text-zinc-100 font-bold' : 'text-zinc-500 hover:text-zinc-300'
                 }`}
               >
@@ -269,7 +269,7 @@ export default function CalendarClient({ events }: CalendarClientProps) {
               </div>
             </div>
             <span className="font-mono text-[9px] sm:text-[10px] uppercase tracking-widest text-zinc-500">
-              {events.length} events this season
+              {events.length} events · 2027 Placement Season
             </span>
           </div>
 

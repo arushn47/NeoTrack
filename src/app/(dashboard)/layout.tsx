@@ -33,7 +33,7 @@ export default async function DashboardLayout({
           userAvatar={session.avatar}
           lastSyncAt={lastSyncAt}
         />
-        <main className="flex-1 px-4 sm:px-8 lg:px-10 xl:px-12 py-5 sm:py-7 pb-28 lg:pb-10 min-w-0 w-full">
+        <main className="flex-1 px-5 sm:px-8 md:px-12 lg:px-16 xl:px-20 2xl:px-24 py-6 sm:py-8 pb-28 lg:pb-12 min-w-0 w-full">
           {children}
         </main>
       </div>

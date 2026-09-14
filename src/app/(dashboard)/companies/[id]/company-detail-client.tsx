@@ -13,6 +13,9 @@ import {
   Trash2,
   CheckCircle2,
   ExternalLink,
+  Plane,
+  Building2,
+  Globe,
 } from 'lucide-react';
 import { cn, timeAgo } from '@/lib/utils';
 import { CategoryBadge, STATUS_META } from '@/components/ui/status-chip';
@@ -75,6 +78,9 @@ export interface CompanyDetail {
 
 interface CompanyDetailClientProps {
   company: CompanyDetail;
+  userCampus?: 'VIT Bhopal' | 'VIT Vellore' | 'VIT Chennai' | 'VIT AP';
+  userBranch?: string | null;
+  userRegNo?: string | null;
 }
 
 const STAGES = ['Applied', 'Shortlisted', 'Test', 'Interview', 'Offer'];
@@ -181,7 +187,12 @@ function getGmailLink(email: {
   return `https://mail.google.com/mail/u/0/#inbox`;
 }
 
-export default function CompanyDetailClient({ company }: CompanyDetailClientProps) {
+export default function CompanyDetailClient({
+  company,
+  userCampus = 'VIT Bhopal',
+  userBranch,
+  userRegNo,
+}: CompanyDetailClientProps) {
   const router = useRouter();
   const rawStatus = company.application?.status || 'applied';
   const effective = useMemo(
@@ -233,18 +244,19 @@ export default function CompanyDetailClient({ company }: CompanyDetailClientProp
   }
   const displayLocation = cleanedLoc || 'Pan-India';
 
-  // Drive Mode & Travel
+  // Drive Mode & Travel: Standardized strictly to 5 options:
+  // 'Online', 'VIT Vellore', 'VIT Chennai', 'VIT AP', 'VIT Bhopal'
   const notesStr = (company.application?.notes || '').toLowerCase();
   const driveModeDisplay =
     notesStr.includes('vellore')
       ? 'VIT Vellore'
       : notesStr.includes('chennai')
       ? 'VIT Chennai'
-      : notesStr.includes('bhopal_lab')
-      ? 'Bhopal Labs'
-      : notesStr.includes('online')
+      : notesStr.includes('ap') || notesStr.includes('amaravati')
+      ? 'VIT AP'
+      : notesStr.includes('online') || notesStr.includes('virtual')
       ? 'Online'
-      : 'On-Campus';
+      : 'VIT Bhopal';
 
   // Role display
   const displayRole = (() => {
@@ -424,19 +436,7 @@ export default function CompanyDetailClient({ company }: CompanyDetailClientProp
 
           <div data-testid="ctc-drive-mode" className="rounded-lg border border-zinc-800 bg-zinc-900/50 px-3.5 py-3">
             <div className="font-mono text-[9px] uppercase tracking-widest text-zinc-500">Drive Mode</div>
-            <div
-              className={cn(
-                'font-tabular mt-1 font-display text-lg font-bold truncate',
-                driveModeDisplay.includes('Vellore')
-                  ? 'text-amber-300'
-                  : driveModeDisplay.includes('Chennai')
-                  ? 'text-orange-300'
-                  : driveModeDisplay.includes('Online')
-                  ? 'text-cyan-300'
-                  : 'text-zinc-200'
-              )}
-              title={driveModeDisplay}
-            >
+            <div className="font-tabular mt-1 font-display text-lg font-bold text-zinc-200 truncate" title={driveModeDisplay}>
               {driveModeDisplay}
             </div>
           </div>
@@ -576,7 +576,7 @@ export default function CompanyDetailClient({ company }: CompanyDetailClientProp
                           {email.subject}
                         </div>
                         <div className="mt-1 flex items-center gap-2 font-mono text-[10px] text-zinc-500">
-                          <span>{timeAgo(email.receivedAt)}</span>
+                          <span suppressHydrationWarning>{timeAgo(email.receivedAt)}</span>
                           <span>·</span>
                           <span>{isPersonal ? 'personal gmail' : 'college gmail'}</span>
                         </div>

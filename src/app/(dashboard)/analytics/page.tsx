@@ -28,7 +28,7 @@ export default async function AnalyticsPage() {
   ] = await Promise.all([
     supabase
       .from('applications')
-      .select('id, company_id, status, ctc, stipend, category, applied_at, last_updated')
+      .select('id, company_id, status, notes, ctc, stipend, category, applied_at, last_updated')
       .eq('user_id', session.userId),
     supabase
       .from('events')

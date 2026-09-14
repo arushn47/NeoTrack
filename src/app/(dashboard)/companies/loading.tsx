@@ -11,12 +11,12 @@ export default function CompaniesLoading() {
       </div>
 
       {/* Filter tabs skeleton */}
-      <div className="flex items-center gap-1.5">
+      <div className="flex items-center gap-2 sm:gap-2.5 overflow-x-auto pb-1">
         {Array.from({ length: 7 }).map((_, i) => (
           <div
             key={i}
-            className="h-8 rounded-xl bg-bg-surface border border-border-default"
-            style={{ width: `${60 + Math.random() * 40}px` }}
+            className="h-8 sm:h-9 rounded-full bg-bg-surface border border-border-default shrink-0"
+            style={{ width: `${68 + Math.random() * 32}px` }}
           />
         ))}
       </div>

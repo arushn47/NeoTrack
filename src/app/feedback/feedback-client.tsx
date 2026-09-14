@@ -83,7 +83,7 @@ const SEVERITIES: { id: SeverityType; label: string; badgeClass: string }[] = [
 const FAQS = [
   {
     q: 'How frequently does email scanning run?',
-    a: 'Email scanning runs automatically 24/7 every 2 hours via our background sync engine, and can also be manually triggered anytime via the "Scan Now" button on your topbar.',
+    a: 'Email scanning runs automatically 24/7 every 15 minutes via our background sync engine, and can also be manually triggered anytime via the "Scan Now" button on your topbar.',
   },
   {
     q: 'What if a company shortlist Excel file was not parsed?',

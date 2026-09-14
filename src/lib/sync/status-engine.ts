@@ -5,6 +5,10 @@ import { createAdminClient } from '@/lib/supabase/admin';
 /**
  * Converts HTML email content to clean plain text so table cells, divs, and paragraphs
  * containing Neo IDs or text are fully searchable.
+ *
+ * IMPORTANT: td/th cells are separated by spaces (not pipes). Using pipes causes adjacent
+ * columns to merge Neo IDs into invalid strings like `Name|23BCE1234`, which breaks
+ * word-boundary regex checks and causes false-negative ID misses in shortlist tables.
  */
 function htmlToPlainText(html: string | undefined | null): string {
   if (!html) return '';
@@ -12,7 +16,7 @@ function htmlToPlainText(html: string | undefined | null): string {
     .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, ' ')
     .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, ' ')
     .replace(/<\/(tr|p|div|li)>/gi, '\n')
-    .replace(/<(td|th)[^>]*>/gi, ' | ')
+    .replace(/<(td|th)[^>]*>/gi, '   ') // spaces instead of pipes — prevents `Name|23BCE1234` ID merging
     .replace(/<\/?[a-z][a-z0-9]*[^<>]*>/gi, ' ')
     .replace(/&nbsp;/gi, ' ')
     .replace(/&amp;/gi, '&')
@@ -45,13 +49,15 @@ export function checkNeoIdMatch(
     .toUpperCase();
 
   // 1. Check user's explicitly configured Neo ID (e.g. "I4W0POK8", "I4W0P0K8", "K1D6D1R7")
+  // Uses strict word-boundary regex to avoid false positives from partial substring matches.
+  // Retains 0/O and 1/I fuzzy matching to handle OCR scan / CDC font rendering artefacts.
   if (userNeoId && userNeoId.trim().length >= 4) {
     const cleanNeoId = userNeoId.trim().toUpperCase();
-    const matchesDirect = sanitizedText.includes(cleanNeoId);
-    const matchesFlexible = sanitizedText
-      .replace(/[0O]/g, '#0#')
-      .replace(/[1I]/g, '#1#')
-      .includes(cleanNeoId.replace(/[0O]/g, '#0#').replace(/[1I]/g, '#1#'));
+    const regex = new RegExp(`\\b${cleanNeoId}\\b`);
+    const matchesDirect = regex.test(sanitizedText);
+    const matchesFlexible = new RegExp(
+      `\\b${cleanNeoId.replace(/[0O]/g, '[0O]').replace(/[1I]/g, '[1I]')}\\b`
+    ).test(sanitizedText);
 
     if (matchesDirect || matchesFlexible) {
       return { matched: true, matchedValue: cleanNeoId };
@@ -100,34 +106,15 @@ export async function processEmailForEventsAndStatus(
   const { classifyEmail } = await import('@/lib/sync/classifier');
   const emailClass = classifyEmail(email).classification;
 
-  // ─── TEMPORAL FILTER: Drive Anchor Date ──────────────────────────────────────
-  // Fetch the latest NeoPAT registration email or drive number email for this company.
-  // This ensures that if a company visits twice (e.g. July and Sept), old emails from July
-  // do not corrupt the timeline and status of the current Sept drive.
-  const { data: anchorEmail } = await supabase
-    .from('emails')
-    .select('received_at')
-    .eq('user_id', userId)
-    .eq('company_id', companyId)
-    .or('sender.ilike.%noreply.cdcinfo@vitstudent.ac.in%,body_snippet.ilike.%pat-PL-%')
-    .order('received_at', { ascending: false })
-    .limit(1)
-    .maybeSingle();
-
-  if (anchorEmail?.received_at && email.receivedAt) {
-    const anchorTime = new Date(anchorEmail.received_at).getTime();
-    const emailTime = new Date(email.receivedAt).getTime();
-    // Use a 14-day grace period to allow college circulars that pre-date the NeoPAT email
-    if (emailTime < anchorTime - 14 * 24 * 60 * 60 * 1000) {
-      console.log(`[Status Engine] Email "${email.subject.slice(0, 30)}" is too old for current drive (Anchor: ${new Date(anchorTime).toISOString()}). Skipping.`);
-      return;
-    }
-  }
+  // Temporal filter removed. Idempotency requires that evaluating an email's effect
+  // must depend purely on its own timestamp vs other emails in the transaction,
+  // NOT on what currently exists in the DB from a previous sync pass.
+  // The holistic status will be correctly converged during the batch recalculation.
 
   // 0. Early check of existing application status from DB
   const { data: existingApp } = await supabase
     .from('applications')
-    .select('status, manual_override, applied_at, location, ctc, role, stipend, notes, status_source_email_at')
+    .select('status, manual_override, applied_at, location, ctc, role, stipend, notes, status_source_email_at, last_updated')
     .eq('user_id', userId)
     .eq('company_id', companyId)
     .maybeSingle();
@@ -154,17 +141,26 @@ export async function processEmailForEventsAndStatus(
 
   // Compute isShortlistEmail early — needed both for attachment scanning context (below)
   // and for status computation logic further down.
-  const isShortlistEmail =
-    /shortlist|selection\s+list|selected\s+candidates|shortlisted\s+students|shortlist\s+for|candidates\s+shortlisted|online\s+test\s+is\s+scheduled|assessment\s+is\s+scheduled|coding\s+test\s+is\s+scheduled/i.test(
-      subjLower
-    ) ||
-    /find\s+the\s+below\s+shortlist|below\s+is\s+the\s+shortlist|shortlisted\s+candidates|shortlisted\s+students|attached\s+list\s+of\s+shortlisted|shortlist\s+for\s+next\s+round/i.test(
-      fullText
-    ) ||
-    (email.hasAttachments &&
+  const isAppliedOrOptInRoster =
+    /attached\s+(?:applied|opt[\s-]*in|registered)\s+(?:students?|candidates?)\s+list|opt[\s-]*in\s+list/i.test(fullText) &&
+    !/shortlist|shortlisted/i.test(subjLower);
+
+  const hasShortlistAttachment = Boolean(
+    email.hasAttachments &&
       email.attachments.some((a) =>
         /shortlist|selection[_\s-]*list|test[_\s-]*shortlist|selected[_\s-]*student/i.test(a.filename)
-      ));
+      )
+  );
+
+  const isExplicitShortlistNotice =
+    /shortlist|selection\s+list|selected\s+candidates|shortlisted\s+students|shortlist\s+for|candidates\s+shortlisted/i.test(
+      subjLower
+    ) ||
+    /find\s+the\s+below\s+shortlist|below\s+is\s+the\s+shortlist|attached\s+list\s+of\s+shortlisted|shortlist\s+for\s+next\s+round|attached\s+(?:students?|candidates?)\s+list/i.test(
+      fullText
+    );
+
+  const isShortlistEmail = (hasShortlistAttachment || isExplicitShortlistNotice) && !isAppliedOrOptInRoster;
 
   // 2. Scan Excel attachments whenever the email contains a shortlist/test/candidate list.
   // CRITICAL: Even if a student previously withdrew or opted out on NeoPAT, CDC often fails to
@@ -264,7 +260,19 @@ export async function processEmailForEventsAndStatus(
     isNeoMatched = false;
   }
 
-  if (isNeoMatched) {
+  // Check direct personal test invitation received by user (e.g. from NeoPAT noreply.cdcinfo)
+  const isPersonalNeoPatSender =
+    /noreply\.cdcinfo@vitstudent\.ac\.in|vit\s*-\s*soft\s*skill\s*assessments/i.test(email.sender || '');
+  const hasPersonalTestCredentials =
+    isPersonalNeoPatSender &&
+    (/test\s*link|assessment\s*link|login\s*window|exam\s*link|password|passkey/i.test(fullText) || emailClass === 'test');
+  if (hasPersonalTestCredentials && !isNeoMatched) {
+    isNeoMatched = true;
+    matchType = 'email_body';
+    matchDetail = 'Direct personal test invitation received from NeoPAT';
+  }
+
+  if (isNeoMatched || isInAppliedList) {
     // Record candidate match in DB
     await supabase.from('candidate_matches').insert({
       user_id: userId,
@@ -602,7 +610,17 @@ export async function processEmailForEventsAndStatus(
         /interview\s+shortlist|shortlist\s+for\s+interview|next\s+round\s+shortlist|shortlisted\s+for\s+next\s+round/i.test(fullText);
 
       if (isPostTestRound) {
-        if (['test_scheduled', 'interview_scheduled'].includes(currentStatus)) {
+        // Check if user had an actual confirmed shortlist match in the database
+        const { data: compMatches } = await supabase
+          .from('matches')
+          .select('id')
+          .eq('user_id', userId)
+          .eq('company_id', companyId)
+          .limit(1);
+
+        const hasConfirmedMatch = compMatches && compMatches.length > 0;
+
+        if (hasConfirmedMatch && ['test_scheduled', 'interview_scheduled'].includes(currentStatus)) {
           // User was in the test/interview and was eliminated in a subsequent round
           newStatus = 'rejected';
         } else {
@@ -615,13 +633,21 @@ export async function processEmailForEventsAndStatus(
       }
     }
   } else if (
-    // F. PPT event found in email — upgrade status for registered candidates
-    extractedEvents.length > 0
+    // F. Event found in email — upgrade status for registered candidates
+    extractedEvents.length > 0 ||
+    /(?:online\s+)?(?:test|assessment|exam)\s+(?:is\s+)?(?:scheduled|rescheduled)|(?:online\s+)?(?:test|assessment|exam)\s+schedule|test\s+link|assessment\s+link/i.test(subjLower)
   ) {
     const current = existingApp?.status || 'not_applied';
+    const hasExplicitTestScheduleInSubject =
+      /(?:online\s+)?(?:test|assessment|exam)\s+(?:is\s+)?(?:scheduled|rescheduled)|(?:online\s+)?(?:test|assessment|exam)\s+schedule|test\s+link|assessment\s+link/i.test(subjLower);
+    const hasTest =
+      extractedEvents.some((e) => ['online_test', 'coding_test'].includes(e.eventType) && e.startTime !== null) ||
+      hasExplicitTestScheduleInSubject;
     const hasPpt = extractedEvents.some((e) => /ppt/i.test(e.eventType));
-    // Only candidates who actively applied get ppt_scheduled
-    if (hasPpt && current === 'applied') {
+
+    if (hasTest && !isShortlistEmail && ['applied', 'ppt_scheduled'].includes(current)) {
+      newStatus = 'test_scheduled';
+    } else if (hasPpt && current === 'applied') {
       newStatus = 'ppt_scheduled';
     }
   }
@@ -690,7 +716,7 @@ export async function processEmailForEventsAndStatus(
   const appUpdate: Record<string, unknown> = {
     user_id: userId,
     company_id: companyId,
-    last_updated: new Date().toISOString(),
+    last_updated: existingApp?.manual_override && existingApp?.last_updated ? existingApp.last_updated : new Date().toISOString(),
   };
 
   const { extractTravelRequirement } = await import('@/lib/sync/events');
@@ -714,7 +740,7 @@ export async function processEmailForEventsAndStatus(
   } else if (existingApp?.notes) {
     // Preserve previously extracted travel mode so later circulars (e.g. test links) don't overwrite it
     const prevTravel = existingApp.notes.split('\n')[0]?.trim();
-    if (['vellore', 'chennai', 'bhopal_lab', 'online'].includes(prevTravel)) {
+    if (['vellore', 'chennai', 'ap', 'bhopal', 'bhopal_lab', 'online'].includes(prevTravel)) {
       noteParts.push(prevTravel);
     }
   }

@@ -463,7 +463,7 @@ export default function Topbar({ userName, userAvatar, lastSyncAt }: TopbarProps
 
   return (
     <>
-      <header className="flex items-center justify-between h-14 sm:h-16 px-3 sm:px-6 bg-[#09090b]/85 backdrop-blur-xl border-b border-zinc-800/80 sticky top-0 z-40 w-full min-w-0 max-w-full">
+      <header className="flex items-center justify-between h-14 sm:h-16 px-5 sm:px-8 md:px-12 lg:px-16 xl:px-20 2xl:px-24 bg-[#09090b]/85 backdrop-blur-xl border-b border-zinc-800/80 sticky top-0 z-40 w-full min-w-0 max-w-full">
         {/* Left: Mobile logo (hidden on desktop) */}
         <div className="flex items-center gap-2 lg:hidden min-w-0 shrink">
           <Link href="/" className="flex items-center gap-2 min-w-0 group" title="Where's My Offer?">

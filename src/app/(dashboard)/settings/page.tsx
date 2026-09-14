@@ -2,6 +2,7 @@ import type { Metadata } from 'next';
 import { requireSession } from '@/lib/auth';
 import { createAdminClient } from '@/lib/supabase/admin';
 import SettingsClient from './settings-client';
+import { detectCampus, detectBranch, detectRegNo } from '@/lib/utils';
 
 export const metadata: Metadata = {
   title: 'Settings & Preferences',
@@ -24,11 +25,19 @@ export default async function SettingsPage() {
       .single(),
   ]);
 
+  const collegeAccount = (accounts || []).find((a) => a.account_type === 'college');
+  const autoCampus = detectCampus(collegeAccount?.email);
+  const detectedBranch = detectBranch(collegeAccount?.email) || (user?.neo_id ? detectBranch(user.neo_id) : null);
+  const detectedRegNo = detectRegNo(collegeAccount?.email) || user?.neo_id || null;
+
   return (
     <SettingsClient
       accounts={accounts || []}
       neoId={user?.neo_id || ''}
       userEmail={session.email}
+      autoCampus={autoCampus}
+      detectedBranch={detectedBranch}
+      detectedRegNo={detectedRegNo}
     />
   );
 }

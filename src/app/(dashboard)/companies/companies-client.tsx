@@ -9,6 +9,8 @@ import {
   Clock,
   MapPin,
   Building2,
+  Plane,
+  Globe,
   ArrowUpRight,
   ChevronDown,
   Check,
@@ -16,8 +18,11 @@ import {
   X,
   Tag,
   Zap,
+  CheckCircle2,
+  AlertCircle,
+  Calendar,
 } from 'lucide-react';
-import { cn, timeAgo, formatStipend } from '@/lib/utils';
+import { cn, timeAgo, formatDate, formatStipend } from '@/lib/utils';
 import { StatusChip, CategoryBadge } from '@/components/ui/status-chip';
 import { StageStepper, getStageIndex, getEffectiveStage } from '@/components/companies/stage-stepper';
 
@@ -65,6 +70,7 @@ export interface CompanyWithDetails {
 
 interface CompaniesClientProps {
   companies: CompanyWithDetails[];
+  userCampus?: 'VIT Bhopal' | 'VIT Vellore' | 'VIT Chennai' | 'VIT AP';
 }
 
 const FILTERS = [
@@ -73,6 +79,7 @@ const FILTERS = [
   { id: 'scheduled', label: 'Scheduled' },
   { id: 'not_shortlisted', label: 'Not Shortlisted' },
   { id: 'withdrawn', label: 'Withdrawn' },
+  { id: 'not_applied', label: 'Not Applied' },
   { id: 'all', label: 'All' },
 ];
 
@@ -90,7 +97,9 @@ const matchFilter = (status: string, filter: string) => {
     return [
       'shortlisted',
       'test_scheduled',
+      'test_ongoing',
       'interview_scheduled',
+      'interview_ongoing',
       'interview',
       'test',
       'selected',
@@ -103,15 +112,19 @@ const matchFilter = (status: string, filter: string) => {
     if (s.includes('completed')) return false;
     return [
       'test_scheduled',
+      'test_ongoing',
       'interview_scheduled',
+      'interview_ongoing',
       'ppt_scheduled',
+      'ppt_ongoing',
       'test',
       'ppt',
       'interview',
     ].includes(s);
   }
   if (filter === 'not_shortlisted') return ['rejected', 'not_shortlisted'].includes(s);
-  if (filter === 'withdrawn') return ['withdrawn', 'declined', 'not_applied'].includes(s);
+  if (filter === 'withdrawn') return ['withdrawn', 'declined'].includes(s);
+  if (filter === 'not_applied') return s === 'not_applied';
   return true;
 };
 
@@ -148,16 +161,70 @@ function formatEventTime(dateStr: string | null) {
   const diffHours = Math.round(diffMs / (1000 * 60 * 60));
   const diffDays = Math.round(diffMs / (1000 * 60 * 60 * 24));
 
-  if (diffHours > 0 && diffHours < 24) return `in ${diffHours} hrs · ${date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}`;
-  if (diffDays > 0 && diffDays <= 7) return `in ${diffDays} days`;
-  return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  const timeStr = date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+  const dateStrShort = date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  const hasSpecificTime = !(date.getHours() === 0 && date.getMinutes() === 0);
+
+  if (diffHours > 0 && diffHours < 24) {
+    return hasSpecificTime ? `in ${diffHours}h · ${timeStr}` : 'Today';
+  }
+  if (diffDays === 1) {
+    return hasSpecificTime ? `Tomorrow · ${timeStr}` : 'Tomorrow';
+  }
+  if (diffDays > 1 && diffDays <= 7) {
+    return hasSpecificTime ? `${dateStrShort} · ${timeStr}` : `in ${diffDays}d (${dateStrShort})`;
+  }
+  return hasSpecificTime ? `${dateStrShort} · ${timeStr}` : dateStrShort;
 }
 
-export default function CompaniesClient({ companies }: CompaniesClientProps) {
+export default function CompaniesClient({
+  companies,
+  userCampus = 'VIT Bhopal',
+}: CompaniesClientProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [q, setQ] = useState(searchParams.get('q') || searchParams.get('search') || '');
-  const [filter, setFilter] = useState('active');
+  const urlFilter = searchParams.get('filter');
+  const [filter, setFilter] = useState(urlFilter || 'active');
+
+  const updateUrl = (newFilter: string, newQ?: string) => {
+    const params = new URLSearchParams();
+    if (newFilter) {
+      params.set('filter', newFilter);
+    }
+    const currentQ = newQ !== undefined ? newQ : q;
+    if (currentQ.trim()) {
+      params.set('q', currentQ.trim());
+    }
+    const qs = params.toString();
+    router.replace(qs ? `/companies?${qs}` : '/companies', { scroll: false });
+  };
+
+  const handleFilterChange = (newFilter: string) => {
+    setFilter(newFilter);
+    updateUrl(newFilter, q);
+  };
+
+  const handleSearchChange = (val: string) => {
+    setQ(val);
+    updateUrl(filter, val);
+  };
+
+  const handleClearSearch = () => {
+    setQ('');
+    updateUrl(filter, '');
+  };
+
+  useEffect(() => {
+    const currentParam = searchParams.get('filter') || 'active';
+    if (currentParam !== filter) {
+      setFilter(currentParam);
+    }
+    const currentQ = searchParams.get('q') || searchParams.get('search') || '';
+    if (currentQ !== q) {
+      setQ(currentQ);
+    }
+  }, [searchParams]);
 
   const filteredCompanies = useMemo(() => {
     const list = companies
@@ -171,6 +238,61 @@ export default function CompaniesClient({ companies }: CompaniesClientProps) {
         const haystack = `${c.name} ${c.application?.role || ''} ${c.application?.ctc || ''} ${c.application?.location || ''}`.toLowerCase();
         return haystack.includes(q.toLowerCase().trim());
       });
+
+    if (filter === 'active') {
+      const now = Date.now();
+      return [...list].sort((a, b) => {
+        // 1. Any confirmed upcoming round (Interview, Test, PPT) sorted by soonest date first
+        const getNextRoundTime = (comp: CompanyWithDetails) => {
+          const compEvents = comp.events || (comp.latestEvent ? [comp.latestEvent] : []);
+          const upcoming = compEvents
+            .filter((e) => {
+              const isRound = /interview|test|coding|assessment|ppt|pre-placement/i.test(
+                `${e.event_type || ''} ${e.title || ''}`
+              );
+              const t = e.start_time ? new Date(e.start_time).getTime() : 0;
+              return isRound && t > now;
+            })
+            .sort((x, y) => new Date(x.start_time!).getTime() - new Date(y.start_time!).getTime());
+          return upcoming.length > 0 ? new Date(upcoming[0].start_time!).getTime() : null;
+        };
+
+        const nextA = getNextRoundTime(a);
+        const nextB = getNextRoundTime(b);
+
+        // If both have upcoming rounds, earliest event date/time takes top priority
+        if (nextA !== null && nextB !== null) return nextA - nextB;
+        // If one has an upcoming round, it floats above non-scheduled drives
+        if (nextA !== null) return -1;
+        if (nextB !== null) return 1;
+
+        // 2. Funnel Progression Rank (Deepest in recruitment pipeline first)
+        const getRank = (comp: CompanyWithDetails) => {
+          const rawStatus = comp.application?.status || 'applied';
+          const eff = getEffectiveStage(rawStatus, comp.latestEvent, comp.events);
+          const s = eff.effectiveStatus.toLowerCase();
+          if (s === 'selected' || s === 'offer' || s === 'offer_received') return 100;
+          if (s === 'interview_completed') return 90;
+          if (s === 'interview_scheduled' || s === 'interview') return 80;
+          if (s === 'test_completed') return 70; // e.g. Goldman Sachs, EY GDS, Cummins
+          if (s === 'test_scheduled' || s === 'test') return 60; // e.g. Playsimple Games
+          if (s === 'ppt_completed') return 50; // e.g. Unilever, EY SAP
+          if (s === 'ppt_scheduled' || s === 'ppt') return 40;
+          return 10; // applied
+        };
+
+        const rankA = getRank(a);
+        const rankB = getRank(b);
+        if (rankB !== rankA) return rankB - rankA;
+
+        // 3. Secondary sort: prioritize manual/bot updates, else latest email circular / applied_at
+        const isManualA = a.application?.manual_override && a.application?.last_updated;
+        const isManualB = b.application?.manual_override && b.application?.last_updated;
+        const dateA = new Date(isManualA ? a.application!.last_updated : a.latestEmailDate || a.application?.applied_at || a.updated_at || 0).getTime();
+        const dateB = new Date(isManualB ? b.application!.last_updated : b.latestEmailDate || b.application?.applied_at || b.updated_at || 0).getTime();
+        return dateB - dateA;
+      });
+    }
 
     if (filter === 'not_shortlisted') {
       return [...list].sort((a, b) => {
@@ -199,6 +321,30 @@ export default function CompaniesClient({ companies }: CompaniesClientProps) {
     return list;
   }, [companies, filter, q]);
 
+  const filterCounts = useMemo(() => {
+    const counts: Record<string, number> = {
+      all: companies.length,
+      active: 0,
+      shortlisted: 0,
+      scheduled: 0,
+      not_shortlisted: 0,
+      withdrawn: 0,
+      not_applied: 0,
+    };
+    for (const c of companies) {
+      const rawStatus = c.application?.status || 'applied';
+      const eff = getEffectiveStage(rawStatus, c.latestEvent, c.events);
+      const st = eff.effectiveStatus;
+      if (matchFilter(st, 'active')) counts.active++;
+      if (matchFilter(st, 'shortlisted')) counts.shortlisted++;
+      if (matchFilter(st, 'scheduled')) counts.scheduled++;
+      if (matchFilter(st, 'not_shortlisted')) counts.not_shortlisted++;
+      if (matchFilter(st, 'withdrawn')) counts.withdrawn++;
+      if (matchFilter(st, 'not_applied')) counts.not_applied++;
+    }
+    return counts;
+  }, [companies]);
+
   return (
     <div data-testid="companies-page" className="mx-auto max-w-7xl w-full min-w-0">
       {/* Page Header */}
@@ -223,13 +369,13 @@ export default function CompaniesClient({ companies }: CompaniesClientProps) {
           <input
             data-testid="companies-search-input"
             value={q}
-            onChange={(e) => setQ(e.target.value)}
+            onChange={(e) => handleSearchChange(e.target.value)}
             placeholder="Search drives, roles, CTCs…"
             className="h-9 sm:h-10 w-full rounded-xl border border-zinc-800 bg-zinc-900/60 pl-9 pr-8 text-xs sm:text-sm text-zinc-200 placeholder:text-zinc-500 focus:border-emerald-500/40 focus:outline-none"
           />
           {q && (
             <button
-              onClick={() => setQ('')}
+              onClick={handleClearSearch}
               className="absolute right-2.5 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-zinc-300"
             >
               <X className="h-3.5 w-3.5" />
@@ -238,31 +384,43 @@ export default function CompaniesClient({ companies }: CompaniesClientProps) {
         </div>
       </div>
 
-      {/* Filter Chips Bar */}
-      <div className="mt-4 sm:mt-6 flex items-center gap-1.5 sm:gap-2 overflow-x-auto pb-1 scrollbar-none max-w-full min-w-0" data-testid="filter-bar">
-        {FILTERS.map((f) => (
-          <button
-            key={f.id}
-            data-testid={`filter-chip-${f.id}`}
-            onClick={() => setFilter(f.id)}
-            className={`shrink-0 rounded-full border px-3 sm:px-4 py-1 sm:py-1.5 text-xs font-semibold transition-colors duration-200 ${
-              filter === f.id
-                ? 'border-emerald-500/40 bg-emerald-500/15 text-emerald-300'
-                : 'border-zinc-800 bg-zinc-900/50 text-zinc-500 hover:border-zinc-700 hover:text-zinc-300'
-            }`}
-          >
-            {f.label}
-          </button>
-        ))}
-        <span className="ml-auto hidden shrink-0 font-mono text-[10px] text-zinc-600 sm:block">
-          {filteredCompanies.length} / {companies.length} drives
-        </span>
+      {/* Filter Chips Bar with inline badge counts */}
+      <div className="mt-4 sm:mt-6 flex items-center gap-2 sm:gap-2.5 overflow-x-auto pb-1 scrollbar-none max-w-full min-w-0" data-testid="filter-bar">
+        {FILTERS.map((f) => {
+          const count = filterCounts[f.id] ?? 0;
+          return (
+            <button
+              key={f.id}
+              data-testid={`filter-chip-${f.id}`}
+              onClick={() => handleFilterChange(f.id)}
+              className={`group flex items-center gap-1.5 shrink-0 rounded-full border px-3.5 sm:px-4 py-1.5 sm:py-2 text-xs font-semibold transition-colors duration-200 cursor-pointer ${
+                filter === f.id
+                  ? 'border-emerald-500/40 bg-emerald-500/15 text-emerald-300'
+                  : 'border-zinc-800 bg-zinc-900/50 text-zinc-500 hover:border-zinc-700 hover:text-zinc-300'
+              }`}
+            >
+              <span>{f.label}</span>
+              <span
+                className={cn(
+                  'rounded-full px-1.5 py-0.5 font-mono text-[10px] font-bold leading-none transition-colors',
+                  filter === f.id
+                    ? 'bg-emerald-500/30 text-emerald-200'
+                    : 'bg-zinc-800 text-zinc-400 group-hover:bg-zinc-700 group-hover:text-zinc-300'
+                )}
+              >
+                {count}
+              </span>
+            </button>
+          );
+        })}
       </div>
 
       {/* 2-Column Company Cards Grid (Emergent Style) */}
-      <div className="mt-4 grid grid-cols-1 lg:grid-cols-2 gap-3 w-full min-w-0 max-w-full">
+      <div className="mt-4 sm:mt-5 grid grid-cols-1 lg:grid-cols-2 gap-3.5 sm:gap-4.5 w-full min-w-0 max-w-full">
         {filteredCompanies.map((c, i) => {
-          const nextEv = c.latestEvent;
+          const nextEv =
+            c.latestEvent ||
+            (c.events || []).find((e) => e.start_time && new Date(e.start_time).getTime() >= Date.now());
           const rawStatus = c.application?.status || 'applied';
           const effectiveResult = getEffectiveStage(rawStatus, nextEv, c.events);
           const status = effectiveResult.effectiveStatus;
@@ -272,18 +430,19 @@ export default function CompaniesClient({ companies }: CompaniesClientProps) {
           const initials = c.name.slice(0, 2).toUpperCase();
           const hue = getHue(c.name);
 
-          // Mode & Travel display
+          // Mode & Travel: Standardized strictly to 5 options:
+          // 'Online', 'VIT Vellore', 'VIT Chennai', 'VIT AP', 'VIT Bhopal'
           const notesStr = (c.application?.notes || '').toLowerCase();
           const driveMode =
             notesStr.includes('vellore')
               ? 'VIT Vellore'
               : notesStr.includes('chennai')
               ? 'VIT Chennai'
-              : notesStr.includes('bhopal')
-              ? 'Bhopal Labs'
-              : notesStr.includes('online')
+              : notesStr.includes('ap') || notesStr.includes('amaravati')
+              ? 'VIT AP'
+              : notesStr.includes('online') || notesStr.includes('virtual')
               ? 'Online'
-              : 'On-Campus';
+              : 'VIT Bhopal';
 
           const stipendFormatted = formatStipend(c.application?.stipend);
           const ctcDisplay = c.application?.ctc
@@ -298,94 +457,150 @@ export default function CompaniesClient({ companies }: CompaniesClientProps) {
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.4, delay: Math.min(i * 0.04, 0.4) }}
               whileHover={{ y: -3 }}
-              className="w-full min-w-0 max-w-full"
+              className="w-full min-w-0 max-w-full h-full"
             >
               <Link
                 href={`/companies/${c.id}`}
-                className={`group block w-full min-w-0 max-w-full overflow-hidden rounded-xl border border-zinc-800 bg-[#101014] p-3.5 sm:p-4 text-left transition-colors duration-200 hover:border-zinc-600 ${
+                className={`group flex flex-col justify-between h-full w-full min-w-0 max-w-full overflow-hidden rounded-xl border border-zinc-800 bg-[#101014] p-3.5 sm:p-4 text-left transition-colors duration-200 hover:border-zinc-600 ${
                   status === 'selected' || status === 'offer'
                     ? 'border-emerald-500/30 shadow-[0_0_40px_rgba(16,185,129,0.08)]'
                     : ''
                 }`}
               >
-                <div className="flex items-start gap-2.5 sm:gap-3 min-w-0">
-                  <div
-                    className={`flex h-10 w-10 sm:h-11 sm:w-11 shrink-0 items-center justify-center rounded-lg border font-display text-xs sm:text-sm font-bold ${hue}`}
-                  >
-                    {initials}
-                  </div>
-                  <div className="min-w-0 flex-1 overflow-hidden">
-                    <div className="flex items-center justify-between gap-2 min-w-0">
-                      <h3 className="truncate min-w-0 flex-1 font-display text-sm sm:text-base font-bold tracking-tight text-zinc-100 group-hover:text-emerald-300 transition-colors">
-                        {c.name}
-                      </h3>
-                      <StatusChip status={status} className="shrink-0" />
-                    </div>
-                    <div className="mt-1 flex items-center gap-2 min-w-0">
-                      <span className="truncate text-xs text-zinc-400">{role}</span>
-                      <CategoryBadge category={category} className="shrink-0" />
-                    </div>
-                  </div>
-                </div>
-
-                <div className="mt-3 flex flex-wrap items-center gap-x-3 sm:gap-x-4 gap-y-1 text-[11px] text-zinc-500 min-w-0">
-                  <span className="font-tabular font-mono text-xs sm:text-sm font-bold text-zinc-200 shrink-0">
-                    {ctcDisplay}
-                  </span>
-                  <span className="flex items-center gap-1 min-w-0 max-w-[130px] sm:max-w-none truncate shrink-0">
-                    <MapPin className="h-3 w-3 shrink-0 text-zinc-500" />
-                    <span className="truncate">{c.application?.location || 'Pan-India'}</span>
-                  </span>
-                  <span className="flex items-center gap-1 shrink-0">
-                    <Building2 className="h-3 w-3 shrink-0 text-zinc-500" />
-                    <span>{driveMode}</span>
-                  </span>
-                  <span className="ml-auto font-mono text-[10px] text-zinc-600 shrink-0">
-                    {c.application?.last_updated ? timeAgo(c.application.last_updated) : 'Active'}
-                  </span>
-                </div>
-
-                {/* Recruitment Stage Stepper */}
-                <div className="mt-3.5 pt-3 border-t border-zinc-800/80">
-                  <div className="mb-2 flex items-center justify-between">
-                    <span className="font-mono text-[10px] uppercase tracking-widest text-zinc-500">
-                      Recruitment Stage
-                    </span>
-                    <span
-                      className={cn(
-                        'font-mono text-[10px]',
-                        effectiveResult.eliminatedStage !== -1
-                          ? 'text-rose-400 font-semibold'
-                          : 'text-zinc-500'
-                      )}
+                {/* Top Content Area */}
+                <div className="flex-1 flex flex-col min-w-0">
+                  <div className="flex items-start gap-2.5 sm:gap-3 min-w-0">
+                    <div
+                      className={`flex h-10 w-10 sm:h-11 sm:w-11 shrink-0 items-center justify-center rounded-lg border font-display text-xs sm:text-sm font-bold ${hue}`}
                     >
-                      {effectiveResult.statusSubtitle}
-                    </span>
+                      {initials}
+                    </div>
+                    <div className="min-w-0 flex-1 overflow-hidden">
+                      <div className="flex items-center justify-between gap-2 min-w-0">
+                        <h3 className="truncate min-w-0 flex-1 font-display text-sm sm:text-base font-bold tracking-tight text-zinc-100 group-hover:text-emerald-300 transition-colors">
+                          {c.name}
+                        </h3>
+                        <StatusChip status={status} className="shrink-0" />
+                      </div>
+                      <div className="mt-1 flex items-center gap-1.5 min-w-0 text-xs text-zinc-400">
+                        <span className="truncate">{role}</span>
+                        {category && (
+                          <>
+                            <span className="text-zinc-600 shrink-0">·</span>
+                            <span className="shrink-0 text-zinc-500">{category}</span>
+                          </>
+                        )}
+                      </div>
+                    </div>
                   </div>
-                  <StageStepper
-                    status={rawStatus}
-                    latestEvent={nextEv}
-                    events={c.events}
-                    compact
-                  />
+
+                  <div className="mt-3 flex flex-wrap items-center gap-x-3 sm:gap-x-4 gap-y-1 text-[11px] text-zinc-500 min-w-0">
+                    <span className="font-tabular font-mono text-xs sm:text-sm font-bold text-zinc-200 shrink-0">
+                      {ctcDisplay}
+                    </span>
+                    <span className="flex items-center gap-1 min-w-0 max-w-[130px] sm:max-w-none truncate shrink-0">
+                      <MapPin className="h-3 w-3 shrink-0 text-zinc-500" />
+                      <span className="truncate">{c.application?.location || 'Pan-India'}</span>
+                    </span>
+                    {(() => {
+                      const isHomeCampus = driveMode === userCampus;
+                      const isTravelRequired = driveMode !== 'Online' && !isHomeCampus;
+                      return (
+                        <span
+                          className={cn(
+                            'flex items-center gap-1 shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium border transition-colors',
+                            isTravelRequired
+                              ? 'border-amber-500/30 bg-amber-500/10 text-amber-300'
+                              : driveMode === 'Online'
+                              ? 'border-cyan-500/30 bg-cyan-500/10 text-cyan-300'
+                              : 'border-indigo-500/30 bg-indigo-500/10 text-indigo-300'
+                          )}
+                          title={`Drive Mode: ${driveMode}${isTravelRequired ? ' (Travel Required)' : isHomeCampus ? ' (Home Campus)' : ''}`}
+                        >
+                          {isTravelRequired ? (
+                            <Plane className="h-2.5 w-2.5 text-amber-400 shrink-0" />
+                          ) : driveMode === 'Online' ? (
+                            <Globe className="h-2.5 w-2.5 text-cyan-400 shrink-0" />
+                          ) : (
+                            <Building2 className="h-2.5 w-2.5 text-indigo-400 shrink-0" />
+                          )}
+                          <span>{driveMode}</span>
+                        </span>
+                      );
+                    })()}
+                    {(() => {
+                      const isManual = Boolean(c.application?.manual_override && c.application?.last_updated);
+                      const displayDate = isManual
+                        ? c.application!.last_updated
+                        : c.latestEmailDate || c.application?.applied_at || c.application?.last_updated;
+                      const titleText = isManual
+                        ? `Manually updated via Placement Assistant: ${formatDate(c.application!.last_updated)}`
+                        : c.latestEmailDate
+                        ? `Latest circular/email: ${formatDate(c.latestEmailDate)}`
+                        : c.application?.applied_at
+                        ? `Applied: ${formatDate(c.application.applied_at)}`
+                        : undefined;
+
+                      return (
+                        <span
+                          suppressHydrationWarning
+                          title={titleText}
+                          className="ml-auto font-mono text-[10px] text-zinc-600 shrink-0 cursor-default"
+                        >
+                          {displayDate ? timeAgo(displayDate) : 'Active'}
+                        </span>
+                      );
+                    })()}
+                  </div>
+
+                  {/* Recruitment Stage Stepper */}
+                  <div className="mt-3.5 pt-3 border-t border-zinc-800/80">
+                    <div className="mb-2 flex items-center justify-between min-w-0 gap-2">
+                      <span className="font-mono text-[10px] uppercase tracking-widest text-zinc-500 shrink-0">
+                        {['withdrawn', 'declined', 'not_applied'].includes(status) ? 'Participation Status' : 'Recruitment Stage'}
+                      </span>
+                      <div className="flex items-center gap-2 min-w-0 overflow-hidden">
+                        {nextEv?.start_time &&
+                          effectiveResult.eliminatedStage === -1 &&
+                          !['not_shortlisted', 'rejected', 'withdrawn', 'declined', 'not_applied'].includes(status) && (
+                          <span
+                            suppressHydrationWarning
+                            className={cn(
+                              'font-mono text-[10px] flex items-center gap-1 font-semibold px-1.5 py-0.5 rounded border shrink-0',
+                              NEXT_EVENT_CLS[nextEv.event_type] || NEXT_EVENT_CLS.test
+                            )}
+                            title={nextEv.title || nextEv.event_type}
+                          >
+                            <Clock className="h-2.5 w-2.5 shrink-0" />
+                            <span>{formatEventTime(nextEv.start_time)}</span>
+                          </span>
+                        )}
+                        <span
+                          className={cn(
+                            'font-mono text-[10px] truncate',
+                            effectiveResult.eliminatedStage !== -1
+                              ? 'text-rose-400 font-semibold'
+                              : 'text-zinc-500'
+                          )}
+                        >
+                          {effectiveResult.statusSubtitle}
+                        </span>
+                      </div>
+                    </div>
+                    <StageStepper
+                      status={rawStatus}
+                      latestEvent={nextEv}
+                      events={c.events}
+                      compact
+                    />
+                  </div>
                 </div>
 
-                {nextEv && (
-                  <div
-                    className={`mt-2.5 flex items-center justify-between gap-2 rounded-lg border px-3 py-1.5 sm:py-2 text-[11px] font-medium min-w-0 overflow-hidden ${
-                      NEXT_EVENT_CLS[nextEv.event_type] || NEXT_EVENT_CLS.test
-                    }`}
-                  >
-                    <span className="flex items-center gap-2 min-w-0 truncate">
-                      <Clock className="h-3.5 w-3.5 shrink-0" />
-                      <span className="truncate">{nextEv.title || nextEv.event_type.replace(/_/g, ' ')}</span>
-                    </span>
-                    <span className="font-tabular font-mono shrink-0">{formatEventTime(nextEv.start_time)}</span>
+                {/* Bottom Section: Minimal Open timeline action */}
+                <div className="mt-2.5 flex items-center justify-end">
+                  <div className="flex items-center gap-1 text-[11px] font-semibold text-zinc-500 transition-colors group-hover:text-emerald-400">
+                    <span>Open timeline</span> <ArrowUpRight className="h-3.5 w-3.5" />
                   </div>
-                )}
-
-                <div className="mt-2.5 flex items-center justify-end gap-1 text-[11px] font-semibold text-zinc-600 transition-colors group-hover:text-emerald-400">
-                  <span>Open timeline</span> <ArrowUpRight className="h-3.5 w-3.5" />
                 </div>
               </Link>
             </motion.div>

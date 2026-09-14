@@ -28,6 +28,800 @@ export const maxDuration = 120;
  * Tier 2: College circulars (@vitbhopal.ac.in) ONLY enrich existing NeoPAT drives with CTC, JDs,
  *         test dates, and shortlist verification. Non-NeoPAT drives (e.g. Datagrokr) are discarded.
  */
+/**
+ * Phase 4 only: Recalculates application statuses, CTCs, roles, and events for all
+ * companies of a user by loading ALL their emails at once and doing holistic analysis.
+ *
+ * This is the same computation that happens at the end of performReprocess but runs
+ * standalone — called from the sync engine after all pages complete to correct any
+ * status errors from incremental per-email processing.
+ */
+export async function recalculateApplicationStatuses(
+  userId: string,
+  onProgress?: (p: { step: number; totalSteps: number; message: string }) => void
+): Promise<{ updatedCount: number; results: Array<{ company: string; status: string; role?: string | null; ctc?: string | null }> }> {
+  const supabase = createAdminClient();
+
+  onProgress?.({
+    step: 5,
+    totalSteps: 5,
+    message: `Recalculating application stages, CTCs & calendar events for official drives…`,
+  });
+
+  const { data: userData } = await supabase
+    .from('users')
+    .select('neo_id, email, name')
+    .eq('id', userId)
+    .single();
+
+  const userNeoId = userData?.neo_id || null;
+  const userEmail = userData?.email || '';
+
+  if (!userEmail) return { updatedCount: 0, results: [] };
+
+  // Fetch all emails for this user (paginated)
+  const allEmails: Array<{
+    id: string;
+    subject: string | null;
+    sender: string | null;
+    body_snippet: string | null;
+    classification: string | null;
+    company_id: string | null;
+    received_at: string | null;
+  }> = [];
+
+  const pageSize = 1000;
+  let page = 0;
+  while (true) {
+    const { data: chunk, error: chunkErr } = await supabase
+      .from('emails')
+      .select('id, subject, sender, body_snippet, classification, company_id, received_at')
+      .eq('user_id', userId)
+      .order('received_at', { ascending: true })
+      .range(page * pageSize, (page + 1) * pageSize - 1);
+
+    if (chunkErr || !chunk || chunk.length === 0) break;
+    allEmails.push(...chunk);
+    if (chunk.length < pageSize) break;
+    page++;
+  }
+
+  if (allEmails.length === 0) return { updatedCount: 0, results: [] };
+
+  // Run comprehensive company deduplication pass before status calculation
+  try {
+    const { deduplicateUserCompanies } = await import('@/lib/sync/dedup');
+    await deduplicateUserCompanies(supabase, userId);
+  } catch (dedupErr) {
+    console.warn('[recalculateApplicationStatuses] Pre-calculation dedup warning:', dedupErr);
+  }
+
+  const { data: remainingCompanies } = await supabase
+    .from('companies')
+    .select('id, name')
+    .eq('user_id', userId);
+
+  if (!remainingCompanies || remainingCompanies.length === 0) return { updatedCount: 0, results: [] };
+
+  // Deduplicate rogue companies ending with UG/PG or duplicate names if base company exists
+  for (const c of remainingCompanies) {
+    if (/\b(?:ug|pg)\b/i.test(c.name)) {
+      const baseName = c.name.replace(/\s+(?:ug|pg)\b.*$/i, '').trim();
+      const baseComp = remainingCompanies.find(
+        (other) => other.id !== c.id && other.name.toLowerCase() === baseName.toLowerCase()
+      );
+      if (baseComp) {
+        await supabase.from('emails').update({ company_id: baseComp.id }).eq('company_id', c.id);
+        await supabase.from('applications').delete().eq('company_id', c.id);
+        await supabase.from('events').delete().eq('company_id', c.id);
+        await supabase.from('notifications').delete().eq('company_id', c.id);
+        await supabase.from('companies').delete().eq('id', c.id);
+        c.id = baseComp.id;
+      }
+    }
+  }
+
+  // Sanitize legacy suffixed company names like "Euler Motors (1170)"
+  for (const c of remainingCompanies) {
+    if (/\s*\(\d+\)\s*$/.test(c.name)) {
+      const cleanName = c.name.replace(/\s*\(\d+\)\s*$/, '').trim();
+      await supabase.from('companies').update({ name: cleanName }).eq('id', c.id);
+      c.name = cleanName;
+    }
+  }
+
+  const { data: candidateMatches } = await supabase
+    .from('candidate_matches')
+    .select('id, match_type, email_id, matched_value')
+    .eq('user_id', userId);
+
+  const emailsByCompanyId = new Map<string, typeof allEmails>();
+  for (const e of allEmails) {
+    if (e.company_id) {
+      const list = emailsByCompanyId.get(e.company_id) || [];
+      list.push(e);
+      emailsByCompanyId.set(e.company_id, list);
+    }
+  }
+
+  let updatedAppsCount = 0;
+  const applicationResults: Array<{ company: string; status: string; role?: string | null; ctc?: string | null }> = [];
+
+  const uniqueCompanies = Array.from(new Map(remainingCompanies.map((c) => [c.id, c])).values());
+
+  for (let cIdx = 0; cIdx < uniqueCompanies.length; cIdx++) {
+    const comp = uniqueCompanies[cIdx];
+    const companyEmails = emailsByCompanyId.get(comp.id) || [];
+    if (companyEmails.length === 0) continue;
+
+    if (cIdx % 5 === 0 || cIdx === uniqueCompanies.length - 1) {
+      onProgress?.({
+        step: 5,
+        totalSteps: 5,
+        message: `Recalculating application stages, CTCs & calendar events (${cIdx + 1} / ${uniqueCompanies.length})…`,
+      });
+    }
+
+    const emailIds = new Set(companyEmails.map((e) => e.id));
+    const matchedEmailIds = new Set(
+      (candidateMatches || [])
+        .filter((cm) => emailIds.has((cm as unknown as { email_id: string }).email_id))
+        .map((cm) => (cm as unknown as { email_id: string }).email_id)
+    );
+
+    // 0. Scan any Google Sheets pubhtml shortlists in company emails for candidate matches
+    const { extractGoogleSheetUrls, scanGoogleSheetForCandidate } = await import('@/lib/sync/gsheet-parser');
+    const gsheetEventsForCompany: Array<{
+      eventType: string;
+      title: string;
+      startTime: Date;
+      venue: string;
+      mode: string;
+      confidence: string;
+      hasExplicitTime: boolean;
+    }> = [];
+
+    for (const email of companyEmails) {
+      const emailText = `${email.subject || ''}\n${email.body_snippet || ''}`;
+      const isRelevantCandidateEmail =
+        /shortlist|selection|selected|test|assessment|interview|score|rank|eligible|candidates|students/i.test(
+          emailText
+        );
+      if (!isRelevantCandidateEmail) continue;
+
+      const gUrls = extractGoogleSheetUrls(emailText);
+      for (const gUrl of gUrls) {
+        const gMatch = await scanGoogleSheetForCandidate(gUrl, userEmail, userNeoId, userData?.name);
+        if (gMatch && gMatch.matched) {
+          matchedEmailIds.add(email.id);
+          const alreadyMatched = (candidateMatches || []).some(
+            (cm) => (cm as unknown as { email_id: string }).email_id === email.id
+          );
+          if (!alreadyMatched) {
+            await supabase.from('candidate_matches').insert({
+              user_id: userId,
+              email_id: email.id,
+              neo_id: userNeoId || userEmail,
+              match_type: 'xlsx_cell',
+              matched_value: gMatch.details,
+              confidence: 'high',
+            });
+          }
+
+          if (gMatch.eventDate) {
+            const isPpt = /ppt|pre[\s-]*placement/i.test(email.subject || '');
+            const isInterview = /interview/i.test(email.subject || '');
+            const eventType = isPpt ? 'ppt' : isInterview ? 'technical_interview' : 'online_test';
+            const title = isPpt
+              ? 'Pre-Placement Talk (PPT)'
+              : isInterview
+              ? 'Interview'
+              : `Online Assessment${gMatch.slot ? ` (${gMatch.slot})` : ''}`;
+
+            const startTime = new Date(gMatch.eventDate);
+            startTime.setHours(gMatch.slot && /slot\s*2/i.test(gMatch.slot) ? 14 : 9, 0, 0, 0);
+            gsheetEventsForCompany.push({
+              eventType,
+              title,
+              startTime,
+              venue: 'Campus / Offline',
+              mode: 'online',
+              confidence: 'high',
+              hasExplicitTime: true,
+            });
+          }
+          break;
+        }
+      }
+    }
+
+    const sortedCompanyEmails = [...companyEmails].sort(
+      (a, b) => new Date(b.received_at || 0).getTime() - new Date(a.received_at || 0).getTime()
+    );
+
+    const isRegistrationCircular = (e: { subject?: string | null; body_snippet?: string | null }) => {
+      const text = `${e.subject || ''}\n${e.body_snippet || ''}`;
+      return (
+        (/name\s+of\s+the\s+company/i.test(text) && /category/i.test(text)) ||
+        /super\s*dream.*registration|dream.*registration|placement\s+registration|internship\s+registration/i.test(
+          e.subject || ''
+        )
+      );
+    };
+
+    const mainCircularEmail =
+      sortedCompanyEmails.find((e) => {
+        const text = `${e.subject || ''}\n${e.body_snippet || ''}`;
+        return (
+          /name\s+of\s+the\s+company/i.test(text) &&
+          /eligibility\s+criteria/i.test(text) &&
+          /category/i.test(text)
+        );
+      }) ||
+      sortedCompanyEmails.find((e) =>
+        /super\s*dream.*registration|dream.*registration|placement\s+registration|internship\s+registration|offer\s+registration/i.test(e.subject || '')
+      ) ||
+      sortedCompanyEmails.find((e) =>
+        /date\s+of\s+visit/i.test(e.body_snippet || '') || /registration/i.test(e.subject || '')
+      ) ||
+      sortedCompanyEmails[0];
+
+    const registrationCirculars = companyEmails.filter(isRegistrationCircular);
+    registrationCirculars.sort(
+      (a, b) => new Date(a.received_at || 0).getTime() - new Date(b.received_at || 0).getTime()
+    );
+    const driveRegistrationEmail = registrationCirculars[0] || mainCircularEmail;
+    const driveStartDate = driveRegistrationEmail?.received_at
+      ? new Date(driveRegistrationEmail.received_at)
+      : null;
+
+    const activeDriveEmails = sortedCompanyEmails;
+
+    const mainEmailText = `${mainCircularEmail.subject || ''}\n${mainCircularEmail.body_snippet || ''}`;
+    const mainJobDetails = extractJobDetails(mainEmailText);
+
+    const jobDetailEligibleEmails = activeDriveEmails.filter((e) => {
+      const cls = e.classification || '';
+      if (['test', 'venue_update', 'shortlist', 'interview', 'withdrawal', 'decline'].includes(cls)) return false;
+      const subj = (e.subject || '').toLowerCase();
+      if (/online\s+test|coding\s+test|shortlist|interview\s+is\s+scheduled/i.test(subj)) return false;
+      return true;
+    });
+
+    const combinedEmailText = (jobDetailEligibleEmails.length > 0 ? jobDetailEligibleEmails : activeDriveEmails)
+      .map((e) => `${e.subject || ''}\n${e.body_snippet || ''}`)
+      .join('\n\n');
+    const fallbackJobDetails = extractJobDetails(combinedEmailText);
+
+    const extractedJob = {
+      role: mainJobDetails.role || fallbackJobDetails.role,
+      category: mainJobDetails.category || fallbackJobDetails.category,
+      ctc: mainJobDetails.ctc || fallbackJobDetails.ctc,
+      stipend: mainJobDetails.stipend || fallbackJobDetails.stipend,
+      location: mainJobDetails.location || fallbackJobDetails.location,
+    };
+
+    const withdrawalEmails = companyEmails.filter((e) => {
+      const full = `${e.subject || ''} ${e.body_snippet || ''}`.toLowerCase();
+      if (
+        /who\s+(?:wish|want)\s+to\s+opt|if\s+you\s+(?:wish|want)\s+to\s+opt|opt[\s-]*out\s+(?:form|link|google|portal)|voluntary\s+withdrawal\s+only|forms\.gle/i.test(
+          full
+        )
+      ) {
+        return false;
+      }
+      return (
+        e.classification === 'withdrawal' ||
+        e.classification === 'decline' ||
+        /registration.*withdrawn|your registration.*withdrawn|declined\s+drive/i.test(full) ||
+        /confirmation.*drive\s+registration\s+update.*withdrawn/i.test(full)
+      );
+    });
+
+    const latestWithdrawalTime = withdrawalEmails.reduce((max, e) => {
+      const t = e.received_at ? new Date(e.received_at).getTime() : 0;
+      return Math.max(max, t);
+    }, 0);
+
+    const registrationEmails = activeDriveEmails.filter((e) => {
+      const subj = (e.subject || '').toLowerCase();
+      const full = `${subj} ${e.body_snippet || ''}`.toLowerCase();
+      return (
+        e.classification === 'registration_confirmation' ||
+        /confirmed:\s*your\s+registration/i.test(subj) ||
+        /registration\s+(confirmed|successful|received)/i.test(full) ||
+        /successfully\s+registered|thank\s+you\s+for\s+(registering|applying)/i.test(full)
+      );
+    });
+
+    const latestRegistrationTime = registrationEmails.reduce((max, e) => {
+      const t = e.received_at ? new Date(e.received_at).getTime() : 0;
+      return Math.max(max, t);
+    }, 0);
+
+    const hasRegistrationConfirmation = registrationEmails.length > 0;
+    const hasReRegisteredAfterWithdrawal = hasRegistrationConfirmation && latestRegistrationTime > latestWithdrawalTime;
+    const isWithdrawn = withdrawalEmails.length > 0 && !hasReRegisteredAfterWithdrawal;
+    const hasConfirmedRegistration = hasRegistrationConfirmation && !isWithdrawn;
+
+    const isAfterRegistration = (e: { received_at: string | null }) => {
+      if (!latestRegistrationTime) return true;
+      const t = e.received_at ? new Date(e.received_at).getTime() : 0;
+      return t >= (latestRegistrationTime - 2 * 60 * 1000);
+    };
+
+    const selectionListPattern = /selection\s+list|congratulations.*offer|selected\s+candidates|final\s+select/i;
+    const selectionEmails = activeDriveEmails.filter((e) =>
+      isAfterRegistration(e) && selectionListPattern.test(e.subject || '')
+    );
+
+    const nextRoundPattern =
+      /next\s+round|interview\s+(?:is\s+)?scheduled|technical\s+interview|hr\s+interview|final\s+interview|interview\s+shortlist|shortlist\s+for\s+interview|shortlisted\s+for\s+(?:the\s+)?interview/i;
+    const nextRoundEmails = activeDriveEmails.filter((e) =>
+      isAfterRegistration(e) && nextRoundPattern.test(e.subject || '')
+    );
+
+    const isInterviewOrSelectionEmail = (e: { subject?: string | null; body_snippet?: string | null }) => {
+      return nextRoundPattern.test(e.subject || '') || selectionListPattern.test(e.subject || '');
+    };
+
+    const isPptEmail = (e: { subject?: string | null }) => {
+      const s = (e.subject || '').toLowerCase();
+      return /ppt|pre[\s-]*placement/i.test(s) && !/test|exam|assessment|coding|mettl|hackerrank/i.test(s);
+    };
+
+    const testShortlistPattern =
+      /test\s+shortlist|shortlist\s+for\s+(?:the\s+)?(?:test|assessment|exam)|shortlisted\s+for\s+(?:the\s+)?(?:online\s+)?(?:test|assessment)|candidate[s]?\s+shortlisted|shortlisted\s+(?:candidates|students)|shortlist\s+will\s+be\s+shared|only\s+shortlisted\s+students|attached\s+(?:updated\s+)?(?:shortlist|shortlisted)|attached\s+.*shortlist|attached\s+(?:students?|candidates?)\s+list|\bneo\s+id\b/i;
+    const testShortlistEmails = activeDriveEmails.filter((e) => {
+      if (!isAfterRegistration(e)) return false;
+      if (isInterviewOrSelectionEmail(e)) return false;
+      if (isPptEmail(e)) return false;
+      if (isRegistrationCircular(e) || e.classification === 'registration') return false;
+      if (e.classification === 'shortlist') return true;
+      const full = `${e.subject || ''} ${e.body_snippet || ''}`;
+      // Exclude applied / opt-in rosters that do not explicitly announce a shortlist
+      if (
+        /attached\s+(?:final\s+|updated\s+)?(?:applied|opt[\s-]*in|registered)\s+(?:students?|candidates?)\s+list|opt[\s-]*in\s+list/i.test(full) &&
+        !/shortlist|shortlisted/i.test(e.subject || '')
+      ) {
+        return false;
+      }
+      // Exclude emails that merely state a shortlist "will be shared" or "will be confirmed" in the future
+      if (
+        /shortlist(?:ed)?\s+.*will\s+be\s+(?:shared|confirmed|announced|sent)|will\s+be\s+confirmed\s+shortly/i.test(full) &&
+        !/attached\s+(?:shortlist|shortlisted)/i.test(full) &&
+        !/shortlist|shortlisted/i.test(e.subject || '')
+      ) {
+        return false;
+      }
+      return testShortlistPattern.test(full);
+    });
+
+    const isTestEmail = (e: { subject: string | null; body_snippet: string | null; classification?: string | null; received_at?: string | null }) => {
+      if (!isAfterRegistration(e as { received_at: string | null })) return false;
+      if (isPptEmail(e)) return false;
+
+      const s = (e.subject || '').toLowerCase();
+      const b = (e.body_snippet || '').toLowerCase();
+      const full = `${s} ${b}`;
+
+      // 1. Explicit scheduling phrase in subject or direct test links
+      const isExplicitSubjectSchedule =
+        /(?:online\s+)?(?:test|assessment|exam)\s+(?:is\s+)?(?:scheduled|rescheduled)|(?:online\s+)?(?:test|assessment|exam)\s+schedule/i.test(s) ||
+        /test\s+link|assessment\s+link|exam\s+link/i.test(s);
+
+      if (isExplicitSubjectSchedule) {
+        return true;
+      }
+
+      // 2. Registration circulars, opt-in Google Forms, or mandatory registration emails
+      if (
+        isRegistrationCircular(e) ||
+        e.classification === 'registration' ||
+        /super\s*dream.*registration|dream.*registration|placement\s+registration|internship\s+registration/i.test(s) ||
+        /forms\.gle|google\s+form|registration\s+link|register\s+(?:in|on)\s+the\s+(?:below\s+)?link|mandatory\s+.*registration/i.test(full)
+      ) {
+        // Only accept if body explicitly states "test is scheduled on <date>"
+        if (!/(?:online\s+)?(?:test|assessment|exam)\s+(?:is\s+)?scheduled\s+(?:on|for)|\bon\s+\d{1,2}[-/.]\d{1,2}/i.test(b)) {
+          return false;
+        }
+      }
+
+      // 3. Merely describing duration (e.g. "Online Test: 45-60 minutes") in interview process without scheduling a date
+      if (
+        /(?:interview|selection|evaluation|recruitment)\s+process/i.test(full) &&
+        /online\s+test\s*[:\-–—]?\s*\d+\s*(?:mins?|minutes?)/i.test(full) &&
+        !/(?:test|assessment)\s+(?:is\s+)?scheduled\s+(?:on|for)|\bon\s+\d{1,2}[-/.]\d{1,2}/i.test(full)
+      ) {
+        return false;
+      }
+
+      // 4. If email explicitly states date will be informed later and has no test date
+      if (
+        /date\s+of\s+visit\s*[:\-–—]?\s*will\s+be\s+informed|will\s+be\s+informed\s+later/i.test(full) &&
+        !/(?:test|assessment)\s+(?:is\s+)?scheduled\s+(?:on|for)|\bon\s+\d{1,2}[-/.]\d{1,2}/i.test(full)
+      ) {
+        return false;
+      }
+
+      // 5. Positive body test schedule triggers
+      const hasBodySchedule =
+        /(?:online\s+)?(?:test|assessment|exam)\s+(?:is\s+)?scheduled\s+(?:on|for)/i.test(b) ||
+        /(?:online\s+)?(?:test|assessment|exam)\s+on\s+\d{1,2}[-/.]\d{1,2}/i.test(b) ||
+        /test\s+will\s+be\s+conducted\s+on\s+\d{1,2}/i.test(b) ||
+        /test\s+link\s*[:\-–—]|assessment\s+link\s*[:\-–—]|login\s+window|test\s+window\s*[:\-–—]|test\s+credentials/i.test(b) ||
+        /(?:codility|hackerrank|mettl)\s+(?:test|assessment|link)/i.test(full);
+
+      return hasBodySchedule;
+    };
+
+    const testEmails = activeDriveEmails.filter(isTestEmail);
+
+    const hasDirectPersonalTestInvitation = activeDriveEmails.some((e) => {
+      if (!isAfterRegistration(e)) return false;
+      const senderLower = (e.sender || '').toLowerCase();
+      const isPersonalSender =
+        senderLower.includes('noreply.cdcinfo@vitstudent.ac.in') ||
+        senderLower.includes('vit - soft skill assessments');
+      if (!isPersonalSender) return false;
+      const full = `${e.subject || ''} ${e.body_snippet || ''}`.toLowerCase();
+      const hasTestKeywords = /test\s*link|assessment\s*link|login\s*window|exam\s*link|password|passkey/i.test(full);
+      return hasTestKeywords || e.classification === 'test';
+    });
+
+    const matchedShortlistEmailIds = new Set(
+      (candidateMatches || [])
+        .filter((m) => {
+          const emailId = (m as unknown as { email_id: string }).email_id;
+          const emailForMatch = activeDriveEmails.find((e) => e.id === emailId);
+          const isTestEmailMatch = !!(emailForMatch && isTestEmail(emailForMatch));
+
+          if (m.match_type === 'xlsx_applied_list') {
+            return isTestEmailMatch;
+          }
+          const val = (m.matched_value || '').toLowerCase();
+          if (/applied[_\s-]*list|opt[_\s-]*in[_\s-]*list|opt_in|registration[_\s-]*list|applied[_\s-]*student|applied[_\s-]*candidate/i.test(val)) {
+            return isTestEmailMatch;
+          }
+          return true;
+        })
+        .map((m) => (m as unknown as { email_id: string }).email_id)
+        .filter(Boolean)
+    );
+
+    const sortedSelectionEmails = [...selectionEmails].sort(
+      (a, b) => (a.received_at ? new Date(a.received_at).getTime() : 0) - (b.received_at ? new Date(b.received_at).getTime() : 0)
+    );
+    const isMatchedInSelectionList = sortedSelectionEmails.some((e) => matchedShortlistEmailIds.has(e.id));
+
+    const sortedNextRoundEmails = [...nextRoundEmails].sort(
+      (a, b) => (a.received_at ? new Date(a.received_at).getTime() : 0) - (b.received_at ? new Date(b.received_at).getTime() : 0)
+    );
+    const isMatchedInNextRound = sortedNextRoundEmails.some((e) => matchedShortlistEmailIds.has(e.id));
+
+    const hasCompanyCandidateMatch = activeDriveEmails.some((e) => matchedEmailIds.has(e.id));
+
+    const sortedTestShortlists = [...testShortlistEmails].sort(
+      (a, b) => (a.received_at ? new Date(a.received_at).getTime() : 0) - (b.received_at ? new Date(b.received_at).getTime() : 0)
+    );
+
+    let isMatchedInTest = false;
+    if (sortedTestShortlists.length > 0) {
+      const latestTestShortlistEmail = sortedTestShortlists[sortedTestShortlists.length - 1];
+      isMatchedInTest = matchedShortlistEmailIds.has(latestTestShortlistEmail.id);
+    }
+    if (!isMatchedInTest) {
+      isMatchedInTest =
+        testShortlistEmails.some((e) => matchedShortlistEmailIds.has(e.id)) ||
+        testEmails.some((e) => matchedShortlistEmailIds.has(e.id));
+    }
+    if (hasDirectPersonalTestInvitation) {
+      isMatchedInTest = true;
+    }
+
+    const hasGSheetTestEvent = gsheetEventsForCompany.some((g) => g.eventType === 'online_test');
+    if (hasGSheetTestEvent) {
+      isMatchedInTest = true;
+    }
+
+    const allExtractedEvents = activeDriveEmails.flatMap((e) =>
+      extractEvents({
+        gmailMessageId: e.id,
+        threadId: null,
+        sender: '',
+        senderEmail: '',
+        subject: e.subject || '',
+        receivedAt: e.received_at ? new Date(e.received_at) : new Date(),
+        bodySnippet: e.body_snippet || '',
+        bodyPlain: e.body_snippet || '',
+        bodyHtml: '',
+        hasAttachments: false,
+        attachments: [],
+        labels: [],
+      })
+    );
+
+    const hasPptEvent = activeDriveEmails.some((e) => {
+      if (!isAfterRegistration(e)) return false;
+      const subj = (e.subject || '').toLowerCase();
+      const body = (e.body_snippet || '').toLowerCase();
+      return /ppt|pre[\s-]*placement\s*talk/i.test(subj) || /pre[\s-]*placement\s*talk/i.test(body);
+    });
+
+    let computedStatus = 'not_applied';
+
+    const positiveMatchedEmails = activeDriveEmails.filter((e) => matchedShortlistEmailIds.has(e.id));
+    const latestPositiveMatchEmailTime = positiveMatchedEmails.reduce((max, e) => {
+      const t = e.received_at ? new Date(e.received_at).getTime() : 0;
+      return Math.max(max, t);
+    }, 0);
+
+    const latestGsheetTime = gsheetEventsForCompany.reduce((max, g) => {
+      const t = g.startTime ? new Date(g.startTime).getTime() : 0;
+      return Math.max(max, t);
+    }, 0);
+
+    const latestPositiveMatchTime = Math.max(latestPositiveMatchEmailTime, latestGsheetTime);
+
+    const genuinePositiveMatchAfterWithdrawal =
+      isWithdrawn &&
+      (isMatchedInSelectionList || isMatchedInNextRound || isMatchedInTest) &&
+      (latestPositiveMatchTime > latestWithdrawalTime || hasDirectPersonalTestInvitation);
+
+    if (isWithdrawn && !genuinePositiveMatchAfterWithdrawal) {
+      computedStatus = 'withdrawn';
+    } else if (isMatchedInSelectionList) {
+      computedStatus = 'selected';
+    } else if (isMatchedInNextRound) {
+      if (selectionEmails.length > 0) {
+        computedStatus = 'rejected';
+      } else {
+        computedStatus = 'interview_scheduled';
+      }
+    } else if (isMatchedInTest) {
+      if (selectionEmails.length > 0 || nextRoundEmails.length > 0) {
+        computedStatus = 'rejected';
+      } else {
+        computedStatus = 'test_scheduled';
+      }
+    } else if (hasConfirmedRegistration) {
+      if (selectionEmails.length > 0 || nextRoundEmails.length > 0 || testShortlistEmails.length > 0) {
+        computedStatus = 'not_shortlisted';
+      } else if (testEmails.length > 0) {
+        computedStatus = 'test_scheduled';
+      } else if (hasPptEvent) {
+        computedStatus = 'ppt_scheduled';
+      } else {
+        computedStatus = 'applied';
+      }
+    } else if (hasCompanyCandidateMatch) {
+      if (selectionEmails.length > 0 || nextRoundEmails.length > 0 || testShortlistEmails.length > 0) {
+        computedStatus = 'not_shortlisted';
+      } else if (testEmails.length > 0) {
+        computedStatus = 'test_scheduled';
+      } else if (hasPptEvent) {
+        computedStatus = 'ppt_scheduled';
+      } else {
+        computedStatus = 'applied';
+      }
+    } else if (selectionEmails.length > 0 || nextRoundEmails.length > 0 || testShortlistEmails.length > 0 || testEmails.length > 0) {
+      computedStatus = 'not_applied';
+    } else {
+      computedStatus = 'not_applied';
+    }
+
+    const { data: existingApp } = await supabase
+      .from('applications')
+      .select('status, manual_override, role, ctc, stipend, location, notes, applied_at')
+      .eq('user_id', userId)
+      .eq('company_id', comp.id)
+      .single();
+
+    const finalStatus = existingApp?.manual_override ? existingApp.status : computedStatus;
+
+    let finalRole = existingApp?.manual_override ? existingApp.role : (extractedJob.role || extractJobDetails(combinedEmailText).role);
+    if (finalRole && (
+      /\byou\s*(?:are|have|re)\b|dear\s|greetings|eligible|registr|for the candidate|reserve a position|expect them/i.test(finalRole) ||
+      /^(?:super\s+dream|dream|regular)(?:\s+(?:internship|offer|placement|drive))?$/i.test(finalRole.trim())
+    )) {
+      finalRole = null;
+    }
+
+    const travelReq = extractTravelRequirement(mainEmailText) || extractTravelRequirement(combinedEmailText);
+    const existingTravel = existingApp?.notes ? existingApp.notes.split('\n')[0]?.trim() : null;
+    const hasCampusLabEvent = allExtractedEvents.some((e) => /campus\s*\/\s*offline|\blc\s*\d+\b|\blab\b/i.test(e.venue || ''));
+    const hasOnlineEvent = allExtractedEvents.some((e) => e.mode === 'online' || /online|virtual/i.test(e.venue || ''));
+
+    let finalTravel = existingApp?.manual_override ? existingTravel : travelReq;
+    if (!finalTravel) {
+      if (hasCampusLabEvent) finalTravel = 'bhopal';
+      else if (hasOnlineEvent) finalTravel = 'online';
+      else if (existingTravel && ['bhopal', 'bhopal_lab', 'online', 'vellore', 'chennai', 'ap'].includes(existingTravel)) {
+        finalTravel = existingTravel;
+      }
+    }
+
+    let workLocation = extractedJob.location || null;
+    if (
+      workLocation &&
+      (/\byou\b|\bwe\b|\bi\b|\bcan\b|\bwrite\b|\bwant\b|\btest\b|\blab\b|\blc\s*\d+|\bsjt|\bprp|\banna|\bhall\b|---|forwarded|own\s+location|\b(?:lc|sjt|prp|tt|mb|cb|smv)\s*\d+\b|please find|attached shortlisted|services interested|as per business|nonsense|come at|economy class|round trip|placement office|\bpre$/i.test(
+        workLocation
+      ) ||
+        /^(?:vit\s+)?(?:vellore|chennai|bhopal)(?:\s+campus)?$/i.test(workLocation.trim()))
+    ) {
+      workLocation = null;
+    }
+    if (workLocation) {
+      if (/remote/i.test(workLocation)) workLocation = 'Remote';
+      else if (/pan\s+india/i.test(workLocation)) workLocation = 'Pan India';
+    }
+
+    let finalCategory = extractedJob.category || null;
+    const finalCtc = existingApp?.manual_override ? existingApp.ctc : (extractedJob.ctc || null);
+    const finalStipend = existingApp?.manual_override ? existingApp.stipend : (extractedJob.stipend || null);
+    if (finalCtc) {
+      const matches = [...finalCtc.matchAll(/(\d+(?:\.\d+)?)/g)].map((m) => parseFloat(m[1]));
+      if (matches.length > 0) {
+        const maxCtc = Math.max(...matches);
+        const isIntern = Boolean(finalStipend) || /internship|intern\b/i.test(mainEmailText);
+        if (maxCtc >= 10) {
+          finalCategory = isIntern ? 'Super Dream Internship' : 'Super Dream Offer';
+        } else if (maxCtc >= 4.5) {
+          finalCategory = isIntern ? 'Dream Internship' : 'Dream Offer';
+        } else {
+          finalCategory = 'Regular Offer';
+        }
+      }
+    }
+
+    await supabase.from('applications').upsert(
+      {
+        user_id: userId,
+        company_id: comp.id,
+        status: finalStatus,
+        status_source: existingApp?.manual_override ? 'manual_override' : 'sync_reprocess',
+        status_confidence: 'high',
+        role: finalRole,
+        category: finalCategory,
+        ctc: finalCtc,
+        stipend: finalStipend,
+        location: workLocation || null,
+        notes: finalTravel || null,
+        applied_at: (registrationEmails[0]?.received_at ? new Date(registrationEmails[0].received_at) : (driveStartDate || (existingApp?.applied_at ? new Date(existingApp.applied_at) : new Date()))).toISOString(),
+        last_updated: new Date().toISOString(),
+      },
+      { onConflict: 'user_id,company_id' }
+    );
+
+    const { data: manualEvents } = await supabase
+      .from('events')
+      .select('*')
+      .eq('user_id', userId)
+      .eq('company_id', comp.id)
+      .eq('manual_override', true);
+
+    await supabase
+      .from('events')
+      .delete()
+      .eq('user_id', userId)
+      .eq('company_id', comp.id)
+      .eq('manual_override', false);
+
+    const isOptedOut = ['declined', 'withdrawn'].includes(finalStatus);
+
+    if (!isOptedOut) {
+      const sortedEmails = [...activeDriveEmails].sort((a, b) => {
+        const tA = a.received_at ? new Date(a.received_at).getTime() : 0;
+        const tB = b.received_at ? new Date(b.received_at).getTime() : 0;
+        return tA - tB;
+      });
+
+      const latestEventsByType = new Map<string, any>();
+      for (const e of sortedEmails) {
+        const evts = extractEvents({
+          gmailMessageId: e.id,
+          threadId: null,
+          sender: '',
+          senderEmail: '',
+          subject: e.subject || '',
+          receivedAt: e.received_at ? new Date(e.received_at) : new Date(),
+          bodySnippet: e.body_snippet || '',
+          bodyPlain: e.body_snippet || '',
+          bodyHtml: '',
+          hasAttachments: false,
+          attachments: [],
+          labels: [],
+        });
+
+        for (const evt of evts) {
+          if (!evt.startTime) continue;
+          const normalizedKey =
+            evt.eventType === 'coding_test' || evt.eventType === 'online_test'
+              ? 'online_test'
+              : evt.eventType;
+          const existing = latestEventsByType.get(normalizedKey);
+
+          if (existing && existing.hasExplicitTime && !evt.hasExplicitTime) {
+            latestEventsByType.set(normalizedKey, {
+              ...existing,
+              venue: evt.venue && evt.venue !== 'Campus / Offline' ? evt.venue : existing.venue,
+              mode: evt.mode !== 'unknown' ? evt.mode : existing.mode,
+            });
+          } else {
+            latestEventsByType.set(normalizedKey, evt);
+          }
+        }
+      }
+
+      for (const gEvt of gsheetEventsForCompany) {
+        latestEventsByType.set('online_test', {
+          eventType: gEvt.eventType,
+          title: gEvt.title,
+          startTime: gEvt.startTime,
+          endTime: null,
+          venue: gEvt.venue,
+          mode: gEvt.mode,
+          confidence: gEvt.confidence,
+          hasExplicitTime: gEvt.hasExplicitTime,
+        });
+      }
+
+      const manualEventTypes = new Set(
+        (manualEvents || []).map((m) =>
+          m.event_type === 'coding_test' ? 'online_test' : m.event_type
+        )
+      );
+
+      for (const evt of Array.from(latestEventsByType.values())) {
+        const normalizedKey =
+          evt.eventType === 'coding_test' || evt.eventType === 'online_test'
+            ? 'online_test'
+            : evt.eventType;
+
+        if (manualEventTypes.has(normalizedKey)) {
+          continue;
+        }
+
+        if (finalStatus === 'not_shortlisted' && normalizedKey !== 'ppt') {
+          continue;
+        }
+        if (finalStatus === 'rejected') {
+          if (!isMatchedInNextRound && ['interview', 'technical_interview', 'hr_interview', 'final_interview'].includes(normalizedKey)) {
+            continue;
+          }
+          if (!isMatchedInTest && !isMatchedInNextRound && normalizedKey === 'online_test') {
+            continue;
+          }
+        }
+
+        await supabase.from('events').insert({
+          user_id: userId,
+          company_id: comp.id,
+          event_type: evt.eventType,
+          title: `${comp.name} - ${evt.title}`,
+          start_time: evt.startTime.toISOString(),
+          end_time: evt.endTime ? evt.endTime.toISOString() : null,
+          venue: evt.venue,
+          mode: evt.mode,
+          confidence: evt.confidence,
+          manual_override: false,
+        });
+      }
+    }
+
+    updatedAppsCount++;
+    applicationResults.push({
+      company: comp.name,
+      status: finalStatus,
+      role: finalRole,
+      ctc: extractedJob.ctc,
+    });
+  }
+
+  console.log(`[recalculateApplicationStatuses] User ${userId}: holistic calculation updated ${updatedAppsCount} applications.`);
+  return { updatedCount: updatedAppsCount, results: applicationResults };
+}
+
 export async function performReprocess(
   userId: string,
   onProgress?: (p: { step: number; totalSteps: number; message: string }) => void
@@ -161,6 +955,15 @@ export async function performReprocess(
 
   const companiesToUpdate = new Map<string, { aliases?: string[]; drive_number?: string; drive_name?: string | null; name?: string }>();
   const driveResolutionsToUpsert = new Map<string, any>();
+
+  // Sanitize cached company names with legacy drive suffixes (e.g. "Euler Motors (1170)")
+  for (const c of cachedCompanies) {
+    if (/\s*\(\d+\)\s*$/.test(c.name)) {
+      const cleanName = c.name.replace(/\s*\(\d+\)\s*$/, '').trim();
+      c.name = cleanName;
+      companiesToUpdate.set(c.id, { ...(companiesToUpdate.get(c.id) || {}), name: cleanName });
+    }
+  }
 
   // Populate maps from initial companies
   for (const c of cachedCompanies) {
@@ -638,695 +1441,9 @@ export async function performReprocess(
   }
 
   // 6. Phase 4: Recalculate Stage Progression & Events for Official NeoPAT Companies
-  onProgress?.({
-    step: 5,
-    totalSteps: 5,
-    message: `Recalculating application stages, CTCs & calendar events for official drives…`,
-  });
-
-  const { data: remainingCompanies } = await supabase
-    .from('companies')
-    .select('id, name')
-    .eq('user_id', userId);
-
-  const { data: candidateMatches } = await supabase
-    .from('candidate_matches')
-    .select('id, match_type, email_id, matched_value')
-    .eq('user_id', userId);
-
-  const emailsByCompanyId = new Map<string, typeof emails>();
-  for (const e of emails) {
-    if (e.company_id) {
-      const list = emailsByCompanyId.get(e.company_id) || [];
-      list.push(e);
-      emailsByCompanyId.set(e.company_id, list);
-    }
-  }
-
-  let updatedAppsCount = 0;
-  const applicationResults: Array<{ company: string; status: string; role?: string | null; ctc?: string | null }> = [];
-
-  for (let cIdx = 0; cIdx < (remainingCompanies || []).length; cIdx++) {
-    const comp = remainingCompanies![cIdx];
-    const companyEmails = emailsByCompanyId.get(comp.id) || [];
-    if (companyEmails.length === 0) continue;
-
-    if (cIdx % 5 === 0 || cIdx === (remainingCompanies?.length || 0) - 1) {
-      onProgress?.({
-        step: 5,
-        totalSteps: 5,
-        message: `Recalculating application stages, CTCs & calendar events (${cIdx + 1} / ${remainingCompanies?.length || 0})…`,
-      });
-    }
-
-    const emailIds = new Set(companyEmails.map((e) => e.id));
-    const matchedEmailIds = new Set(
-      (candidateMatches || [])
-        .filter((cm) => emailIds.has((cm as unknown as { email_id: string }).email_id))
-        .map((cm) => (cm as unknown as { email_id: string }).email_id)
-    );
-
-    // 0. Scan any Google Sheets pubhtml shortlists in company emails for candidate matches
-    const { extractGoogleSheetUrls, scanGoogleSheetForCandidate } = await import('@/lib/sync/gsheet-parser');
-    const gsheetEventsForCompany: Array<{
-      eventType: string;
-      title: string;
-      startTime: Date;
-      venue: string;
-      mode: string;
-      confidence: string;
-      hasExplicitTime: boolean;
-    }> = [];
-
-    for (const email of companyEmails) {
-      const emailText = `${email.subject || ''}\n${email.body_snippet || ''}`;
-      const isRelevantCandidateEmail =
-        /shortlist|selection|selected|test|assessment|interview|score|rank|eligible|candidates|students/i.test(
-          emailText
-        );
-      if (!isRelevantCandidateEmail) continue;
-
-      const gUrls = extractGoogleSheetUrls(emailText);
-      for (const gUrl of gUrls) {
-        const gMatch = await scanGoogleSheetForCandidate(gUrl, userEmail, userNeoId, userData?.name);
-        if (gMatch && gMatch.matched) {
-          matchedEmailIds.add(email.id);
-          // Persist match in candidate_matches if not already present
-          const alreadyMatched = (candidateMatches || []).some(
-            (cm) => (cm as unknown as { email_id: string }).email_id === email.id
-          );
-          if (!alreadyMatched) {
-            await supabase.from('candidate_matches').insert({
-              user_id: userId,
-              email_id: email.id,
-              neo_id: userNeoId || userEmail,
-              match_type: 'xlsx_cell',
-              matched_value: gMatch.details,
-              confidence: 'high',
-            });
-          }
-
-          if (gMatch.eventDate) {
-            const isPpt = /ppt|pre[\s-]*placement/i.test(email.subject || '');
-            const isInterview = /interview/i.test(email.subject || '');
-            const eventType = isPpt ? 'ppt' : isInterview ? 'technical_interview' : 'online_test';
-            const title = isPpt
-              ? 'Pre-Placement Talk (PPT)'
-              : isInterview
-              ? 'Interview'
-              : `Online Assessment${gMatch.slot ? ` (${gMatch.slot})` : ''}`;
-
-            const startTime = new Date(gMatch.eventDate);
-            startTime.setHours(gMatch.slot && /slot\s*2/i.test(gMatch.slot) ? 14 : 9, 0, 0, 0);
-            gsheetEventsForCompany.push({
-              eventType,
-              title,
-              startTime,
-              venue: 'Campus / Offline',
-              mode: 'online',
-              confidence: 'high',
-              hasExplicitTime: true,
-            });
-          }
-          break;
-        }
-      }
-    }
-
-    // Sort company emails descending (newest first) so recent circulars take precedence
-    const sortedCompanyEmails = [...companyEmails].sort(
-      (a, b) => new Date(b.received_at || 0).getTime() - new Date(a.received_at || 0).getTime()
-    );
-
-    // 1. Identify true official CDC registration circular with highest precision (newest first)
-    const mainCircularEmail =
-      sortedCompanyEmails.find((e) => {
-        const text = `${e.subject || ''}\n${e.body_snippet || ''}`;
-        return (
-          /name\s+of\s+the\s+company/i.test(text) &&
-          /eligibility\s+criteria/i.test(text) &&
-          /category/i.test(text)
-        );
-      }) ||
-      sortedCompanyEmails.find((e) =>
-        /super\s*dream.*registration|dream.*registration|placement\s+registration|internship\s+registration|offer\s+registration/i.test(e.subject || '')
-      ) ||
-      sortedCompanyEmails.find((e) =>
-        /date\s+of\s+visit/i.test(e.body_snippet || '') || /registration/i.test(e.subject || '')
-      ) ||
-      sortedCompanyEmails[0];
-
-    // Drive Date Temporal Boundary:
-    // "only consider emails after the drive time or date"
-    // If an official registration circular exists for the drive (e.g. Honeywell Dream Internship on Aug 29),
-    // any emails received before this drive date are from older completed cycles or irrelevant historical emails.
-    const isRegistrationCircular = (e: { subject?: string | null; body_snippet?: string | null }) => {
-      const text = `${e.subject || ''}\n${e.body_snippet || ''}`;
-      return (
-        (/name\s+of\s+the\s+company/i.test(text) && /category/i.test(text)) ||
-        /super\s*dream.*registration|dream.*registration|placement\s+registration|internship\s+registration/i.test(
-          e.subject || ''
-        )
-      );
-    };
-
-    // Find the earliest official registration circular of the active drive cluster
-    const registrationCirculars = companyEmails.filter(isRegistrationCircular);
-    registrationCirculars.sort(
-      (a, b) => new Date(a.received_at || 0).getTime() - new Date(b.received_at || 0).getTime()
-    );
-    const driveRegistrationEmail = registrationCirculars[0] || mainCircularEmail;
-    const driveStartDate = driveRegistrationEmail?.received_at
-      ? new Date(driveRegistrationEmail.received_at)
-      : null;
-
-    // Filter out emails before driveStartDate (with 2-hour delivery buffer)
-    const activeDriveEmails = driveStartDate
-      ? sortedCompanyEmails.filter((e) => {
-          const t = e.received_at ? new Date(e.received_at).getTime() : 0;
-          return t >= driveStartDate.getTime() - 2 * 60 * 60 * 1000;
-        })
-      : sortedCompanyEmails;
-
-    // Unlink any emails in DB that were received prior to the active drive start date,
-    // but NEVER unlink personal withdrawal / decline confirmation emails!
-    if (driveStartDate) {
-      const stalePriorEmailIds = companyEmails
-        .filter((e) => {
-          if (e.classification === 'withdrawal' || e.classification === 'decline') return false;
-          if (/withdrawn|declined/i.test(e.subject || '')) return false;
-          const t = e.received_at ? new Date(e.received_at).getTime() : 0;
-          return t < driveStartDate.getTime() - 2 * 60 * 60 * 1000;
-        })
-        .map((e) => e.id);
-
-      if (stalePriorEmailIds.length > 0) {
-        await supabase
-          .from('emails')
-          .update({ company_id: null, is_relevant: false })
-          .in('id', stalePriorEmailIds);
-      }
-    }
-
-    const mainEmailText = `${mainCircularEmail.subject || ''}\n${mainCircularEmail.body_snippet || ''}`;
-    const mainJobDetails = extractJobDetails(mainEmailText);
-
-    // 2. Extract fallback details from combined active CDC emails only if main circular missed them
-    // Strictly filter out test announcements and shortlist circulars to prevent test venue/lab instructions from polluting job details
-    const jobDetailEligibleEmails = activeDriveEmails.filter((e) => {
-      const cls = e.classification || '';
-      if (['test', 'venue_update', 'shortlist', 'interview', 'withdrawal', 'decline'].includes(cls)) return false;
-      const subj = (e.subject || '').toLowerCase();
-      if (/online\s+test|coding\s+test|shortlist|interview\s+is\s+scheduled/i.test(subj)) return false;
-      return true;
-    });
-
-    const combinedEmailText = (jobDetailEligibleEmails.length > 0 ? jobDetailEligibleEmails : activeDriveEmails)
-      .map((e) => `${e.subject || ''}\n${e.body_snippet || ''}`)
-      .join('\n\n');
-    const fallbackJobDetails = extractJobDetails(combinedEmailText);
-
-    const extractedJob = {
-      role: mainJobDetails.role || fallbackJobDetails.role,
-      category: mainJobDetails.category || fallbackJobDetails.category,
-      ctc: mainJobDetails.ctc || fallbackJobDetails.ctc,
-      stipend: mainJobDetails.stipend || fallbackJobDetails.stipend,
-      location: mainJobDetails.location || fallbackJobDetails.location,
-    };
-
-    // Identify user actions & progression from active drive emails
-    const withdrawalEmails = companyEmails.filter((e) => {
-      const full = `${e.subject || ''} ${e.body_snippet || ''}`.toLowerCase();
-      // Exclude broadcast circulars mentioning opt-out policy or forms
-      if (
-        /who\s+(?:wish|want)\s+to\s+opt|if\s+you\s+(?:wish|want)\s+to\s+opt|opt[\s-]*out\s+(?:form|link|google|portal)|voluntary\s+withdrawal\s+only|forms\.gle/i.test(
-          full
-        )
-      ) {
-        return false;
-      }
-      return (
-        e.classification === 'withdrawal' ||
-        e.classification === 'decline' ||
-        /registration.*withdrawn|your registration.*withdrawn|declined\s+drive/i.test(full) ||
-        /confirmation.*drive\s+registration\s+update.*withdrawn/i.test(full)
-      );
-    });
-
-    const latestWithdrawalTime = withdrawalEmails.reduce((max, e) => {
-      const t = e.received_at ? new Date(e.received_at).getTime() : 0;
-      return Math.max(max, t);
-    }, 0);
-
-    const registrationEmails = activeDriveEmails.filter((e) => {
-      const subj = (e.subject || '').toLowerCase();
-      const full = `${subj} ${e.body_snippet || ''}`.toLowerCase();
-      return (
-        e.classification === 'registration_confirmation' ||
-        /confirmed:\s*your\s+registration/i.test(subj) ||
-        /registration\s+(confirmed|successful|received)/i.test(full) ||
-        /successfully\s+registered|thank\s+you\s+for\s+(registering|applying)/i.test(full)
-      );
-    });
-
-    const latestRegistrationTime = registrationEmails.reduce((max, e) => {
-      const t = e.received_at ? new Date(e.received_at).getTime() : 0;
-      return Math.max(max, t);
-    }, 0);
-
-    const hasRegistrationConfirmation = registrationEmails.length > 0;
-    const hasReRegisteredAfterWithdrawal = hasRegistrationConfirmation && latestRegistrationTime > latestWithdrawalTime;
-
-    // If candidate received a withdrawal confirmation email:
-    // They are withdrawn UNLESS they subsequently re-registered AFTER that withdrawal!
-    const isWithdrawn = withdrawalEmails.length > 0 && !hasReRegisteredAfterWithdrawal;
-
-    // Candidate has active confirmed registration if they registered and didn't withdraw (or re-registered after withdrawal)
-    const hasConfirmedRegistration = hasRegistrationConfirmation && !isWithdrawn;
-
-    const isAfterRegistration = (e: { received_at: string | null }) => {
-      if (!latestRegistrationTime) return true;
-      const t = e.received_at ? new Date(e.received_at).getTime() : 0;
-      return t >= (latestRegistrationTime - 2 * 60 * 1000);
-    };
-
-    // Progression stage emails (ONLY those on or after latest registration!)
-    const selectionListPattern = /selection\s+list|congratulations.*offer|selected\s+candidates|final\s+select/i;
-    const selectionEmails = activeDriveEmails.filter((e) =>
-      isAfterRegistration(e) && selectionListPattern.test(e.subject || '')
-    );
-
-    const nextRoundPattern =
-      /next\s+round|interview\s+(?:is\s+)?scheduled|technical\s+interview|hr\s+interview|final\s+interview|interview\s+shortlist|shortlist\s+for\s+interview|shortlisted\s+for\s+(?:the\s+)?interview/i;
-    const nextRoundEmails = activeDriveEmails.filter((e) =>
-      isAfterRegistration(e) && nextRoundPattern.test(e.subject || '')
-    );
-
-    const isInterviewOrSelectionEmail = (e: { subject?: string | null; body_snippet?: string | null }) => {
-      return nextRoundPattern.test(e.subject || '') || selectionListPattern.test(e.subject || '');
-    };
-
-    const isPptEmail = (e: { subject?: string | null }) => {
-      const s = (e.subject || '').toLowerCase();
-      return /ppt|pre[\s-]*placement/i.test(s) && !/test|exam|assessment|coding|mettl|hackerrank/i.test(s);
-    };
-
-    const testShortlistPattern =
-      /test\s+shortlist|shortlist\s+for\s+(?:the\s+)?(?:test|assessment|exam)|shortlisted\s+for\s+(?:the\s+)?(?:online\s+)?(?:test|assessment)|candidate[s]?\s+shortlisted|shortlisted\s+(?:candidates|students)|shortlist\s+will\s+be\s+shared|only\s+shortlisted\s+students|attached\s+(?:updated\s+)?(?:shortlist|shortlisted)|attached\s+.*shortlist|\bneo\s+id\b|attached\s+(?:students?|candidates?)\s+list|find\s+the\s+attached\s+(?:students?|candidates?)\s+list/i;
-    const testShortlistEmails = activeDriveEmails.filter((e) => {
-      if (!isAfterRegistration(e)) return false;
-      if (isInterviewOrSelectionEmail(e)) return false; // Next round / interview is NOT a test shortlist!
-      if (isPptEmail(e)) return false; // Pure PPT announcements with venue/seating lists are NOT test shortlists!
-      if (e.classification === 'shortlist') return true;
-      const full = `${e.subject || ''} ${e.body_snippet || ''}`;
-      return testShortlistPattern.test(full);
-    });
-
-    const testPattern =
-      /online\s+test|coding\s+test|aptitude\s+test|assessment\s+test|assessment\s+is\s+scheduled|online\s+assessment|codility|hackerrank|mettl/i;
-    const testEmails = activeDriveEmails.filter((e) =>
-      isAfterRegistration(e) && !isPptEmail(e) && testPattern.test(`${e.subject || ''} ${e.body_snippet || ''}`)
-    );
-
-    // Differentiate matches in actual shortlists vs applied/opt-in lists
-    const matchedShortlistEmailIds = new Set(
-      (candidateMatches || [])
-        .filter((m) => {
-          const emailId = (m as unknown as { email_id: string }).email_id;
-          const emailForMatch = activeDriveEmails.find((e) => e.id === emailId);
-          const isTestEmail = !!(emailForMatch && !isPptEmail(emailForMatch) && testPattern.test(`${emailForMatch.subject || ''} ${emailForMatch.body_snippet || ''}`));
-
-          if (m.match_type === 'xlsx_applied_list') {
-            // If this applied/opt-in list was specifically attached to an online test announcement (and not a PPT),
-            // it represents the official test participant list!
-            return isTestEmail;
-          }
-          const val = (m.matched_value || '').toLowerCase();
-          if (/applied[_\s-]*list|opt[_\s-]*in[_\s-]*list|opt_in|registration[_\s-]*list|applied[_\s-]*student|applied[_\s-]*candidate/i.test(val)) {
-            // Same rule: If this list is attached to an online test email, candidate is scheduled for the test!
-            return isTestEmail;
-          }
-          return true;
-        })
-        .map((m) => (m as unknown as { email_id: string }).email_id)
-        .filter(Boolean)
-    );
-
-    // ── LATEST SHORTLIST EVALUATION ──
-    // Rule: When multiple shortlists or updates exist for a stage (e.g. initial applied list followed by
-    // an updated/final test shortlist), the LATEST shortlist for that stage is authoritative.
-    const sortedSelectionEmails = [...selectionEmails].sort(
-      (a, b) => (a.received_at ? new Date(a.received_at).getTime() : 0) - (b.received_at ? new Date(b.received_at).getTime() : 0)
-    );
-    const isMatchedInSelectionList = sortedSelectionEmails.some((e) => matchedShortlistEmailIds.has(e.id));
-
-    const sortedNextRoundEmails = [...nextRoundEmails].sort(
-      (a, b) => (a.received_at ? new Date(a.received_at).getTime() : 0) - (b.received_at ? new Date(b.received_at).getTime() : 0)
-    );
-    const isMatchedInNextRound = sortedNextRoundEmails.some((e) => matchedShortlistEmailIds.has(e.id));
-
-    const hasCompanyCandidateMatch = activeDriveEmails.some((e) => matchedEmailIds.has(e.id));
-
-    // Test Shortlists evaluation:
-    // When updated test shortlists are published, ALWAYS check the latest one!
-    const sortedTestShortlists = [...testShortlistEmails].sort(
-      (a, b) => (a.received_at ? new Date(a.received_at).getTime() : 0) - (b.received_at ? new Date(b.received_at).getTime() : 0)
-    );
-
-    let isMatchedInTest = false;
-    if (sortedTestShortlists.length > 0) {
-      const latestTestShortlistEmail = sortedTestShortlists[sortedTestShortlists.length - 1];
-      isMatchedInTest = matchedShortlistEmailIds.has(latestTestShortlistEmail.id);
-    }
-    if (!isMatchedInTest) {
-      isMatchedInTest =
-        testShortlistEmails.some((e) => matchedShortlistEmailIds.has(e.id)) ||
-        testEmails.some((e) => matchedShortlistEmailIds.has(e.id));
-    }
-
-    // Genuine assessment Google Sheet slot match (excluding PPT venue sheets)
-    const hasGSheetTestEvent = gsheetEventsForCompany.some((g) => g.eventType === 'online_test');
-    if (hasGSheetTestEvent) {
-      isMatchedInTest = true;
-    }
-
-    // Extract events
-    const allExtractedEvents = activeDriveEmails.flatMap((e) =>
-      extractEvents({
-        gmailMessageId: e.id,
-        threadId: null,
-        sender: '',
-        senderEmail: '',
-        subject: e.subject || '',
-        receivedAt: e.received_at ? new Date(e.received_at) : new Date(),
-        bodySnippet: e.body_snippet || '',
-        bodyPlain: e.body_snippet || '',
-        bodyHtml: '',
-        hasAttachments: false,
-        attachments: [],
-        labels: [],
-      })
-    );
-
-    const hasPptEvent = activeDriveEmails.some((e) => {
-      if (!isAfterRegistration(e)) return false;
-      const subj = (e.subject || '').toLowerCase();
-      const body = (e.body_snippet || '').toLowerCase();
-      return /ppt|pre[\s-]*placement\s*talk/i.test(subj) || /pre[\s-]*placement\s*talk/i.test(body);
-    });
-
-    // ── STATUS COMPUTATION (Strict withdrawal priority & test verification) ──
-    let computedStatus = 'not_applied';
-
-    // Positive Match Timestamp Check:
-    // If a genuine positive match (test shortlist, interview, or selection list) occurs strictly AFTER
-    // the withdrawal timestamp (e.g. EY GDS test shortlist issued after an earlier withdrawal),
-    // allow the positive match to override the withdrawal.
-    const positiveMatchedEmails = activeDriveEmails.filter((e) => matchedShortlistEmailIds.has(e.id));
-    const latestPositiveMatchEmailTime = positiveMatchedEmails.reduce((max, e) => {
-      const t = e.received_at ? new Date(e.received_at).getTime() : 0;
-      return Math.max(max, t);
-    }, 0);
-
-    const latestGsheetTime = gsheetEventsForCompany.reduce((max, g) => {
-      const t = g.startTime ? new Date(g.startTime).getTime() : 0;
-      return Math.max(max, t);
-    }, 0);
-
-    const latestPositiveMatchTime = Math.max(latestPositiveMatchEmailTime, latestGsheetTime);
-
-    const genuinePositiveMatchAfterWithdrawal =
-      isWithdrawn &&
-      (isMatchedInSelectionList || isMatchedInNextRound || isMatchedInTest) &&
-      latestPositiveMatchTime > latestWithdrawalTime;
-
-    // 1. Withdrawal / Opt-Out takes precedence UNLESS a genuine positive match occurred after withdrawal
-    if (isWithdrawn && !genuinePositiveMatchAfterWithdrawal) {
-      computedStatus = 'withdrawn';
-    } else if (isMatchedInSelectionList) {
-      // 2. Definite Positive Candidate Shortlist / Selection Matches:
-      computedStatus = 'selected';
-    } else if (isMatchedInNextRound) {
-      if (selectionEmails.length > 0) {
-        computedStatus = 'rejected';
-      } else {
-        computedStatus = 'interview_scheduled';
-      }
-    } else if (isMatchedInTest) {
-      if (selectionEmails.length > 0 || nextRoundEmails.length > 0) {
-        computedStatus = 'rejected';
-      } else {
-        computedStatus = 'test_scheduled';
-      }
-    } else if (hasConfirmedRegistration) {
-      // 3. Candidate registered / applied for this drive:
-      if (testShortlistEmails.length > 0 || selectionEmails.length > 0 || nextRoundEmails.length > 0 || testEmails.length > 0) {
-        // A test, interview, or selection list was released, and candidate was not in the shortlist!
-        computedStatus = 'not_shortlisted';
-      } else if (hasPptEvent) {
-        computedStatus = 'ppt_scheduled';
-      } else {
-        computedStatus = 'applied';
-      }
-    } else if (hasCompanyCandidateMatch) {
-      if (testShortlistEmails.length > 0 || selectionEmails.length > 0 || nextRoundEmails.length > 0 || testEmails.length > 0) {
-        computedStatus = 'not_shortlisted';
-      } else if (hasPptEvent) {
-        computedStatus = 'ppt_scheduled';
-      } else {
-        computedStatus = 'applied';
-      }
-    } else if (selectionEmails.length > 0 || nextRoundEmails.length > 0 || testShortlistEmails.length > 0 || testEmails.length > 0) {
-      computedStatus = 'not_applied';
-    } else {
-      computedStatus = 'not_applied';
-    }
-
-    const { data: existingApp } = await supabase
-      .from('applications')
-      .select('status, manual_override, role, ctc, stipend, location, notes, applied_at')
-      .eq('user_id', userId)
-      .eq('company_id', comp.id)
-      .single();
-
-    const finalStatus = existingApp?.manual_override ? existingApp.status : computedStatus;
-
-    // Sanitize role: It must not be category name, prose, or invitation phrases
-    let finalRole = existingApp?.manual_override ? existingApp.role : (extractedJob.role || extractJobDetails(combinedEmailText).role);
-    if (finalRole && (
-      /\byou\s*(?:are|have|re)\b|dear\s|greetings|eligible|registr|for the candidate|reserve a position|expect them/i.test(finalRole) ||
-      /^(?:super\s+dream|dream|regular)(?:\s+(?:internship|offer|placement|drive))?$/i.test(finalRole.trim())
-    )) {
-      finalRole = null;
-    }
-
-    // Extract Drive Mode strictly from the main registration/announcement circular email
-    const travelReq = extractTravelRequirement(mainEmailText) || extractTravelRequirement(combinedEmailText);
-    const existingTravel = existingApp?.notes ? existingApp.notes.split('\n')[0]?.trim() : null;
-    const hasCampusLabEvent = allExtractedEvents.some((e) => /campus\s*\/\s*offline|\blc\s*\d+\b|\blab\b/i.test(e.venue || ''));
-    const hasOnlineEvent = allExtractedEvents.some((e) => e.mode === 'online' || /online|virtual/i.test(e.venue || ''));
-
-    let finalTravel = existingApp?.manual_override ? existingTravel : travelReq;
-    if (!finalTravel) {
-      if (hasCampusLabEvent) finalTravel = 'bhopal_lab';
-      else if (hasOnlineEvent) finalTravel = 'online';
-      else if (existingTravel && ['bhopal_lab', 'online'].includes(existingTravel)) {
-        finalTravel = existingTravel;
-      }
-    }
-
-    // Job Work Location (e.g. Remote, Bengaluru, Gurugram, Pan India)
-    let workLocation = extractedJob.location || null;
-    if (
-      workLocation &&
-      (/\byou\b|\bwe\b|\bi\b|\bcan\b|\bwrite\b|\bwant\b|\btest\b|\blab\b|\blc\s*\d+|\bsjt|\bprp|\banna|\bhall\b|---|forwarded|own\s+location|\b(?:lc|sjt|prp|tt|mb|cb|smv)\s*\d+\b|please find|attached shortlisted|services interested|as per business|nonsense|come at|economy class|round trip|placement office|\bpre$/i.test(
-        workLocation
-      ) ||
-        /^(?:vit\s+)?(?:vellore|chennai|bhopal)(?:\s+campus)?$/i.test(workLocation.trim()))
-    ) {
-      workLocation = null;
-    }
-    if (workLocation) {
-      if (/remote/i.test(workLocation)) workLocation = 'Remote';
-      else if (/pan\s+india/i.test(workLocation)) workLocation = 'Pan India';
-    }
-
-    // VIT Placement Policy:
-    // Touching or above 10 LPA (or max of CTC range >= 10) -> Super Dream
-    // Below 10 LPA -> Dream (>= 4.5) or Regular (< 4.5)
-    let finalCategory = extractedJob.category || null;
-    const finalCtc = existingApp?.manual_override ? existingApp.ctc : (extractedJob.ctc || null);
-    const finalStipend = existingApp?.manual_override ? existingApp.stipend : (extractedJob.stipend || null);
-    if (finalCtc) {
-      const matches = [...finalCtc.matchAll(/(\d+(?:\.\d+)?)/g)].map((m) => parseFloat(m[1]));
-      if (matches.length > 0) {
-        const maxCtc = Math.max(...matches);
-        const isIntern = Boolean(finalStipend) || /internship|intern\b/i.test(mainEmailText);
-        if (maxCtc >= 10) {
-          finalCategory = isIntern ? 'Super Dream Internship' : 'Super Dream Offer';
-        } else if (maxCtc >= 4.5) {
-          finalCategory = isIntern ? 'Dream Internship' : 'Dream Offer';
-        } else {
-          finalCategory = 'Regular Offer';
-        }
-      }
-    }
-
-    await supabase.from('applications').upsert(
-      {
-        user_id: userId,
-        company_id: comp.id,
-        status: finalStatus,
-        status_source: existingApp?.manual_override ? 'manual_override' : 'sync_reprocess',
-        status_confidence: 'high',
-        role: finalRole,
-        category: finalCategory,
-        ctc: finalCtc,
-        stipend: finalStipend,
-        location: workLocation || null,
-        notes: finalTravel || null,
-        applied_at: driveStartDate ? driveStartDate.toISOString() : (existingApp?.applied_at || new Date().toISOString()),
-        last_updated: new Date().toISOString(),
-      },
-      { onConflict: 'user_id,company_id' }
-    );
-
-    // Manage events: fetch manual events and only wipe automated events for this company
-    const { data: manualEvents } = await supabase
-      .from('events')
-      .select('*')
-      .eq('user_id', userId)
-      .eq('company_id', comp.id)
-      .eq('manual_override', true);
-
-    await supabase
-      .from('events')
-      .delete()
-      .eq('user_id', userId)
-      .eq('company_id', comp.id)
-      .eq('manual_override', false);
-
-    const isOptedOut = ['declined', 'withdrawn'].includes(finalStatus);
-
-    if (!isOptedOut) {
-      // Sort active drive emails chronologically (earliest to latest) so latest email timing takes precedence
-      const sortedEmails = [...activeDriveEmails].sort((a, b) => {
-        const tA = a.received_at ? new Date(a.received_at).getTime() : 0;
-        const tB = b.received_at ? new Date(b.received_at).getTime() : 0;
-        return tA - tB;
-      });
-
-      // Deduplicate: 1 single timing per event stage. Newer email replaces earlier timing!
-      const latestEventsByType = new Map<string, any>();
-      for (const e of sortedEmails) {
-        const evts = extractEvents({
-          gmailMessageId: e.id,
-          threadId: null,
-          sender: '',
-          senderEmail: '',
-          subject: e.subject || '',
-          receivedAt: e.received_at ? new Date(e.received_at) : new Date(),
-          bodySnippet: e.body_snippet || '',
-          bodyPlain: e.body_snippet || '',
-          bodyHtml: '',
-          hasAttachments: false,
-          attachments: [],
-          labels: [],
-        });
-
-        for (const evt of evts) {
-          if (!evt.startTime) continue;
-          // Unify coding_test and online_test under the same key so duplicate wordings collapse into a single assessment round
-          const normalizedKey =
-            evt.eventType === 'coding_test' || evt.eventType === 'online_test'
-              ? 'online_test'
-              : evt.eventType;
-          const existing = latestEventsByType.get(normalizedKey);
-
-          // If we already recorded an event with an explicit time (e.g. "3:30 pm"),
-          // and this newer email only has a generic date without time (default 9am),
-          // preserve the exact time while upgrading venue/mode if provided!
-          if (existing && existing.hasExplicitTime && !evt.hasExplicitTime) {
-            latestEventsByType.set(normalizedKey, {
-              ...existing,
-              venue: evt.venue && evt.venue !== 'Campus / Offline' ? evt.venue : existing.venue,
-              mode: evt.mode !== 'unknown' ? evt.mode : existing.mode,
-            });
-          } else {
-            latestEventsByType.set(normalizedKey, evt);
-          }
-        }
-      }
-
-      // Merge Google Sheet test events if candidate matched in Google Sheet
-      for (const gEvt of gsheetEventsForCompany) {
-        latestEventsByType.set('online_test', {
-          eventType: gEvt.eventType,
-          title: gEvt.title,
-          startTime: gEvt.startTime,
-          endTime: null,
-          venue: gEvt.venue,
-          mode: gEvt.mode,
-          confidence: gEvt.confidence,
-          hasExplicitTime: gEvt.hasExplicitTime,
-        });
-      }
-
-      // Check which event types already have a manual override event so automated events don't duplicate them
-      const manualEventTypes = new Set(
-        (manualEvents || []).map((m) =>
-          m.event_type === 'coding_test' ? 'online_test' : m.event_type
-        )
-      );
-
-      for (const evt of Array.from(latestEventsByType.values())) {
-        const normalizedKey =
-          evt.eventType === 'coding_test' || evt.eventType === 'online_test'
-            ? 'online_test'
-            : evt.eventType;
-
-        if (manualEventTypes.has(normalizedKey)) {
-          // Preserve the manual/chatbot event for this stage
-          continue;
-        }
-
-        // Progression-based calendar event filtering:
-        if (finalStatus === 'not_shortlisted' && normalizedKey !== 'ppt') {
-          // Candidate not shortlisted for test/interview; do not schedule test/interview on calendar
-          continue;
-        }
-        if (finalStatus === 'rejected') {
-          if (!isMatchedInNextRound && ['interview', 'technical_interview', 'hr_interview', 'final_interview'].includes(normalizedKey)) {
-            continue;
-          }
-          if (!isMatchedInTest && !isMatchedInNextRound && normalizedKey === 'online_test') {
-            continue;
-          }
-        }
-
-        await supabase.from('events').insert({
-          user_id: userId,
-          company_id: comp.id,
-          event_type: evt.eventType,
-          title: `${comp.name} - ${evt.title}`,
-          start_time: evt.startTime.toISOString(),
-          end_time: evt.endTime ? evt.endTime.toISOString() : null,
-          venue: evt.venue,
-          mode: evt.mode,
-          confidence: evt.confidence,
-          manual_override: false,
-        });
-      }
-    }
-
-    updatedAppsCount++;
-    applicationResults.push({
-      company: comp.name,
-      status: finalStatus,
-      role: finalRole,
-      ctc: extractedJob.ctc,
-    });
-  }
+  const phase4Res = await recalculateApplicationStatuses(userId, onProgress);
+  const updatedAppsCount = phase4Res.updatedCount;
+  const applicationResults = phase4Res.results || [];
 
   return {
     success: true,

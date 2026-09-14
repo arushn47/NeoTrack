@@ -20,6 +20,7 @@ export interface AnalyticsApplication {
   id: string;
   company_id: string;
   status: string;
+  notes?: string | null;
   ctc: string | null;
   stipend?: string | null;
   category?: string | null;
@@ -59,7 +60,7 @@ export default function AnalyticsClient({
   const {
     appliedCount,
     shortlistedCount,
-    testCount,
+    clearedAssessmentCount,
     interviewCount,
     offerCount,
     optedOutCount,
@@ -73,7 +74,7 @@ export default function AnalyticsClient({
   } = useMemo(() => {
     let applied = 0;
     let shortlisted = 0;
-    let tested = 0;
+    let clearedAssessment = 0;
     let interviewed = 0;
     let selected = 0;
     let optedOut = 0;
@@ -87,6 +88,14 @@ export default function AnalyticsClient({
     let maxCtc = 0;
     let maxCtcStr = 'TBA';
 
+    // Index events by company_id to verify stage participation
+    const eventsByCompany = new Map<string, AnalyticsEvent[]>();
+    events.forEach((ev) => {
+      const list = eventsByCompany.get(ev.company_id) || [];
+      list.push(ev);
+      eventsByCompany.set(ev.company_id, list);
+    });
+
     applications.forEach((app) => {
       const s = (app.status || '').toLowerCase();
       if (['withdrawn', 'declined', 'not_applied'].includes(s)) {
@@ -95,39 +104,63 @@ export default function AnalyticsClient({
       }
       applied++;
 
-      const isShortlisted = [
-        'shortlisted',
-        'test',
-        'test_scheduled',
-        'interview',
-        'interview_scheduled',
-        'selected',
-        'offer',
-        'offer_received',
-      ].includes(s);
+      const compEvents = eventsByCompany.get(app.company_id) || [];
+      const hasTestEvent = compEvents.some((e) =>
+        /test|coding|assessment|hackerearth|mettl|shl/i.test(`${e.event_type || ''}`)
+      );
+      const hasInterviewEvent = compEvents.some((e) =>
+        /interview/i.test(`${e.event_type || ''}`)
+      );
 
-      const isTested = [
-        'test',
-        'test_scheduled',
-        'interview',
-        'interview_scheduled',
-        'selected',
-        'offer',
-        'offer_received',
-      ].includes(s);
+      // Shortlisted for OA / Test:
+      // Even if a candidate wrote a test and failed, they were still shortlisted for OA!
+      const isShortlistedForOA =
+        [
+          'shortlisted',
+          'test',
+          'test_scheduled',
+          'test_completed',
+          'interview',
+          'interview_scheduled',
+          'interview_completed',
+          'selected',
+          'offer',
+          'offer_received',
+        ].includes(s) ||
+        hasTestEvent ||
+        (s === 'rejected' && (hasTestEvent || /test|assessment|interview/i.test(app.notes || '')));
 
-      const isInterviewed = [
-        'interview',
-        'interview_scheduled',
-        'selected',
-        'offer',
-        'offer_received',
-      ].includes(s);
+      // Assessments Cleared:
+      // Candidate ONLY clears an assessment if they successfully advanced to the next round (Interviews or Offers)!
+      // "Test Completed · Awaiting Results" is NOT cleared yet!
+      const isAssessmentCleared =
+        [
+          'interview',
+          'interview_scheduled',
+          'interview_completed',
+          'selected',
+          'offer',
+          'offer_received',
+        ].includes(s) ||
+        (s === 'rejected' && (hasInterviewEvent || /interview/i.test(app.notes || '')));
 
+      // Interviews Reached:
+      const isInterviewed =
+        [
+          'interview',
+          'interview_scheduled',
+          'interview_completed',
+          'selected',
+          'offer',
+          'offer_received',
+        ].includes(s) ||
+        (s === 'rejected' && (hasInterviewEvent || /interview/i.test(app.notes || '')));
+
+      // Offers Won:
       const isSelected = ['selected', 'offer', 'offer_received'].includes(s);
 
-      if (isShortlisted) shortlisted++;
-      if (isTested) tested++;
+      if (isShortlistedForOA) shortlisted++;
+      if (isAssessmentCleared) clearedAssessment++;
       if (isInterviewed) interviewed++;
       if (isSelected) selected++;
       if (s === 'rejected' || s === 'not_shortlisted') rejected++;
@@ -165,7 +198,7 @@ export default function AnalyticsClient({
     return {
       appliedCount: applied,
       shortlistedCount: shortlisted,
-      testCount: tested,
+      clearedAssessmentCount: clearedAssessment,
       interviewCount: interviewed,
       offerCount: selected,
       optedOutCount: optedOut,
@@ -177,7 +210,7 @@ export default function AnalyticsClient({
       highestCtcFormatted: maxCtc > 0 ? maxCtcStr : '—',
       avgSuperDreamCtc: avgSD ? `₹${avgSD} LPA` : '—',
     };
-  }, [applications]);
+  }, [applications, events]);
 
   const shortlistRate = appliedCount > 0 ? Math.round((shortlistedCount / appliedCount) * 100) : 0;
   const interviewRate = shortlistedCount > 0 ? Math.round((interviewCount / shortlistedCount) * 100) : 0;
@@ -192,8 +225,8 @@ export default function AnalyticsClient({
     },
     {
       label: 'Assessments Cleared',
-      count: testCount,
-      pct: appliedCount > 0 ? Math.round((testCount / appliedCount) * 100) : 0,
+      count: clearedAssessmentCount,
+      pct: appliedCount > 0 ? Math.round((clearedAssessmentCount / appliedCount) * 100) : 0,
       color: 'bg-amber-500',
     },
     {
@@ -226,7 +259,7 @@ export default function AnalyticsClient({
             </span>
           </div>
           <p className="mt-1 text-xs sm:text-sm text-zinc-500">
-            Season {new Date().getFullYear()}
+            2027 Placement Season
             {neoId && (
               <>
                 {' '}· <span className="font-mono text-zinc-400">{neoId}</span>
@@ -467,7 +500,7 @@ export default function AnalyticsClient({
                   <ShieldCheck className="h-4 w-4 text-emerald-400" />
                   <span className="text-xs text-zinc-300 font-medium">Background Cron Frequency</span>
                 </div>
-                <span className="font-mono text-xs font-bold text-emerald-300">Every 2 Hours</span>
+                <span className="font-mono text-xs font-bold text-emerald-300">Every 15 Minutes</span>
               </div>
             </div>
           </div>

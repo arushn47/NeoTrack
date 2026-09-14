@@ -176,7 +176,10 @@ export async function planSyncPages(
     return [];
   }
 
-  // Slice newMsgIds (newest-first, straight from Gmail) into chunks of PAGE_SIZE
+  // Reverse newMsgIds (from newest-first to oldest-first) so that historical emails are
+  // batched into early pages. This is CRITICAL for deterministic stateful status derivation.
+  const chronologicalIds = [...newMsgIds].reverse();
+
   const pagesToInsert: {
     user_id: string;
     gmail_account_id: string;
@@ -186,9 +189,9 @@ export async function planSyncPages(
     status: 'pending';
   }[] = [];
 
-  for (let i = 0; i < newMsgIds.length; i += PAGE_SIZE) {
+  for (let i = 0; i < chronologicalIds.length; i += PAGE_SIZE) {
     const pageIndex = Math.floor(i / PAGE_SIZE);
-    const slice = newMsgIds.slice(i, i + PAGE_SIZE);
+    const slice = chronologicalIds.slice(i, i + PAGE_SIZE);
     pagesToInsert.push({
       user_id: userId,
       gmail_account_id: account.id,
@@ -257,6 +260,7 @@ async function processSingleMessage(
       circularCatalog: Map<string, any[]>;
       persistedResolutions: Map<string, any>;
       driveResolutionsMap: Map<string, string>;
+      companyLocks: Map<string, Promise<void>>;
     };
     pageIndex: number;
     totalMessages: number;
@@ -481,12 +485,12 @@ async function processSingleMessage(
         const { processEmailForEventsAndStatus } = await import(
           '@/lib/sync/status-engine'
         );
-        try {
+        const runStatusEngine = async () => {
           await Promise.race([
             processEmailForEventsAndStatus(
               supabase,
               userId,
-              companyId,
+              companyId as string,
               parsedEmail,
               insertedEmail.id,
               deps.userNeoId,
@@ -497,14 +501,19 @@ async function processSingleMessage(
               setTimeout(() => reject(new Error('ai_timeout')), 8000)
             ),
           ]);
-        } catch (statusErr) {
+        };
+
+        const existingLock = deps.companyLocks.get(companyId) || Promise.resolve();
+        const newLock = existingLock.then(runStatusEngine).catch(statusErr => {
           const errMsg = statusErr instanceof Error ? statusErr.message : String(statusErr);
           if (errMsg === 'ai_timeout') {
             console.warn(`[processSingleMessage] Status engine timed out for msg ${msgId} ("${parsedEmail.subject.slice(0, 60)}") — skipped to protect sync budget.`);
           } else {
             console.error(`[processSingleMessage] Status engine error for msg ${msgId}:`, statusErr);
           }
-        }
+        });
+        deps.companyLocks.set(companyId, newLock);
+        await newLock;
       }
     }
 
@@ -544,6 +553,7 @@ export async function processPage(
     circularCatalog: Map<string, any[]>;
     persistedResolutions: Map<string, any>;
     driveResolutionsMap: Map<string, string>;
+    companyLocks: Map<string, Promise<void>>;
   },
   onProgress?: (progress: SyncProgress) => void,
   initialCounts?: { newEmails: number; newCompanies: number; skippedDuplicates: number },
@@ -555,8 +565,8 @@ export async function processPage(
     .update({ status: 'in_progress', updated_at: new Date().toISOString() })
     .eq('id', page.id);
 
-  // Reverse ONLY this page's slice (oldest to newest within this page)
-  const chronoSortedMsgIds = [...page.message_ids].reverse();
+  // Messages are already chronologically sorted (oldest-to-newest) in planSyncPages
+  const chronoSortedMsgIds = [...page.message_ids];
   const startIndex = page.next_offset || 0;
   const startTime = Date.now();
 
@@ -620,10 +630,10 @@ export async function processPage(
     const batch = chronoSortedMsgIds.slice(i, i + BATCH_SIZE);
     currentIndex += batch.length;
 
-    // Process batch concurrently — one rejection won't abort others (Promise.allSettled)
-    const batchResults = await Promise.allSettled(
-      batch.map((msgId) =>
-        processSingleMessage(msgId, {
+    // Process batch sequentially to ensure deterministic causal order and eliminate concurrency races
+    for (const msgId of batch) {
+      try {
+        const singleResult = await processSingleMessage(msgId, {
           supabase,
           userId,
           account,
@@ -637,21 +647,15 @@ export async function processPage(
           totalMessages: chronoSortedMsgIds.length,
           onProgress,
           liveTracker,
-        })
-      )
-    );
+        });
 
-    // Aggregate results from all settled promises
-    for (const settled of batchResults) {
-      if (settled.status === 'fulfilled') {
-        emailsProcessedCount += settled.value.emailsProcessed;
-        newEmailsCount += settled.value.newEmails;
-        newCompaniesCount += settled.value.newCompanies;
-        skippedDuplicatesCount += settled.value.skippedDuplicates;
-        errorsList.push(...settled.value.errors);
-      } else {
-        // Promise.allSettled rejection means a top-level unhandled error escaped processSingleMessage
-        const errMsg = settled.reason instanceof Error ? settled.reason.message : String(settled.reason);
+        emailsProcessedCount += singleResult.emailsProcessed;
+        newEmailsCount += singleResult.newEmails;
+        newCompaniesCount += singleResult.newCompanies;
+        skippedDuplicatesCount += singleResult.skippedDuplicates;
+        errorsList.push(...singleResult.errors);
+      } catch (singleErr) {
+        const errMsg = singleErr instanceof Error ? singleErr.message : String(singleErr);
         const isQuota = /quota exceeded|rate.?limit|units.?per.?minute/i.test(errMsg);
         if (!isQuota) {
           errorsList.push(errMsg);
@@ -1110,6 +1114,7 @@ export async function runSync(
                   circularCatalog: cCatalog,
                   persistedResolutions: pRes,
                   driveResolutionsMap: dMap,
+                  companyLocks: new Map<string, Promise<void>>(),
                 },
                 (pageProg) => {
                   pageProg.currentPageIndex = targetIndex;
@@ -1191,6 +1196,7 @@ export async function runSync(
                 circularCatalog: cCatalog,
                 persistedResolutions: pRes,
                 driveResolutionsMap: dMap,
+                companyLocks: new Map<string, Promise<void>>(),
               },
               (pageProg) => {
                 pageProg.currentPageIndex = targetIndex;
@@ -1263,12 +1269,13 @@ export async function runSync(
       .eq('user_id', userId);
 
     const hasAnyPending = (allPendingPages || []).some((p) => p.status !== 'complete');
+    const hadCompletedInitialPages = (allPendingPages || []).length > 0 && !hasAnyPending;
     result.hasMorePagesPending = hasAnyPending;
 
   // 5. Circular reconciliation: reconcile unlinked college circulars against user companies
   // IDLE & ARCHIVE GUARD: Only run reconciliation when ALL pages are complete and emails were processed.
   // Running this during intermediate archive pages wastes 15 seconds per chunk!
-  if (!result.hasMorePagesPending && result.totalEmailsProcessed > 0) {
+  if (!result.hasMorePagesPending && (result.totalEmailsProcessed > 0 || hadCompletedInitialPages)) {
     try {
       const { data: unlinkedEmails } = await supabase
         .from('emails')
@@ -1354,14 +1361,26 @@ export async function runSync(
               const norm = normalizeCompanyName(compName).toLowerCase();
               const unlinkedDrive = extractDriveNumber(`${email.subject}\n${email.body_snippet || ''}`);
 
+              // Extract parenthetical variants: e.g. "Eternal (Zomato)" -> ["eternal (zomato)", "zomato", "eternal"]
+              const parenMatches = Array.from(compName.matchAll(/\(([^)]+)\)/g)).map((m) => m[1].trim().toLowerCase());
+              const outsideParen = compName.replace(/\([^)]*\)/g, ' ').replace(/\s+/g, ' ').trim().toLowerCase();
+              const searchCandidates = Array.from(new Set([
+                norm,
+                ...parenMatches.filter((p) => p.length >= 2),
+                ...(outsideParen && outsideParen.length >= 2 ? [outsideParen] : []),
+              ]));
+
               const matchedList = allUserComps.filter((c) => {
                 const cLower = c.name.toLowerCase();
-                return (
-                  cLower === norm ||
-                  (c.aliases || []).includes(norm) ||
-                  isFuzzyCompanyMatch(c.name, compName) ||
-                  (c.aliases || []).some((a: string) => isFuzzyCompanyMatch(a, compName))
-                );
+                const cAliases = (c.aliases || []).map((a: string) => a.toLowerCase());
+                return searchCandidates.some((cand) => {
+                  return (
+                    cLower === cand ||
+                    cAliases.includes(cand) ||
+                    isFuzzyCompanyMatch(c.name, cand) ||
+                    (c.aliases || []).some((a: string) => isFuzzyCompanyMatch(a, cand))
+                  );
+                });
               });
 
               let matched = null;
@@ -1543,6 +1562,29 @@ export async function runSync(
       console.warn('Post-sync circular reconciliation non-critical error:', reconcileErr);
     }
 
+    // 5.4 Automatic Post-Sync Company Deduplication:
+    // Merges any duplicate company records caused by subtle naming differences or historical runs.
+    try {
+      const { deduplicateUserCompanies } = await import('@/lib/sync/dedup');
+      const dedupResult = await deduplicateUserCompanies(supabase, userId);
+      if (dedupResult.removedCompaniesCount > 0) {
+        console.log(`[SyncEngine] Deduplicated ${dedupResult.removedCompaniesCount} company record(s) for user ${userId}`);
+      }
+    } catch (dedupErr) {
+      console.warn('[Post-Sync Dedup] Non-critical error:', dedupErr);
+    }
+
+    // 5.5 Holistic Status Recalculation:
+    // The incremental per-email status engine can produce wrong statuses because it only
+    // sees one email at a time. After all pages are done, re-run the full holistic
+    // analysis (same logic as reprocess Phase 4) to correct any status errors.
+    try {
+      const { recalculateApplicationStatuses } = await import('@/app/api/sync/reprocess/route');
+      await recalculateApplicationStatuses(userId);
+    } catch (statusRecalcErr) {
+      console.warn('[Post-Sync Status Recalc] Non-critical error:', statusRecalcErr);
+    }
+
     // 6. Automatic Google Calendar reconciliation:
     // Only runs if new emails or archive pages were processed
     try {
@@ -1551,6 +1593,11 @@ export async function runSync(
       console.log(`[Google Calendar Auto-Sync] User ${userId}: ${calResult.message}`);
     } catch (calErr) {
       console.warn('[Google Calendar Auto-Sync] Non-critical reconciliation error:', calErr);
+    }
+
+    // Clean up completed initial sync pages so future idle cron runs don't re-trigger
+    if (hadCompletedInitialPages) {
+      await supabase.from('sync_pages').delete().eq('user_id', userId);
     }
   } else {
     console.log(
@@ -1595,7 +1642,13 @@ const GENERIC_MATCH_TOKENS = new Set([
   'pvt', 'ltd', 'limited', 'private', 'inc', 'corp', 'corporation',
   'co', 'company', 'llc', 'llp',
   'super', 'dream', 'regular', 'core', 'internship', 'placement', 'drive',
-  'finance', 'batch', '2026', '2027', '2028', 'urgent', 'extended', 'deadline',
+  'finance', 'financial', 'services', 'service',
+  'technologies', 'technology', 'tech', 'solutions', 'solution',
+  'consulting', 'consultancy', 'holdings', 'holding',
+  'group', 'enterprises', 'enterprise', 'international', 'global',
+  'management', 'advisory', 'capital', 'systems', 'system',
+  'labs', 'lab', 'analytics', 'industries', 'industry',
+  'batch', '2026', '2027', '2028', 'urgent', 'extended', 'deadline',
   'update', 'updated', 'campus', 'hiring', 'recruitment', 'talk', 'test',
   'intelligence', 'intelligent', 'artificial', 'hardware',
   ...ENGLISH_STOPWORDS,
@@ -1655,8 +1708,23 @@ export function isFuzzyCompanyMatch(compName: string, targetName: string): boole
     return false;
   }
 
+  const STEM_SYNONYMS: Record<string, string> = {
+    tech: 'technologies',
+    technology: 'technologies',
+    technologies: 'technologies',
+    info: 'information',
+    information: 'information',
+    infosystems: 'information',
+    sys: 'systems',
+    systems: 'systems',
+    sol: 'solutions',
+    soln: 'solutions',
+    solutions: 'solutions',
+  };
+
   const tokenMatches = (a: string, b: string) => {
     if (a === b) return true;
+    if (STEM_SYNONYMS[a] && STEM_SYNONYMS[a] === STEM_SYNONYMS[b]) return true;
     // Allow minor stem variations (e.g. plural s, es) but strictly limit length difference to <= 2
     if (a.length >= 5 && b.length >= 5 && (a.startsWith(b) || b.startsWith(a))) {
       return Math.abs(a.length - b.length) <= 2;
@@ -1679,7 +1747,37 @@ export function isFuzzyCompanyMatch(compName: string, targetName: string): boole
  * Creates or retrieves a company by name for a given user.
  * Handles normalization, alias checking, and drive number isolation.
  */
+// Sequential mutex for upsertCompany per user to prevent concurrent race duplicates
+const userUpsertLocks = new Map<string, Promise<void>>();
+
 async function upsertCompany(
+  supabase: ReturnType<typeof createAdminClient>,
+  userId: string,
+  companyName: string,
+  allowCreate: boolean = true,
+  driveNumber?: string | null,
+  driveName?: string | null
+): Promise<string | null> {
+  const currentLock = userUpsertLocks.get(userId) || Promise.resolve();
+  let release: () => void;
+  const nextLock = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  userUpsertLocks.set(userId, currentLock.then(() => nextLock));
+
+  await currentLock;
+  try {
+    return await doUpsertCompany(supabase, userId, companyName, allowCreate, driveNumber, driveName);
+  } finally {
+    release!();
+  }
+}
+
+/**
+ * Creates or retrieves a company by name for a given user.
+ * Handles normalization, alias checking, and drive number isolation.
+ */
+async function doUpsertCompany(
   supabase: ReturnType<typeof createAdminClient>,
   userId: string,
   companyName: string,
@@ -1690,6 +1788,34 @@ async function upsertCompany(
   const normalized = normalizeCompanyName(companyName);
 
   if (!normalized || normalized.length < 2) return null;
+
+  // Helper: learn new aliases and link drive_number to matched company
+  const learnAliasesAndDrive = async (compRecord: {
+    id: string;
+    aliases?: string[] | null;
+    drive_number?: string | null;
+    drive_name?: string | null;
+  }) => {
+    const newAliases = extractCompanyAliases(companyName, normalized);
+    if (driveNumber && !newAliases.includes(driveNumber.toLowerCase())) {
+      newAliases.push(driveNumber.toLowerCase());
+    }
+    const currentAliases = (compRecord.aliases || []).map((a) => a.toLowerCase());
+    const missing = newAliases.filter((a) => !currentAliases.includes(a.toLowerCase()));
+    const updates: Record<string, any> = {};
+    if (missing.length > 0) {
+      updates.aliases = Array.from(new Set([...currentAliases, ...newAliases]));
+    }
+    if (!compRecord.drive_number && driveNumber) {
+      updates.drive_number = driveNumber;
+      if (driveName && !compRecord.drive_name) {
+        updates.drive_name = driveName;
+      }
+    }
+    if (Object.keys(updates).length > 0) {
+      await supabase.from('companies').update(updates).eq('id', compRecord.id);
+    }
+  };
 
   // Helper: check if a candidate company is already bound to a DIFFERENT drive number
   const isBoundToOtherDrive = async (candidateCompId: string): Promise<boolean> => {
@@ -1712,12 +1838,13 @@ async function upsertCompany(
   if (driveNumber) {
     const { data: driveComp } = await supabase
       .from('companies')
-      .select('id')
+      .select('id, aliases, drive_number, drive_name')
       .eq('user_id', userId)
       .eq('drive_number', driveNumber)
       .maybeSingle();
 
     if (driveComp?.id) {
+      await learnAliasesAndDrive(driveComp);
       return driveComp.id;
     }
 
@@ -1731,45 +1858,74 @@ async function upsertCompany(
       .maybeSingle();
 
     if (driveEmail?.company_id) {
-      return driveEmail.company_id;
+      const { data: matchedComp } = await supabase
+        .from('companies')
+        .select('id, aliases, drive_number, drive_name')
+        .eq('id', driveEmail.company_id)
+        .maybeSingle();
+      if (matchedComp) {
+        await learnAliasesAndDrive(matchedComp);
+        return matchedComp.id;
+      }
     }
   }
 
-  // 1. Check exact name match for this user
-  const { data: existing } = await supabase
-    .from('companies')
-    .select('id')
-    .eq('user_id', userId)
-    .eq('name', normalized)
-    .single();
+  // Extract parenthetical variants: e.g. "Eternal (Zomato)" -> ["Eternal (Zomato)", "Zomato", "Eternal"]
+  const parenMatches = Array.from(companyName.matchAll(/\(([^)]+)\)/g))
+    .map((m) => normalizeCompanyName(m[1].trim()))
+    .filter((p) => p.length >= 2);
+  const outsideParen = normalizeCompanyName(companyName.replace(/\([^)]*\)/g, ' ').replace(/\s+/g, ' ').trim());
+  const candidateNames = Array.from(new Set([
+    normalized,
+    ...parenMatches,
+    ...(outsideParen && outsideParen.length >= 2 ? [outsideParen] : []),
+  ]));
 
-  if (existing && !(await isBoundToOtherDrive(existing.id))) {
-    return existing.id;
+  // 1. Check exact name match for this user across candidate names
+  for (const cand of candidateNames) {
+    const { data: existing } = await supabase
+      .from('companies')
+      .select('id, aliases, drive_number, drive_name')
+      .eq('user_id', userId)
+      .eq('name', cand)
+      .maybeSingle();
+
+    if (existing && !(await isBoundToOtherDrive(existing.id))) {
+      await learnAliasesAndDrive(existing);
+      return existing.id;
+    }
   }
 
-  // 2. Check aliases match
-  const { data: aliasMatch } = await supabase
-    .from('companies')
-    .select('id')
-    .eq('user_id', userId)
-    .contains('aliases', [normalized.toLowerCase()])
-    .single();
+  // 2. Check aliases match across candidate names
+  for (const cand of candidateNames) {
+    const { data: aliasMatch } = await supabase
+      .from('companies')
+      .select('id, aliases, drive_number, drive_name')
+      .eq('user_id', userId)
+      .contains('aliases', [cand.toLowerCase()])
+      .maybeSingle();
 
-  if (aliasMatch && !(await isBoundToOtherDrive(aliasMatch.id))) {
-    return aliasMatch.id;
+    if (aliasMatch && !(await isBoundToOtherDrive(aliasMatch.id))) {
+      await learnAliasesAndDrive(aliasMatch);
+      return aliasMatch.id;
+    }
   }
 
-  // 3. Dynamic matching against existing user companies.
+  // 3. Dynamic matching against existing user companies
   const { data: userCompanies } = await supabase
     .from('companies')
-    .select('id, name, aliases')
+    .select('id, name, aliases, drive_number, drive_name')
     .eq('user_id', userId);
 
   if (userCompanies && userCompanies.length > 0) {
     for (const comp of userCompanies) {
-      const aliasMatch = (comp.aliases || []).some((a: string) => isFuzzyCompanyMatch(a, normalized));
-      if (isFuzzyCompanyMatch(comp.name, normalized) || aliasMatch) {
+      const isMatched = candidateNames.some((cand) => {
+        const aliasMatch = (comp.aliases || []).some((a: string) => isFuzzyCompanyMatch(a, cand));
+        return isFuzzyCompanyMatch(comp.name, cand) || aliasMatch;
+      });
+      if (isMatched) {
         if (!(await isBoundToOtherDrive(comp.id))) {
+          await learnAliasesAndDrive(comp);
           return comp.id;
         }
       }

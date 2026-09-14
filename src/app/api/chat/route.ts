@@ -57,35 +57,102 @@ export async function POST(request: Request) {
     companyEventsMap.set(e.company_id, list);
   });
 
-  // Helper to find specific company mentioned in the query
-  const findMentionedCompany = () => {
-    // Sort by name length descending so specific names like "EY GDS" match before "EY"
+  const CHAT_STOPWORDS = new Set([
+    'as', 'in', 'at', 'to', 'on', 'for', 'of', 'and', 'or', 'a', 'an', 'the',
+    'is', 'are', 'was', 'were', 'be', 'been', 'being', 'have', 'has', 'had',
+    'do', 'does', 'did', 'mark', 'set', 'update', 'change', 'get', 'got',
+    'status', 'test', 'exam', 'assessment', 'interview', 'ppt', 'talk',
+    'drive', 'drives', 'placement', 'placements', 'campus', 'online', 'offline',
+    'shortlist', 'shortlisted', 'selected', 'rejected', 'declined', 'withdrawn',
+    'applied', 'offer', 'role', 'ctc', 'stipend', 'package', 'my', 'me', 'i',
+    'all', 'what', 'when', 'where', 'which', 'who', 'how', 'show', 'list', 'details',
+    'info', 'information', 'schedule', 'scheduled', 'time', 'date', 'venue', 'location'
+  ]);
+
+  const ALLOWED_SHORT_ACRONYMS = new Set(['ey', 'gs', 'hp', 'ge', 'ti', 'ui', 'sap', 'pwc']);
+
+  // 1. Detect explicit status update command with candidate company extraction
+  const explicitStatusCmd =
+    lowerMsg.match(/^(?:mark|set|update|change)\s+(?:the\s+status\s+of\s+)?(.+?)\s+(?:status\s+)?(?:to|as)\s+([a-z\s_-]+)$/i) ||
+    lowerMsg.match(/^(.+?)\s+(?:status\s+)?(?:to|as)\s+(shortlisted|selected|rejected|placed|declined|opted\s+out|withdrawn|applied|test_scheduled|interview_scheduled)$/i) ||
+    lowerMsg.match(/^(?:i\s+(?:got\s+)?(?:selected|placed|shortlisted|rejected)\s+(?:in|for|at))\s+(.+)$/i) ||
+    lowerMsg.match(/^(?:i\s+(?:opted\s+out|withdrew|declined)\s+(?:from|of))\s+(.+)$/i);
+
+  let targetComp: (typeof companyList)[0] | null = null;
+  let explicitNotFoundName: string | null = null;
+
+  if (explicitStatusCmd) {
+    const candidateName = explicitStatusCmd[1].trim();
+    const candidateLower = candidateName.toLowerCase();
+
+    // Look for exact name match first
+    targetComp = companyList.find((c) => c.name.toLowerCase() === candidateLower) || null;
+
+    // Next check aliases exactly
+    if (!targetComp) {
+      targetComp = companyList.find(
+        (c) => c.aliases && c.aliases.some((a: string) => a.toLowerCase() === candidateLower)
+      ) || null;
+    }
+
+    // Next check whole-word boundary match
+    if (!targetComp) {
+      targetComp = companyList.find(
+        (c) =>
+          new RegExp(`\\b${escapeRegex(candidateLower)}\\b`, 'i').test(c.name) ||
+          (c.aliases && c.aliases.some((a: string) => new RegExp(`\\b${escapeRegex(candidateLower)}\\b`, 'i').test(a)))
+      ) || null;
+    }
+
+    if (!targetComp) {
+      explicitNotFoundName = candidateName;
+    }
+  }
+
+  // 2. If not an explicit command or company not yet found, perform general matching
+  if (!targetComp && !explicitNotFoundName) {
     const sorted = [...companyList].sort((a, b) => b.name.length - a.name.length);
     for (const comp of sorted) {
-      const cName = comp.name.toLowerCase();
-      // Match exact name or word boundary match
-      if (lowerMsg.includes(cName) || new RegExp(`\\b${escapeRegex(cName)}\\b`, 'i').test(lowerMsg)) {
-        return comp;
-      }
-      if (comp.aliases) {
-        for (const alias of comp.aliases) {
-          const aName = alias.toLowerCase();
-          if (lowerMsg.includes(aName) || new RegExp(`\\b${escapeRegex(aName)}\\b`, 'i').test(lowerMsg)) {
-            return comp;
-          }
+      const cName = comp.name.toLowerCase().trim();
+      if (cName.length >= 2 && !CHAT_STOPWORDS.has(cName)) {
+        if (new RegExp(`\\b${escapeRegex(cName)}\\b`, 'i').test(lowerMsg)) {
+          targetComp = comp;
+          break;
         }
       }
+      if (comp.aliases) {
+        let matched = false;
+        for (const alias of comp.aliases) {
+          const aName = alias.toLowerCase().trim();
+          if (CHAT_STOPWORDS.has(aName)) continue;
+          if (aName.length < 3 && !ALLOWED_SHORT_ACRONYMS.has(aName)) continue;
+          if (new RegExp(`\\b${escapeRegex(aName)}\\b`, 'i').test(lowerMsg)) {
+            targetComp = comp;
+            matched = true;
+            break;
+          }
+        }
+        if (matched) break;
+      }
     }
-    // Fallback for short keywords like "ey", "lseg", "mufg"
-    if (/\b(?:ey\s*gds|ey|ernst)\b/i.test(lowerMsg)) {
-      return companyList.find((c) => /ey\s*gds/i.test(c.name)) || companyList.find((c) => /ey/i.test(c.name)) || null;
+
+    // Fallback for short corporate keywords
+    if (!targetComp) {
+      if (/\b(?:ey\s*gds|ey|ernst)\b/i.test(lowerMsg)) {
+        targetComp = companyList.find((c) => /ey\s*gds/i.test(c.name)) || companyList.find((c) => /ey/i.test(c.name)) || null;
+      } else if (/\b(?:lseg|london\s*stock)\b/i.test(lowerMsg)) {
+        targetComp = companyList.find((c) => /london|lseg/i.test(c.name)) || null;
+      }
     }
-    if (/\b(?:lseg|london\s*stock)\b/i.test(lowerMsg)) {
-      return companyList.find((c) => /london|lseg/i.test(c.name)) || null;
-    }
-    return null;
-  };
-  const targetComp = findMentionedCompany();
+  }
+
+  // If user explicitly gave a command like "Mark [Company] as shortlisted" but that company isn't in their drives:
+  if (explicitNotFoundName && !targetComp) {
+    return NextResponse.json({
+      reply: `❓ I couldn't find "**${explicitNotFoundName}**" in your registered placement drives. Please verify the company name or check your Companies tab.`,
+      action: 'company_not_found',
+    });
+  }
 
   // Determine fallback date from targetComp existing events if user only specifies time (e.g. "at 8.30 am")
   let compFallbackDate: Date | null = null;

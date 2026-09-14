@@ -340,8 +340,11 @@ const COMPANY_NOISE_WORDS = [
  * Distinctive brand words like 'india' (e.g. WorkIndia), 'tech' (Tech Mahindra),
  * 'solutions', 'technologies', 'services' are never stripped.
  */
-const KEY_NOISE_WORDS = new Set([
-  'pvt', 'ltd', 'limited', 'private', 'inc', 'corp', 'corporation', 'llc', 'llp',
+export const KEY_NOISE_WORDS = new Set([
+  'pvt', 'ltd', 'limited', 'private', 'inc', 'corp', 'corporation', 'llc', 'llp', 'co', 'company',
+  'services', 'service', 'financial', 'technologies', 'technology', 'tech', 'solutions', 'solution',
+  'consulting', 'consultancy', 'holdings', 'holding', 'group', 'enterprises', 'enterprise',
+  'international', 'global', 'management', 'advisory', 'capital', 'systems', 'system', 'labs', 'lab', 'analytics',
 ]);
 
 /**
@@ -350,7 +353,8 @@ const KEY_NOISE_WORDS = new Set([
  *
  * This makes the following equivalent:
  *   "Goldman Sachs"  → "goldmansachs"
- *   "goldmansachs"   → "goldmansachs"  ← same key → same company
+ *   "Tresvista Financial Services" → "tresvista"
+ *   "Tresvista"                    → "tresvista"  ← same key → same company
  *   "HCL Technologies" → "hcl"
  *   "HCL Tech"         → "hcl"          ← same key → same company
  *   "Exxon Mobil"    → "exxonmobil"
@@ -359,6 +363,7 @@ const KEY_NOISE_WORDS = new Set([
  *   "Infosys"        → "infosys"       ← same key → same company
  */
 export function computeNormalizedKey(name: string): string {
+  if (!name) return '';
   // 1. Lowercase
   let str = name.toLowerCase();
 
@@ -371,7 +376,12 @@ export function computeNormalizedKey(name: string): string {
   // 3. Split into words, drop noise words
   const words = str.split(/\s+/).filter((w) => w.length > 0 && !KEY_NOISE_WORDS.has(w));
 
-  // 4. Collapse — remove all remaining spaces so "goldman sachs" === "goldmansachs"
+  // 4. If all words were stripped (e.g. brand itself is a noise word), fallback to collapsed raw string
+  if (words.length === 0) {
+    return str.replace(/[^a-z0-9]/g, '');
+  }
+
+  // 5. Collapse — remove all remaining spaces so "goldman sachs" === "goldmansachs"
   return words.join('');
 }
 
@@ -490,7 +500,7 @@ const SUBJECT_SUFFIXES = [
  * Words and role titles that are never company names.
  */
 const NON_COMPANY_WORDS = [
-  'email', 'match', 'hr', 'github', 'linkedin', 'supabase', 'vitstudent',
+  'via email', 'by email', 'via', 'email', 'emails', 'match', 'hr', 'github', 'linkedin', 'supabase', 'vitstudent',
   'accountprotection', 'mycareernet', 'takeuforward', 'codeforces',
   '10 new tools for', 'complete before 05', 'super dream internship',
   'portal', 'cdc portal', 'vit cdc portal', 'vit', 'your vit cdc portal',
@@ -523,7 +533,7 @@ export const ENGLISH_STOPWORDS = new Set([
   'about', 'above', 'across', 'after', 'against', 'along', 'among', 'around', 'at', 'before', 'behind', 'below', 'beneath',
   'beside', 'between', 'beyond', 'by', 'down', 'during', 'except', 'for', 'from', 'in', 'inside', 'into', 'near', 'of',
   'off', 'on', 'onto', 'out', 'outside', 'over', 'past', 'regarding', 'since', 'through', 'throughout', 'to', 'toward',
-  'under', 'underneath', 'until', 'up', 'upon', 'with', 'within', 'without', 'and', 'but', 'or', 'nor', 'so', 'yet', 'if',
+  'under', 'underneath', 'until', 'up', 'upon', 'with', 'within', 'without', 'and', 'but', 'or', 'nor', 'so', 'yet', 'if', 'via',
   // Auxiliary & Common Verbs
   'am', 'is', 'are', 'was', 'were', 'be', 'been', 'being', 'have', 'has', 'had', 'having', 'do', 'does', 'did', 'doing',
   'will', 'would', 'shall', 'should', 'can', 'could', 'may', 'might', 'must', 'get', 'got', 'give', 'given', 'take', 'taken',
@@ -534,7 +544,7 @@ export const ENGLISH_STOPWORDS = new Set([
   'reminder', 'invitation', 'congratulations', 'details', 'information', 'schedule', 'venue', 'timing', 'dates',
   'morning', 'afternoon', 'evening', 'today', 'tomorrow', 'yesterday', 'passout', 'prelims', 'portal', 'day', 'slots',
   'week', 'month', 'year', 'thanks', 'thank', 'regards', 'team', 'attend', 'attended', 'attending', 'report', 'reported',
-  'test', 'tests', 'interview', 'interviews', 'assessment', 'assessments', 're', 'fwd', 'fw',
+  'test', 'tests', 'interview', 'interviews', 'assessment', 'assessments', 're', 'fwd', 'fw', 'email', 'emails',
 ]);
 
 /**
@@ -653,7 +663,7 @@ export function checkAcronymMatch(shortStr: string, longStr: string): boolean {
  * Extracts all relevant aliases for a company from its raw name and canonical name.
  * Captures parenthetical abbreviations, algorithmic acronyms, and known corporate nicknames.
  */
-export function extractCompanyAliases(rawName: string, canonicalName: string): string[] {
+export function extractCompanyAliases(rawName: string, canonicalName: string, driveName?: string | null): string[] {
   const aliases = new Set<string>();
 
   const add = (str: string) => {
@@ -667,10 +677,38 @@ export function extractCompanyAliases(rawName: string, canonicalName: string): s
   add(canonicalName);
   add(rawName);
 
+  // ROOT STEM EXTRACTION: Strip generic corporate suffixes to generate a shorter root alias.
+  // e.g. "Unilever Industries" → also aliases "unilever", so college circulars that drop the
+  // formal suffix still resolve to the same company record.
+  // NOTE: Substantive brand words like "India", "Tech", "Solutions", "Services" are intentionally
+  // NOT in this list — those are load-bearing brand words (WorkIndia, Tech Mahindra, etc.)
+  const CORPORATE_SUFFIXES_REGEX = /\s+(?:financial\s+services|financial|industries|technologies|technology|services|service|solutions|solution|labs|lab|consulting|consultancy|holdings|holding|group|enterprises|enterprise|management|advisory|capital|systems|system|analytics|pvt|ltd|limited|inc|llc|global|international|india|private|corp|corporation)\b/gi;
+  let currentStem = canonicalName;
+  while (CORPORATE_SUFFIXES_REGEX.test(currentStem)) {
+    currentStem = currentStem.replace(CORPORATE_SUFFIXES_REGEX, '').trim();
+    if (
+      currentStem.length >= 2 &&
+      currentStem.toLowerCase() !== canonicalName.toLowerCase() &&
+      !ENGLISH_STOPWORDS.has(currentStem.toLowerCase()) &&
+      !isInvalidCompanyName(currentStem)
+    ) {
+      add(currentStem);
+    }
+  }
+
   // 1. Parenthetical extraction: e.g. "Willis Towers Watson (WTW India)" -> "wtw india", "wtw"
+  // "Eternal (Zomato)" -> "zomato", "eternal", "eternal zomato", "zomato eternal"
   const parenMatches = Array.from(rawName.matchAll(/\(([^)]+)\)/g)).map((m) => m[1].trim());
+  const outsideParen = rawName.replace(/\([^)]*\)/g, ' ').replace(/\s+/g, ' ').trim();
+  if (outsideParen && outsideParen.toLowerCase() !== rawName.toLowerCase()) {
+    add(outsideParen);
+  }
   for (const p of parenMatches) {
     add(p);
+    if (outsideParen && outsideParen.length >= 2) {
+      add(`${outsideParen} ${p}`);
+      add(`${p} ${outsideParen}`);
+    }
     const pWords = p.split(/\s+/).filter(Boolean);
     for (const w of pWords) {
       if (w.length >= 2 && w.length <= 6 && !ENGLISH_STOPWORDS.has(w.toLowerCase())) {
@@ -681,6 +719,20 @@ export function extractCompanyAliases(rawName: string, canonicalName: string): s
       const pInitials = pWords.map((w) => w[0]).join('').toLowerCase();
       if (pInitials.length >= 3 && !ENGLISH_STOPWORDS.has(pInitials)) {
         add(pInitials);
+      }
+    }
+  }
+
+  // 1.5 Drive Name tokens: e.g. "Zomato Eternal Drive Number: ..." -> "eternal", "zomato eternal"
+  if (driveName) {
+    const cleanDrive = driveName.replace(/\s+drive\s+(?:number|date):.*$/i, '').replace(/[^a-zA-Z0-9\s]/g, ' ').trim();
+    if (cleanDrive && cleanDrive.length >= 2) {
+      add(cleanDrive);
+      const driveWords = cleanDrive.split(/\s+/).filter(Boolean);
+      for (const dw of driveWords) {
+        if (dw.length >= 3 && !ENGLISH_STOPWORDS.has(dw.toLowerCase()) && !isInvalidCompanyName(dw)) {
+          add(dw);
+        }
       }
     }
   }
@@ -816,23 +868,48 @@ export function extractCompanyName(
     };
 
     // 1. Company: <Name> / Name of the Company: <Name>
+    const companyStopWords =
+      'drive\\s+name|drive\\s+number|new\\s+drive\\s+date|category|date\\s+of\\s+visit|eligibility|eligible|ctc|role|stipend|log\\s+in|next\\s+steps|keep\\s+monitoring|save\\s+this|if\\b|please\\b|stay\\b|this\\b|kindly\\b|note\\b|we\\b|you\\b|dear\\b|all\\s+the\\s+best|best\\s+regards';
     const companyMatch = bodySnippet.match(
-      /(?:^|\s|\n|\r)(?:name\s+of\s+the\s+company|company\s+name|company)\s*[:\-–—*]*\s*([A-Za-z0-9&\s\-\.()]+?)(?:\s+(?:drive\s+name|drive\s+number|new\s+drive\s+date|category|date\s+of\s+visit|eligibility|eligible|ctc|role|stipend|please|log\s+in|\n|\r|\*|$))/i
+      new RegExp(
+        `(?:^|\\s|\\n|\\r)(?:name\\s+of\\s+the\\s+company\\s*[:\\-–—*]*|company\\s+name\\s*[:\\-–—*]*|company\\s*[:\\-–—]+)\\s*([A-Za-z0-9&/(). -]+?)(?=[.\\n\\r;]|\\s+(?:${companyStopWords})|\\*|$)`,
+        'i'
+      )
     );
+    let hasHighConfidenceCompany = false;
     if (companyMatch && companyMatch[1]) {
-      addCandidate(companyMatch[1], 25);
+      addCandidate(companyMatch[1], 50);
+      hasHighConfidenceCompany = candidates.some((c) => c.score >= 50);
     }
 
-    // 2. Drive Name: <Name>
-    const driveNameMatch = bodySnippet.match(
-      /(?:drive\s+name|name\s+of\s+the\s+drive)\s*[:\-*]*\s*([A-Za-z0-9&\s\-\.()]+?)(?:\s+(?:drive\s+number|new\s+drive\s+date|category|date\s+of\s+visit|eligibility|eligible|ctc|role|stipend|company|\n|\r|\*|$))/i
-    );
-    if (driveNameMatch && driveNameMatch[1]) {
-      addCandidate(driveNameMatch[1], 15);
+    // 2. Drive Name: <Name> (Only consider if Company: was NOT specified)
+    if (!hasHighConfidenceCompany) {
+      const driveNameMatch = bodySnippet.match(
+        /(?:drive\s+name|name\s+of\s+the\s+drive)\s*[:\-*]*\s*([A-Za-z0-9&\s\-\.()]+?)(?:\s+(?:drive\s+number|new\s+drive\s+date|category|date\s+of\s+visit|eligibility|eligible|ctc|role|stipend|company|\n|\r|\*|$))/i
+      );
+      if (driveNameMatch && driveNameMatch[1]) {
+        // Strip trailing academic level tags (e.g. "Pallav tech ug" -> "Pallav tech")
+        const cleanDriveRaw = driveNameMatch[1].replace(/\s+(?:ug|pg|b\.?tech|m\.?tech|mca|mba)\b.*$/i, '');
+        addCandidate(cleanDriveRaw, 10);
+      }
     }
 
     if (candidates.length > 0) {
       candidates.sort((a, b) => b.score - a.score);
+      // If candidate is high-confidence (e.g. from explicit Company: field), return it
+      if (candidates[0].score >= 25) {
+        return candidates[0].normalized;
+      }
+      // If only low-confidence drive name was found (score < 25), verify if subject has a clean company pattern
+      for (const pattern of SUBJECT_COMPANY_PATTERNS) {
+        const subMatch = subject.match(pattern);
+        if (subMatch && subMatch[1]) {
+          const sc = cleanCompanyName(subMatch[1]);
+          if (sc && !isInvalidCompanyName(sc)) {
+            return normalizeCompanyName(sc);
+          }
+        }
+      }
       return candidates[0].normalized;
     }
 
@@ -1051,6 +1128,9 @@ export function cleanCompanyName(name: string): string {
     str = str.replace(s, '').trim();
   }
 
+  // Strip trailing academic level / batch tags: "UG", "PG", "B.Tech", etc.
+  str = str.replace(/\s+(?:ug|pg|b\.?tech|m\.?tech|mca|mba)\b.*$/i, '').trim();
+
   // 1. Check for trading brand names in parentheses: e.g. "RFPIO India Pvt Ltd (DBA Responsive)" -> "Responsive"
   const dbaMatch = str.match(/\((?:dba|d\/b\/a|doing\s+business\s+as|aka|a\.k\.a\.|now)\s+([A-Za-z0-9&\s\-\.]+?)\)/i);
   if (dbaMatch && dbaMatch[1]) {
@@ -1063,8 +1143,10 @@ export function cleanCompanyName(name: string): string {
   // 2. Remove parenthetical subsidiary / owner notes: e.g. "(A Siemens Company)"
   str = str.replace(/\((?:a|an|the)?\s*[^)]*?(?:company|group|subsidiary|division)[^)]*\)/gi, ' ').trim();
 
-  // 3. Remove content in remaining parentheses e.g. "(Mitsubishi UFJ Financial Group)"
-  str = str.replace(/\(.*?\)/g, '').trim();
+  // 3. Strip only generic noise in parentheses (numbers, batch years, categories, academic levels, campuses)
+  // Preserves legitimate brand names in parentheses like "Eternal (Zomato)", "Responsive (RFP Software)"
+  const NOISE_PARENTHETICAL_REGEX = /\((?:\d+|super\s+dream|dream|regular|core|internship|placement|drive|ppo|fte|off\s+campus|on\s+campus|ug|pg|b\.?tech|m\.?tech|mca|mba|india|vellore|bhopal|chennai|ap|\d{4}(?:\s*batch)?)\)/gi;
+  str = str.replace(NOISE_PARENTHETICAL_REGEX, '').trim();
 
   // Strip trailing corporate legal entity suffixes (e.g. "Euler Motors Pvt. Ltd." -> "Euler Motors")
   // Only strip from the END so brand words (e.g. "India", "Tech", "Technologies", "Solutions", "Services") are fully preserved

@@ -16,7 +16,7 @@ const PUBLIC_ROUTES = [
   '/api/webhooks',
 ];
 
-export async function middleware(request: NextRequest) {
+export async function proxy(request: NextRequest) {
   const host = request.headers.get('x-forwarded-host') || request.headers.get('host') || '';
   if (host === 'wheresmyoffer.in') {
     const url = request.nextUrl.clone();

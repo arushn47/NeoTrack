@@ -28,6 +28,7 @@ export interface CompanyWithApplication {
 export interface DashboardStats {
   total_companies: number;
   active_applications: number;
+  total_applied?: number;
   applied: number;
   shortlisted: number;
   not_shortlisted: number;

@@ -1,365 +1,16 @@
 'use client';
 
 import React from 'react';
+import { Ban, FileX2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
-export interface StageDefinition {
-  id: string;
-  label: string;
-  shortLabel: string;
-}
-
-export const STAGES: StageDefinition[] = [
-  { id: 'applied', label: 'Applied', shortLabel: 'Applied' },
-  { id: 'ppt', label: 'PPT Scheduled', shortLabel: 'PPT' },
-  { id: 'test', label: 'Shortlisted for Test', shortLabel: 'Test' },
-  { id: 'interview', label: 'Shortlisted for Interview', shortLabel: 'Interview' },
-  { id: 'offer', label: 'Selected / Offer', shortLabel: 'Offer' },
-];
-
-export function getStageIndex(status: string): number {
-  const s = (status || '').toLowerCase();
-  if (['selected', 'offer', 'offer_received'].includes(s)) return 4;
-  if (['interview_scheduled', 'interview', 'interview_completed'].includes(s)) return 3;
-  if (['test_scheduled', 'shortlisted', 'test_completed'].includes(s)) return 2;
-  if (['ppt_scheduled', 'ppt', 'ppt_completed'].includes(s)) return 1;
-  return 0;
-}
-
-export interface EventLike {
-  event_type?: string;
-  eventType?: string;
-  title?: string | null;
-  start_time?: string | Date | null;
-  startTime?: string | Date | null;
-  end_time?: string | Date | null;
-  endTime?: string | Date | null;
-}
-
-export interface EffectiveStageResult {
-  stageIndex: number;
-  effectiveStatus: string;
-  eliminatedStage: number; // -1 if not eliminated, 0 = screening, 1 = PPT, 2 = test, 3 = interview
-  furthestPassedStage: number; // index of furthest passed stage (-1 if screened out at start)
-  statusSubtitle: string;
-  hasPpt: boolean;
-  hasTest: boolean;
-  hasInterview: boolean;
-  isTestCompleted: boolean;
-  isPptCompleted: boolean;
-  isInterviewCompleted: boolean;
-}
-
-/**
- * Derives the exact recruitment stage and elimination point by taking into account
- * application status and the company's real event timeline (PPT, Test, Interview),
- * including smart past-event awareness (Test Completed, PPT Completed).
- */
-export function getEffectiveStage(
-  status: string,
-  latestEvent?: EventLike | null,
-  events?: EventLike[] | null
-): EffectiveStageResult {
-  const s = (status || '').toLowerCase();
-
-  const allEvents: EventLike[] = [
-    ...(latestEvent ? [latestEvent] : []),
-    ...(events || []),
-  ];
-
-  const getEvtType = (e: EventLike) =>
-    `${e.event_type || e.eventType || ''} ${e.title || ''}`.toLowerCase();
-
-  const now = new Date();
-  const getEventTime = (e: EventLike) => {
-    const t = e.start_time || e.startTime;
-    return t ? new Date(t).getTime() : null;
-  };
-
-  const isEventPast = (e: EventLike) => {
-    const endT = e.end_time || e.endTime;
-    if (endT) {
-      const t = new Date(endT).getTime();
-      if (!isNaN(t)) return t < now.getTime();
-    }
-    const startT = getEventTime(e);
-    return startT !== null && startT < now.getTime();
-  };
-
-  const pptEvents = allEvents.filter((e) => /ppt|pre[\s-]*placement/i.test(getEvtType(e)));
-  const testEvents = allEvents.filter((e) =>
-    /online_test|coding_test|assessment|test_scheduled|coding|hackerearth|mettl|shl/i.test(getEvtType(e))
-  );
-  const intEvents = allEvents.filter((e) => /interview/i.test(getEvtType(e)));
-
-  const hasPpt = pptEvents.length > 0;
-  const hasTest = testEvents.length > 0;
-  const hasInterview = intEvents.length > 0;
-
-  // Past event awareness: true if scheduled events have already passed in time
-  const isPptCompleted = hasPpt && pptEvents.every(isEventPast);
-  const isTestCompleted = hasTest && testEvents.every(isEventPast);
-  const isInterviewCompleted = hasInterview && intEvents.every(isEventPast);
-
-  // 1. Not Shortlisted: differentiate screening rejection vs post-PPT test rejection
-  if (s === 'not_shortlisted') {
-    if (hasPpt) {
-      // PPT took place for the candidate, then candidate was not shortlisted for the test
-      return {
-        stageIndex: 2,
-        effectiveStatus: 'not_shortlisted',
-        eliminatedStage: 2,
-        furthestPassedStage: 1, // Passed Applied (0) and PPT (1)
-        statusSubtitle: 'Not Shortlisted for Test',
-        hasPpt,
-        hasTest,
-        hasInterview,
-        isTestCompleted,
-        isPptCompleted,
-        isInterviewCompleted,
-      };
-    } else {
-      // Screened out in initial resume/CGPA screening (no PPT attended)
-      return {
-        stageIndex: 0,
-        effectiveStatus: 'not_shortlisted',
-        eliminatedStage: 0,
-        furthestPassedStage: -1, // Did not pass screening
-        statusSubtitle: 'Screened Out in Initial Round',
-        hasPpt,
-        hasTest,
-        hasInterview,
-        isTestCompleted,
-        isPptCompleted,
-        isInterviewCompleted,
-      };
-    }
-  }
-
-  // 2. Rejected: candidate wrote test or interviewed and was eliminated in that round
-  if (s === 'rejected') {
-    if (hasInterview) {
-      return {
-        stageIndex: 3,
-        effectiveStatus: 'rejected',
-        eliminatedStage: 3,
-        furthestPassedStage: 2, // Passed Applied, PPT, and Test
-        statusSubtitle: 'Interviewed · Not Selected',
-        hasPpt,
-        hasTest,
-        hasInterview,
-        isTestCompleted,
-        isPptCompleted,
-        isInterviewCompleted,
-      };
-    } else {
-      // Wrote the test and failed
-      return {
-        stageIndex: 2,
-        effectiveStatus: 'rejected',
-        eliminatedStage: 2,
-        furthestPassedStage: hasPpt ? 1 : 0,
-        statusSubtitle: 'Eliminated in Test Round',
-        hasPpt,
-        hasTest,
-        hasInterview,
-        isTestCompleted,
-        isPptCompleted,
-        isInterviewCompleted,
-      };
-    }
-  }
-
-  // 3. Withdrawn / Declined
-  if (s === 'withdrawn' || s === 'declined') {
-    return {
-      stageIndex: 0,
-      effectiveStatus: s,
-      eliminatedStage: 0,
-      furthestPassedStage: -1,
-      statusSubtitle: 'Withdrawn',
-      hasPpt,
-      hasTest,
-      hasInterview,
-      isTestCompleted,
-      isPptCompleted,
-      isInterviewCompleted,
-    };
-  }
-
-  // 4. Not applied
-  if (s === 'not_applied') {
-    return {
-      stageIndex: 0,
-      effectiveStatus: 'not_applied',
-      eliminatedStage: -1,
-      furthestPassedStage: -1,
-      statusSubtitle: 'Not Registered',
-      hasPpt,
-      hasTest,
-      hasInterview,
-      isTestCompleted,
-      isPptCompleted,
-      isInterviewCompleted,
-    };
-  }
-
-  // 5. Selected / Offer
-  if (['selected', 'offer', 'offer_received'].includes(s)) {
-    return {
-      stageIndex: 4,
-      effectiveStatus: 'selected',
-      eliminatedStage: -1,
-      furthestPassedStage: 4,
-      statusSubtitle: 'Selected · Offer Received 🎉',
-      hasPpt,
-      hasTest,
-      hasInterview,
-      isTestCompleted,
-      isPptCompleted,
-      isInterviewCompleted,
-    };
-  }
-
-  // 6. Interview scheduled / Interview completed
-  if (['interview_scheduled', 'interview', 'interview_completed'].includes(s) || hasInterview) {
-    if (isInterviewCompleted || s === 'interview_completed') {
-      return {
-        stageIndex: 3,
-        effectiveStatus: 'interview_completed',
-        eliminatedStage: -1,
-        furthestPassedStage: 3,
-        statusSubtitle: 'Interview Completed · Results Awaited',
-        hasPpt,
-        hasTest,
-        hasInterview,
-        isTestCompleted,
-        isPptCompleted,
-        isInterviewCompleted: true,
-      };
-    }
-
-    return {
-      stageIndex: 3,
-      effectiveStatus: 'interview_scheduled',
-      eliminatedStage: -1,
-      furthestPassedStage: 2,
-      statusSubtitle: 'Shortlisted for Interview',
-      hasPpt,
-      hasTest,
-      hasInterview,
-      isTestCompleted,
-      isPptCompleted,
-      isInterviewCompleted,
-    };
-  }
-
-  // 7. Test scheduled / Shortlisted for test / Test completed
-  if (['test_scheduled', 'shortlisted', 'test_completed'].includes(s) || hasTest) {
-    if (isTestCompleted || s === 'test_completed') {
-      return {
-        stageIndex: 2,
-        effectiveStatus: 'test_completed',
-        eliminatedStage: -1,
-        furthestPassedStage: 2, // Test was completed! Circle 2 is marked with green tick ✓
-        statusSubtitle: 'Test Completed · Awaiting Results',
-        hasPpt,
-        hasTest,
-        hasInterview,
-        isTestCompleted: true,
-        isPptCompleted,
-        isInterviewCompleted,
-      };
-    }
-
-    return {
-      stageIndex: 2,
-      effectiveStatus: 'test_scheduled',
-      eliminatedStage: -1,
-      furthestPassedStage: hasPpt ? 1 : 0,
-      statusSubtitle: 'Shortlisted for Test',
-      hasPpt,
-      hasTest,
-      hasInterview,
-      isTestCompleted,
-      isPptCompleted,
-      isInterviewCompleted,
-    };
-  }
-
-  // 8. PPT scheduled / PPT completed
-  if (['ppt_scheduled', 'ppt', 'ppt_completed'].includes(s) || hasPpt) {
-    if (isPptCompleted || s === 'ppt_completed') {
-      return {
-        stageIndex: 1,
-        effectiveStatus: 'ppt_completed',
-        eliminatedStage: -1,
-        furthestPassedStage: 1, // PPT was completed! Circle 1 is marked with green tick ✓
-        statusSubtitle: 'PPT Completed · Test Shortlist Awaited',
-        hasPpt,
-        hasTest,
-        hasInterview,
-        isTestCompleted,
-        isPptCompleted: true,
-        isInterviewCompleted,
-      };
-    }
-
-    return {
-      stageIndex: 1,
-      effectiveStatus: 'ppt_scheduled',
-      eliminatedStage: -1,
-      furthestPassedStage: 0,
-      statusSubtitle: 'Stage 2 of 5 · PPT Scheduled',
-      hasPpt,
-      hasTest,
-      hasInterview,
-      isTestCompleted,
-      isPptCompleted,
-      isInterviewCompleted,
-    };
-  }
-
-  // 9. Default Applied
-  return {
-    stageIndex: 0,
-    effectiveStatus: 'applied',
-    eliminatedStage: -1,
-    furthestPassedStage: 0,
-    statusSubtitle: 'Stage 1 of 5 · Applied',
-    hasPpt,
-    hasTest,
-    hasInterview,
-    isTestCompleted,
-    isPptCompleted,
-    isInterviewCompleted,
-  };
-}
-
-export function getStageStatusLabel(status: string, stageIndex: number): string {
-  const s = (status || '').toLowerCase();
-  if (s === 'rejected') return 'Eliminated in Round';
-  if (s === 'not_shortlisted') return 'Not Shortlisted';
-  if (s === 'withdrawn' || s === 'declined') return 'Withdrawn';
-  if (s === 'not_applied') return 'Not Registered';
-  if (s === 'test_completed') return 'Test Completed';
-  if (s === 'ppt_completed') return 'PPT Completed';
-  if (s === 'interview_completed') return 'Interview Completed';
-
-  switch (stageIndex) {
-    case 4:
-      return 'Selected · Offer Received 🎉';
-    case 3:
-      return 'Shortlisted for Interview';
-    case 2:
-      return 'Shortlisted for Test';
-    case 1:
-      return 'PPT Scheduled';
-    case 0:
-    default:
-      return 'Applied · In Screening';
-  }
-}
+export * from '@/lib/stages';
+import {
+  STAGES,
+  STAGE_ACTIVE_STYLES,
+  EventLike,
+  getEffectiveStage,
+} from '@/lib/stages';
 
 export interface StageStepperProps {
   status: string;
@@ -384,6 +35,107 @@ export function StageStepper({
   const furthestPassed = effective.furthestPassedStage;
 
   const isWithdrawn = (effective.effectiveStatus === 'withdrawn' || effective.effectiveStatus === 'declined');
+  const isNotApplied = (effective.effectiveStatus === 'not_applied');
+
+  // Dedicated UI Banner for Withdrawn / Opted Out drives
+  if (isWithdrawn) {
+    if (compact) {
+      return (
+        <div
+          data-testid="stage-stepper-withdrawn"
+          className={cn(
+            'flex items-center gap-2.5 rounded-lg border border-zinc-800/80 bg-zinc-900/40 px-3 py-2 select-none',
+            className
+          )}
+        >
+          <div className="flex h-5 w-5 shrink-0 items-center justify-center rounded border border-zinc-700/60 bg-zinc-800/80 text-zinc-400">
+            <Ban className="h-3 w-3 text-zinc-400" />
+          </div>
+          <div className="flex min-w-0 flex-1 items-center justify-between gap-2">
+            <span className="truncate text-[11px] font-medium text-zinc-400">
+              Registration Withdrawn · Opted Out on NeoPAT
+            </span>
+            <span className="shrink-0 font-mono text-[9px] uppercase tracking-wider text-zinc-500">
+              Opted Out
+            </span>
+          </div>
+        </div>
+      );
+    }
+
+    return (
+      <div
+        data-testid="stage-stepper-withdrawn"
+        className={cn(
+          'flex items-center gap-3.5 rounded-xl border border-zinc-800 bg-zinc-900/40 p-4 select-none',
+          className
+        )}
+      >
+        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-zinc-700/60 bg-zinc-800 text-zinc-400">
+          <Ban className="h-4 w-4" />
+        </div>
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center justify-between gap-2">
+            <h4 className="text-sm font-semibold text-zinc-200">Registration Withdrawn · Opted Out</h4>
+            <span className="font-mono text-[10px] uppercase tracking-wider text-zinc-500">NeoPAT Opt-Out</span>
+          </div>
+          <p className="mt-0.5 text-xs text-zinc-500">
+            You opted out of this drive on NeoPAT and did not participate in subsequent recruitment rounds.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  // Dedicated UI Banner for Not Applied / Unregistered circulars
+  if (isNotApplied) {
+    if (compact) {
+      return (
+        <div
+          data-testid="stage-stepper-not-applied"
+          className={cn(
+            'flex items-center gap-2.5 rounded-lg border border-zinc-800/80 bg-zinc-900/40 px-3 py-2 select-none',
+            className
+          )}
+        >
+          <div className="flex h-5 w-5 shrink-0 items-center justify-center rounded border border-zinc-700/60 bg-zinc-800/80 text-zinc-400">
+            <FileX2 className="h-3 w-3 text-zinc-400" />
+          </div>
+          <div className="flex min-w-0 flex-1 items-center justify-between gap-2">
+            <span className="truncate text-[11px] font-medium text-zinc-400">
+              Eligible Circular · No Application Submitted
+            </span>
+            <span className="shrink-0 font-mono text-[9px] uppercase tracking-wider text-zinc-500">
+              Not Applied
+            </span>
+          </div>
+        </div>
+      );
+    }
+
+    return (
+      <div
+        data-testid="stage-stepper-not-applied"
+        className={cn(
+          'flex items-center gap-3.5 rounded-xl border border-zinc-800 bg-zinc-900/40 p-4 select-none',
+          className
+        )}
+      >
+        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-zinc-700/60 bg-zinc-800 text-zinc-400">
+          <FileX2 className="h-4 w-4" />
+        </div>
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center justify-between gap-2">
+            <h4 className="text-sm font-semibold text-zinc-200">Eligible Circular · Not Registered</h4>
+            <span className="font-mono text-[10px] uppercase tracking-wider text-zinc-500">Unregistered</span>
+          </div>
+          <p className="mt-0.5 text-xs text-zinc-500">
+            CDC issued an eligibility circular for your branch/batch, but no registration was submitted.
+          </p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div
@@ -392,60 +144,74 @@ export function StageStepper({
     >
       {STAGES.map((s, i) => {
         const isEliminated = i === eliminatedStage;
-        const isWithdrawnNode = isWithdrawn && i === 0;
 
-        // Has this stage been passed / completed?
-        const isPassed = !isEliminated && !isWithdrawn && i <= furthestPassed;
-
-        // Is this the currently active (upcoming / in-progress) stage?
+        // Is this the currently active round or milestone?
         const isCurrent =
           !isEliminated &&
           !isWithdrawn &&
           eliminatedStage === -1 &&
-          i === currentStage &&
-          !isPassed &&
-          effective.effectiveStatus !== 'selected' &&
-          effective.effectiveStatus !== 'offer';
+          i === currentStage;
+
+        // Historical passed stage (completed before current stage)
+        const isHistoricalPassed = !isEliminated && !isCurrent && i < currentStage && i <= furthestPassed;
+
+        // Has this stage been completed (either in past or as current completed milestone)?
+        const isCompleted = !isEliminated && i <= furthestPassed;
 
         let displayLabel = compact ? s.shortLabel : s.label;
-        if (isEliminated && i === 0) {
-          displayLabel = compact ? 'Screening' : 'Screened Out';
+        if (isEliminated) {
+          if (i === 0) {
+            displayLabel = compact ? 'Screening' : 'Screened Out';
+          } else if (i === 2 && effective.effectiveStatus === 'not_shortlisted') {
+            displayLabel = compact ? 'Shortlist' : 'Not Shortlisted';
+          }
         }
+
+        const activeStyle = STAGE_ACTIVE_STYLES[i] || STAGE_ACTIVE_STYLES[0];
 
         return (
           <div key={s.id} className="flex flex-1 items-center last:flex-none min-w-0">
             <div className="flex flex-col items-center flex-1 min-w-0">
-              <div
-                className={cn(
-                  'flex items-center justify-center rounded-full border font-mono font-bold transition-colors shrink-0',
-                  compact ? 'h-6 w-6 text-[9px]' : 'h-7 w-7 text-[10px]',
-                  isPassed
-                    ? 'border-emerald-500/50 bg-emerald-500/15 text-emerald-300'
-                    : isEliminated
-                    ? 'border-rose-500/60 bg-rose-500/20 text-rose-400 ring-2 ring-rose-500/30'
-                    : isWithdrawnNode
-                    ? 'border-zinc-700 bg-zinc-800 text-zinc-400'
-                    : isCurrent
-                    ? 'border-violet-500/60 bg-violet-500/15 text-violet-300 pulse-dot'
-                    : 'border-zinc-700 bg-zinc-900 text-zinc-600'
+              <div className="relative flex items-center justify-center">
+                {isCurrent && (
+                  <span
+                    className={cn(
+                      'absolute -inset-1 rounded-full animate-ping pointer-events-none opacity-40',
+                      activeStyle.ripple
+                    )}
+                    style={{ animationDuration: '2.5s' }}
+                  />
                 )}
-              >
-                {isPassed ? '✓' : isEliminated ? '✕' : isWithdrawnNode ? '⊘' : i + 1}
+                <div
+                  className={cn(
+                    'relative z-10 flex items-center justify-center rounded-full border font-mono font-bold transition-all shrink-0',
+                    compact ? 'h-6 w-6 text-[9px]' : 'h-7 w-7 text-[10px]',
+                    isEliminated
+                      ? 'border-rose-500/70 bg-rose-500/20 text-rose-400 ring-2 ring-rose-500/40 shadow-[0_0_12px_rgba(244,63,94,0.35)]'
+                      : isCurrent
+                      ? activeStyle.circle
+                      : isHistoricalPassed
+                      ? 'border-emerald-500/35 bg-emerald-500/10 text-emerald-400/80'
+                      : isWithdrawn && i <= furthestPassed
+                      ? 'border-zinc-700 bg-zinc-850 text-zinc-400'
+                      : 'border-zinc-800 bg-[#141418] text-zinc-600'
+                  )}
+                >
+                  {isEliminated ? '✕' : (isCompleted || isHistoricalPassed) ? '✓' : i + 1}
+                </div>
               </div>
               <span
                 title={s.label}
                 className={cn(
-                  'font-medium truncate max-w-full text-center transition-colors',
+                  'truncate max-w-full text-center transition-colors',
                   compact ? 'text-[9px] mt-1' : 'text-[10px] mt-1.5 hidden sm:block',
-                  isPassed
-                    ? 'text-emerald-300'
-                    : isEliminated
+                  isEliminated
                     ? 'text-rose-400 font-bold'
-                    : isWithdrawnNode
-                    ? 'text-zinc-500'
                     : isCurrent
-                    ? 'text-violet-300 font-bold'
-                    : 'text-zinc-600'
+                    ? activeStyle.text
+                    : isHistoricalPassed
+                    ? 'text-emerald-400/75 font-medium'
+                    : 'text-zinc-600 font-medium'
                 )}
               >
                 {displayLabel}
@@ -456,10 +222,10 @@ export function StageStepper({
                 className={cn(
                   'mx-1 sm:mx-1.5 h-px flex-1 transition-colors',
                   compact ? 'mb-3.5' : 'mb-0 sm:mb-4',
-                  i < furthestPassed
-                    ? 'bg-emerald-500/50'
-                    : i === furthestPassed && eliminatedStage === i + 1
+                  eliminatedStage !== -1 && i === eliminatedStage - 1
                     ? 'bg-rose-500/70'
+                    : i < currentStage
+                    ? 'bg-emerald-500/45'
                     : 'bg-zinc-800'
                 )}
               />

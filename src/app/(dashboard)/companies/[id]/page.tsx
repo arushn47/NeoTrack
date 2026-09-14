@@ -3,6 +3,7 @@ import { notFound } from 'next/navigation';
 import { requireSession } from '@/lib/auth';
 import { createAdminClient } from '@/lib/supabase/admin';
 import CompanyDetailClient, { type CompanyDetail } from './company-detail-client';
+import { detectCampus, detectBranch, detectRegNo } from '@/lib/utils';
 
 export async function generateMetadata({
   params,
@@ -173,5 +174,17 @@ export default async function CompanyDetailPage({
     })),
   };
 
-  return <CompanyDetailClient company={detail} />;
+  const collegeAccount = (gmailAccounts || []).find((acc) => acc.account_type === 'college');
+  const userCampus = detectCampus(collegeAccount?.email);
+  const userRegNo = detectRegNo(collegeAccount?.email) || userProfile?.neo_id || null;
+  const userBranch = detectBranch(collegeAccount?.email) || (userRegNo ? detectBranch(userRegNo) : null);
+
+  return (
+    <CompanyDetailClient
+      company={detail}
+      userCampus={userCampus}
+      userBranch={userBranch}
+      userRegNo={userRegNo}
+    />
+  );
 }

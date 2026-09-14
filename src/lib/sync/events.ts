@@ -558,7 +558,7 @@ function determineMode(
   return 'unknown';
 }
 
-export type TravelRequirement = 'vellore' | 'chennai' | 'bhopal_lab' | 'online' | null;
+export type TravelRequirement = 'vellore' | 'chennai' | 'ap' | 'bhopal' | 'bhopal_lab' | 'online' | null;
 
 /**
  * Extracts campus travel requirement / Mode for VIT Bhopal students strictly from the main circular email.
@@ -584,7 +584,7 @@ export function extractTravelRequirement(text: string): TravelRequirement {
 
   if (isBhopalExemptOrDeferred) {
     if (/virtual|online/i.test(targetText)) return 'online';
-    if (/@\s*respective\s+campus\s+labs|in\s+campus\s+lab|conducted\s+on-campus/i.test(clean)) return 'bhopal_lab';
+    if (/@\s*respective\s+campus\s+labs|in\s+campus\s+lab|conducted\s+on-campus/i.test(clean)) return 'bhopal';
     return null;
   }
 
@@ -612,7 +612,17 @@ export function extractTravelRequirement(text: string): TravelRequirement {
     return 'chennai';
   }
 
-  // 5. Respective Campus Labs (All stages in campus labs / venues at Bhopal)
+  // 5. Explicit Travel to AP / Amaravati check
+  const apRegexes = [
+    /bhopal[\s\S]{0,80}?travel[\s\S]{0,40}?(?:ap|amaravati)/i,
+    /travel\s+to\s+(?:ap|amaravati)/i,
+    /(?:physical\s+process|physical\s+interview)[\s\S]{0,50}?(?:at|@)\s*(?:physical\s+)?(?:vit\s+)?(?:ap|amaravati)/i,
+  ];
+  if (apRegexes.some((r) => r.test(targetText) || r.test(clean))) {
+    return 'ap';
+  }
+
+  // 6. Respective Campus Labs (All stages in campus labs / venues at Bhopal)
   if (
     /@\s*respective\s+campus\s+(?:labs|venues|lab)/i.test(targetText) ||
     /in\s+campus\s+lab\s+only/i.test(targetText) ||
@@ -621,7 +631,7 @@ export function extractTravelRequirement(text: string): TravelRequirement {
     /campus\s*\/\s*offline/i.test(targetText) ||
     /conducted\s+on-campus/i.test(targetText)
   ) {
-    return 'bhopal_lab';
+    return 'bhopal';
   }
 
   // 6. Online / Virtual

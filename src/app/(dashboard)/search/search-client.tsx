@@ -152,7 +152,7 @@ export default function SearchClient({ data }: SearchClientProps) {
     results.companies.length + results.emails.length + results.events.length;
 
   return (
-    <div className="space-y-6 max-w-5xl mx-auto animate-fade-in selection:bg-indigo-500/20">
+    <div className="space-y-6 max-w-7xl mx-auto animate-fade-in selection:bg-indigo-500/20">
       {/* Header */}
       <div>
         <h1 className="text-2xl sm:text-3xl font-extrabold text-white tracking-tight flex items-center gap-2.5">
@@ -283,7 +283,7 @@ export default function SearchClient({ data }: SearchClientProps) {
               <div key={em.id} className="p-4 bg-[#101018]/90 border border-zinc-800/80 rounded-2xl">
                 <div className="flex items-center justify-between gap-2 mb-1">
                   <span className="text-xs font-semibold text-indigo-400 truncate">{em.sender}</span>
-                  <span className="text-[11px] text-zinc-500 font-mono">{timeAgo(em.receivedAt)}</span>
+                  <span suppressHydrationWarning className="text-[11px] text-zinc-500 font-mono">{timeAgo(em.receivedAt)}</span>
                 </div>
                 <h4 className="text-sm font-bold text-white">{em.subject}</h4>
                 <p className="text-xs text-zinc-400 mt-1 line-clamp-2 leading-relaxed">{em.snippet}</p>

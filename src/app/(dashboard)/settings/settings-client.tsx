@@ -8,6 +8,7 @@ import { toast } from 'sonner';
 import {
   Mail,
   Fingerprint,
+  Building2,
   AlertOctagon,
   RefreshCw,
   CheckCheck,
@@ -20,6 +21,7 @@ import {
   Wrench,
 } from 'lucide-react';
 import NotificationSettings from '@/components/notifications/notification-settings';
+import { cn } from '@/lib/utils';
 
 interface Account {
   id: string;
@@ -33,6 +35,9 @@ interface SettingsClientProps {
   accounts: Account[];
   neoId: string;
   userEmail: string;
+  autoCampus?: 'VIT Bhopal' | 'VIT Vellore' | 'VIT Chennai' | 'VIT AP';
+  detectedBranch?: string | null;
+  detectedRegNo?: string | null;
 }
 
 const Card = ({
@@ -42,6 +47,7 @@ const Card = ({
   children,
   danger,
   testid,
+  className,
 }: {
   icon: React.ComponentType<{ className?: string }>;
   title: string;
@@ -49,15 +55,18 @@ const Card = ({
   children: React.ReactNode;
   danger?: boolean;
   testid?: string;
+  className?: string;
 }) => (
   <motion.section
     data-testid={testid}
     initial={{ opacity: 0, y: 16 }}
     animate={{ opacity: 1, y: 0 }}
     transition={{ duration: 0.45 }}
-    className={`rounded-2xl border p-5 sm:p-6 ${
-      danger ? 'border-rose-500/25 bg-rose-500/[0.03]' : 'border-zinc-800 bg-[#101014]'
-    }`}
+    className={cn(
+      'rounded-2xl border p-5 sm:p-6',
+      danger ? 'border-rose-500/25 bg-rose-500/[0.03]' : 'border-zinc-800 bg-[#101014]',
+      className
+    )}
   >
     <div className="flex items-center gap-2.5">
       <Icon className={`h-4 w-4 ${danger ? 'text-rose-400' : 'text-emerald-400'}`} />
@@ -68,11 +77,36 @@ const Card = ({
   </motion.section>
 );
 
-export default function SettingsClient({ accounts, neoId: initialNeoId, userEmail }: SettingsClientProps) {
+export default function SettingsClient({
+  accounts,
+  neoId: initialNeoId,
+  userEmail,
+  autoCampus = 'VIT Bhopal',
+  detectedBranch,
+  detectedRegNo,
+}: SettingsClientProps) {
   const router = useRouter();
   const [regId, setRegId] = useState(initialNeoId);
   const [isSavingId, setIsSavingId] = useState(false);
   const [disconnecting, setDisconnecting] = useState<string | null>(null);
+
+  const [selectedCampus, setSelectedCampus] = useState<'VIT Bhopal' | 'VIT Vellore' | 'VIT Chennai' | 'VIT AP'>(() => {
+    if (typeof window !== 'undefined') {
+      const stored = localStorage.getItem('neotrack_home_campus');
+      if (stored && ['VIT Bhopal', 'VIT Vellore', 'VIT Chennai', 'VIT AP'].includes(stored)) {
+        return stored as 'VIT Bhopal' | 'VIT Vellore' | 'VIT Chennai' | 'VIT AP';
+      }
+    }
+    return autoCampus;
+  });
+
+  const handleSelectCampus = (c: 'VIT Bhopal' | 'VIT Vellore' | 'VIT Chennai' | 'VIT AP') => {
+    setSelectedCampus(c);
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('neotrack_home_campus', c);
+    }
+    toast.success(`Home campus updated to ${c}`);
+  };
 
   // Reprocess state with live progress
   const [reprocessing, setReprocessing] = useState(false);
@@ -286,7 +320,7 @@ export default function SettingsClient({ accounts, neoId: initialNeoId, userEmai
   };
 
   return (
-    <div data-testid="settings-page" className="mx-auto max-w-3xl space-y-6 w-full min-w-0">
+    <div data-testid="settings-page" className="mx-auto max-w-7xl space-y-6 w-full min-w-0">
       {/* Header */}
       <div>
         <h1 className="font-display text-xl sm:text-3xl font-extrabold tracking-tight text-white">
@@ -297,138 +331,224 @@ export default function SettingsClient({ accounts, neoId: initialNeoId, userEmai
         </p>
       </div>
 
-      {/* Card 1: Candidate Registration ID */}
-      <Card
-        icon={Fingerprint}
-        title="NeoPAT Candidate Registration ID"
-        desc="Your unique campus ID — the Excel scanner matches this in every shortlist attachment."
-        testid="regid-card"
-      >
-        <div className="flex flex-col sm:flex-row gap-2.5 sm:gap-3">
-          <input
-            data-testid="regid-input"
-            value={regId}
-            onChange={(e) => setRegId(e.target.value.toUpperCase())}
-            placeholder="e.g. 21BCE0492"
-            maxLength={12}
-            className="h-11 flex-1 rounded-lg border border-zinc-800 bg-zinc-900/60 px-4 font-mono text-sm tracking-widest text-zinc-100 placeholder:text-zinc-600 placeholder:font-sans placeholder:tracking-normal focus:border-emerald-500/40 focus:outline-none"
-          />
-          <button
-            data-testid="regid-save-btn"
-            onClick={handleSaveRegId}
-            disabled={isSavingId}
-            className="h-11 rounded-lg bg-emerald-500 px-5 text-sm font-bold text-zinc-950 transition-colors hover:bg-emerald-400 disabled:opacity-60 cursor-pointer w-full sm:w-auto text-center"
-          >
-            {isSavingId ? 'Saving…' : 'Save ID'}
-          </button>
-        </div>
-      </Card>
+      {/* Section: Candidate Profile & Campus Setup (2-Column Grid on Desktop) */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 sm:gap-6 items-stretch">
+        {/* Card 1: Candidate Registration ID */}
+        <Card
+          icon={Fingerprint}
+          title="NeoPAT Candidate Registration ID"
+          desc="Your unique campus ID — the Excel scanner matches this in every shortlist attachment."
+          testid="regid-card"
+          className="flex flex-col justify-between"
+        >
+          <div className="space-y-3">
+            <div className="flex flex-col sm:flex-row gap-2.5 sm:gap-3 w-full">
+              <input
+                data-testid="regid-input"
+                value={regId}
+                onChange={(e) => setRegId(e.target.value.toUpperCase())}
+                placeholder="e.g. 21BCE0492"
+                maxLength={12}
+                className="h-11 flex-1 rounded-lg border border-zinc-800 bg-zinc-900/60 px-4 font-mono text-sm tracking-widest text-zinc-100 placeholder:text-zinc-600 placeholder:font-sans placeholder:tracking-normal focus:border-emerald-500/40 focus:outline-none"
+              />
+              <button
+                data-testid="regid-save-btn"
+                onClick={handleSaveRegId}
+                disabled={isSavingId}
+                className="h-11 rounded-lg bg-emerald-500 px-5 text-sm font-bold text-zinc-950 transition-colors hover:bg-emerald-400 disabled:opacity-60 cursor-pointer w-full sm:w-auto text-center shrink-0"
+              >
+                {isSavingId ? 'Saving…' : 'Save ID'}
+              </button>
+            </div>
+            <p className="text-[11px] text-zinc-500 leading-relaxed">
+              Matched against roll number columns, candidate tables, and shortlist attachments.
+            </p>
+          </div>
+          <div className="mt-4 pt-3 border-t border-zinc-800/80 flex items-center justify-between text-[11px] text-zinc-400">
+            <span className="text-zinc-500">Shortlist Scanner:</span>
+            <span className="font-mono text-emerald-400 font-semibold flex items-center gap-1.5">
+              <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" /> Active & Monitoring
+            </span>
+          </div>
+        </Card>
 
-      {/* Card 2: Connected Gmail Accounts */}
+        {/* Card 2: Home Campus & Academic Profile */}
+        <Card
+          icon={Building2}
+          title="Home Campus & Academic Profile"
+          desc="Used to calculate whether campus placement drives require travel, and to verify branch eligibility."
+          testid="campus-card"
+          className="flex flex-col justify-between"
+        >
+          <div className="space-y-3.5">
+            <div>
+              <label className="text-xs font-semibold text-zinc-300 mb-2 block">Home Campus</label>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                {(['VIT Bhopal', 'VIT Vellore', 'VIT Chennai', 'VIT AP'] as const).map((c) => (
+                  <button
+                    key={c}
+                    type="button"
+                    onClick={() => handleSelectCampus(c)}
+                    className={`rounded-lg border px-3 py-2 text-xs font-semibold transition-all text-center cursor-pointer ${
+                      selectedCampus === c
+                        ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300 shadow-[0_0_12px_rgba(16,185,129,0.12)]'
+                        : 'border-zinc-800 bg-zinc-900/60 text-zinc-400 hover:border-zinc-700 hover:text-zinc-200'
+                    }`}
+                  >
+                    {c}
+                  </button>
+                ))}
+              </div>
+              <p className="mt-2 text-[11px] text-zinc-500">
+                {collegeAccount?.email ? `Auto-detected from ${collegeAccount.email}: ` : 'Active campus: '}
+                <span className="text-zinc-300 font-mono font-bold">{selectedCampus}</span>
+              </p>
+            </div>
+          </div>
+
+          {(detectedBranch || detectedRegNo) && (
+            <div className="mt-4 pt-3 border-t border-zinc-800/80 flex flex-wrap items-center gap-3 text-xs text-zinc-400">
+              {detectedBranch && (
+                <div className="flex items-center gap-1.5">
+                  <span className="text-zinc-500 text-[11px]">Branch:</span>
+                  <span className="font-mono text-zinc-200 font-semibold px-2 py-0.5 rounded bg-zinc-800 border border-zinc-700 text-[11px]">
+                    {detectedBranch}
+                  </span>
+                </div>
+              )}
+              {detectedBranch && detectedRegNo && <span className="text-zinc-600">·</span>}
+              {detectedRegNo && (
+                <div className="flex items-center gap-1.5">
+                  <span className="text-zinc-500 text-[11px]">Reg No:</span>
+                  <span className="font-mono text-zinc-200 font-semibold px-2 py-0.5 rounded bg-zinc-800 border border-zinc-700 text-[11px]">
+                    {detectedRegNo}
+                  </span>
+                </div>
+              )}
+            </div>
+          )}
+        </Card>
+      </div>
+
+      {/* Card 3: Connected Gmail Accounts (2-Column Grid on Desktop) */}
       <Card
         icon={Mail}
         title="Connected Gmail Accounts"
         desc="Both inboxes are read-only. Tokens are AES-256 encrypted and revocable anytime."
         testid="gmail-card"
       >
-        <div className="space-y-3">
-          {/* Personal Gmail Row */}
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 rounded-xl border border-zinc-800 bg-zinc-900/50 p-3.5 sm:px-4 sm:py-3.5">
-            <div className="flex items-start gap-3 min-w-0 flex-1">
-              <div className="flex h-9 w-9 sm:h-10 sm:w-10 shrink-0 items-center justify-center rounded-lg border border-emerald-500/25 bg-emerald-500/10">
-                <Mail className="h-4 w-4 text-emerald-400" />
+        <div className="space-y-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5 sm:gap-4">
+            {/* Personal Gmail Box */}
+            <div className="flex flex-col justify-between gap-4 rounded-xl border border-zinc-800 bg-zinc-900/40 p-4 sm:p-5">
+              <div className="flex items-start gap-3 min-w-0">
+                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-emerald-500/25 bg-emerald-500/10">
+                  <Mail className="h-5 w-5 text-emerald-400" />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="text-sm font-semibold text-zinc-100">Personal Gmail</span>
+                    {personalAccount ? (
+                      <span className="flex items-center gap-1 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider text-emerald-300">
+                        <CheckCheck className="h-2.5 w-2.5" /> Connected
+                      </span>
+                    ) : (
+                      <span className="rounded-full border border-zinc-700 bg-zinc-800 px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider text-zinc-400">
+                        Not Connected
+                      </span>
+                    )}
+                  </div>
+                  <div className="mt-1 truncate font-mono text-xs text-zinc-300">
+                    {personalAccount ? personalAccount.email : userEmail || 'your.personal@gmail.com'}
+                  </div>
+                  <p className="mt-1 text-[11px] text-zinc-500 leading-relaxed">
+                    Official registrations, application submissions, and offer letters.
+                  </p>
+                </div>
               </div>
-              <div className="min-w-0 flex-1">
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className="text-sm font-semibold text-zinc-100">Personal Gmail</span>
-                  {personalAccount ? (
-                    <span className="flex items-center gap-1 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider text-emerald-300">
-                      <CheckCheck className="h-2.5 w-2.5" /> Connected
-                    </span>
-                  ) : (
-                    <span className="rounded-full border border-zinc-700 bg-zinc-800 px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider text-zinc-400">
-                      Not Connected
-                    </span>
-                  )}
-                </div>
-                <div className="mt-0.5 truncate font-mono text-[11px] text-zinc-500">
-                  {personalAccount ? personalAccount.email : userEmail || 'your.personal@gmail.com'} · Official registrations & offer letters
-                </div>
+              <div className="pt-3 border-t border-zinc-800/80 flex items-center justify-between">
+                <span className="text-[11px] text-zinc-500">Master company records</span>
+                {personalAccount ? (
+                  <button
+                    data-testid="disconnect-personal-btn"
+                    onClick={() => handleDisconnect(personalAccount.id)}
+                    disabled={disconnecting === personalAccount.id}
+                    className="shrink-0 rounded-lg border border-zinc-800 px-3.5 py-1.5 text-xs font-semibold text-zinc-400 transition-colors hover:border-rose-500/40 hover:text-rose-300 cursor-pointer"
+                  >
+                    {disconnecting === personalAccount.id ? 'Disconnecting…' : 'Disconnect'}
+                  </button>
+                ) : (
+                  <a
+                    href="/api/auth/google?type=personal"
+                    className="flex items-center justify-center gap-1.5 shrink-0 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3.5 py-1.5 text-xs font-semibold text-emerald-300 hover:bg-emerald-500/20 transition-colors"
+                  >
+                    <Plus className="h-3.5 w-3.5" /> Connect
+                  </a>
+                )}
               </div>
             </div>
-            {personalAccount ? (
-              <button
-                data-testid="disconnect-personal-btn"
-                onClick={() => handleDisconnect(personalAccount.id)}
-                disabled={disconnecting === personalAccount.id}
-                className="shrink-0 rounded-lg border border-zinc-800 px-3.5 py-2 text-[11px] font-semibold text-zinc-500 transition-colors hover:border-rose-500/40 hover:text-rose-300 cursor-pointer w-full sm:w-auto text-center"
-              >
-                {disconnecting === personalAccount.id ? 'Disconnecting…' : 'Disconnect'}
-              </button>
-            ) : (
-              <a
-                href="/api/auth/google?type=personal"
-                className="flex items-center justify-center gap-1.5 shrink-0 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3.5 py-2 text-[11px] font-semibold text-emerald-300 hover:bg-emerald-500/20 transition-colors w-full sm:w-auto text-center"
-              >
-                <Plus className="h-3.5 w-3.5" /> Connect
-              </a>
-            )}
-          </div>
 
-          {/* College Gmail Row */}
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 rounded-xl border border-zinc-800 bg-zinc-900/50 p-3.5 sm:px-4 sm:py-3.5">
-            <div className="flex items-start gap-3 min-w-0 flex-1">
-              <div className="flex h-9 w-9 sm:h-10 sm:w-10 shrink-0 items-center justify-center rounded-lg border border-emerald-500/25 bg-emerald-500/10">
-                <Mail className="h-4 w-4 text-emerald-400" />
+            {/* College Gmail Box */}
+            <div className="flex flex-col justify-between gap-4 rounded-xl border border-zinc-800 bg-zinc-900/40 p-4 sm:p-5">
+              <div className="flex items-start gap-3 min-w-0">
+                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-emerald-500/25 bg-emerald-500/10">
+                  <Mail className="h-5 w-5 text-emerald-400" />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="text-sm font-semibold text-zinc-100">
+                      College Gmail ({selectedCampus})
+                    </span>
+                    {collegeAccount ? (
+                      <span className="flex items-center gap-1 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider text-emerald-300">
+                        <CheckCheck className="h-2.5 w-2.5" /> Connected
+                      </span>
+                    ) : (
+                      <span className="rounded-full border border-amber-500/30 bg-amber-500/10 px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider text-amber-300">
+                        Action Required
+                      </span>
+                    )}
+                  </div>
+                  <div className="mt-1 truncate font-mono text-xs text-zinc-300">
+                    {collegeAccount ? collegeAccount.email : 'student.23bce@vitbhopal.ac.in'}
+                  </div>
+                  <p className="mt-1 text-[11px] text-zinc-500 leading-relaxed">
+                    CDC circulars, eligibility sheets, test links & shortlist attachments.
+                  </p>
+                </div>
               </div>
-              <div className="min-w-0 flex-1">
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className="text-sm font-semibold text-zinc-100">
-                    College Gmail (VIT Bhopal)
-                  </span>
-                  {collegeAccount ? (
-                    <span className="flex items-center gap-1 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider text-emerald-300">
-                      <CheckCheck className="h-2.5 w-2.5" /> Connected
-                    </span>
-                  ) : (
-                    <span className="rounded-full border border-amber-500/30 bg-amber-500/10 px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider text-amber-300">
-                      Action Required
-                    </span>
-                  )}
-                </div>
-                <div className="mt-0.5 truncate font-mono text-[11px] text-zinc-500">
-                  {collegeAccount ? collegeAccount.email : 'student.23bce@vitbhopal.ac.in'} · CDC circulars, test links & shortlists
-                </div>
+              <div className="pt-3 border-t border-zinc-800/80 flex items-center justify-between">
+                <span className="text-[11px] text-zinc-500">Shortlist scanner sync</span>
+                {collegeAccount ? (
+                  <button
+                    data-testid="disconnect-college-btn"
+                    onClick={() => handleDisconnect(collegeAccount.id)}
+                    disabled={disconnecting === collegeAccount.id}
+                    className="shrink-0 rounded-lg border border-zinc-800 px-3.5 py-1.5 text-xs font-semibold text-zinc-400 transition-colors hover:border-rose-500/40 hover:text-rose-300 cursor-pointer"
+                  >
+                    {disconnecting === collegeAccount.id ? 'Disconnecting…' : 'Disconnect'}
+                  </button>
+                ) : (
+                  <a
+                    href="/api/auth/google?type=college"
+                    className="flex items-center justify-center gap-1.5 shrink-0 rounded-lg border border-emerald-500/40 bg-emerald-500 px-3.5 py-1.5 text-xs font-bold text-zinc-950 hover:bg-emerald-400 transition-colors"
+                  >
+                    <Plus className="h-3.5 w-3.5" /> Link College Gmail
+                  </a>
+                )}
               </div>
             </div>
-            {collegeAccount ? (
-              <button
-                data-testid="disconnect-college-btn"
-                onClick={() => handleDisconnect(collegeAccount.id)}
-                disabled={disconnecting === collegeAccount.id}
-                className="shrink-0 rounded-lg border border-zinc-800 px-3.5 py-2 text-[11px] font-semibold text-zinc-500 transition-colors hover:border-rose-500/40 hover:text-rose-300 cursor-pointer w-full sm:w-auto text-center"
-              >
-                {disconnecting === collegeAccount.id ? 'Disconnecting…' : 'Disconnect'}
-              </button>
-            ) : (
-              <a
-                href="/api/auth/google?type=college"
-                className="flex items-center justify-center gap-1.5 shrink-0 rounded-lg border border-emerald-500/40 bg-emerald-500 px-3.5 py-2 text-[11px] font-bold text-zinc-950 hover:bg-emerald-400 transition-colors w-full sm:w-auto text-center"
-              >
-                <Plus className="h-3.5 w-3.5" /> Link College Gmail
-              </a>
-            )}
           </div>
 
           {/* Sync Trigger Action */}
-          <div className="pt-2 flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-t border-zinc-800/80">
-            <div className="text-xs text-zinc-500">
+          <div className="pt-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-t border-zinc-800/80">
+            <div className="text-xs text-zinc-400">
               Fetch incoming emails from both Gmail inboxes. Live status shows in the top navigation bar.
             </div>
             <button
               type="button"
               onClick={handleTriggerSync}
-              className="flex items-center justify-center gap-2 rounded-lg border border-emerald-500/40 bg-emerald-500/10 px-4 py-2 text-xs font-semibold text-emerald-300 hover:bg-emerald-500/20 transition-all cursor-pointer shrink-0"
+              className="flex items-center justify-center gap-2 rounded-lg border border-emerald-500/40 bg-emerald-500/10 px-4 py-2 text-xs font-semibold text-emerald-300 hover:bg-emerald-500/20 transition-all cursor-pointer shrink-0 w-full sm:w-auto"
             >
               <Zap className="h-3.5 w-3.5 text-emerald-400" />
               <span>Sync Inboxes Now</span>
@@ -501,7 +621,7 @@ export default function SettingsClient({ accounts, neoId: initialNeoId, userEmai
         </div>
       </Card>
 
-      {/* Card 5: Danger Zone Overhaul */}
+      {/* Card 5: Danger Zone */}
       <Card
         icon={AlertOctagon}
         title="Danger Zone"
@@ -509,55 +629,59 @@ export default function SettingsClient({ accounts, neoId: initialNeoId, userEmai
         danger
         testid="danger-card"
       >
-        <div className="space-y-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {/* Action 1: Reset All Data */}
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-4 rounded-xl border border-amber-500/20 bg-amber-500/[0.04]">
-            <div className="space-y-0.5">
+          <div className="flex flex-col justify-between gap-4 p-4 sm:p-5 rounded-xl border border-amber-500/20 bg-amber-500/[0.04]">
+            <div className="space-y-1.5">
               <div className="flex items-center gap-2 text-amber-300 text-sm font-semibold">
-                <RotateCcw className="h-4 w-4 text-amber-400" />
-                <span>Reset Placement Data (Fresh Candidate Mode)</span>
+                <RotateCcw className="h-4 w-4 text-amber-400 shrink-0" />
+                <span>Reset Placement Data (Fresh Mode)</span>
               </div>
-              <p className="text-xs text-zinc-400">
+              <p className="text-xs text-zinc-400 leading-relaxed">
                 Wipes all stored companies, applications, emails, shortlists, and events. Keeps your Google login and Candidate ID so you can re-sync from scratch.
               </p>
             </div>
-            <button
-              type="button"
-              data-testid="reset-data-btn"
-              onClick={() => {
-                setResetConfirmText('');
-                setShowResetModal(true);
-              }}
-              className="flex items-center justify-center gap-2 shrink-0 rounded-lg border border-amber-500/40 bg-amber-500/10 px-4 py-2.5 text-xs font-semibold text-amber-300 transition-colors hover:bg-amber-500/20 cursor-pointer w-full sm:w-auto"
-            >
-              <RotateCcw className="h-3.5 w-3.5" />
-              <span>Reset All Data</span>
-            </button>
+            <div className="pt-3 border-t border-amber-500/15 flex justify-end">
+              <button
+                type="button"
+                data-testid="reset-data-btn"
+                onClick={() => {
+                  setResetConfirmText('');
+                  setShowResetModal(true);
+                }}
+                className="flex items-center justify-center gap-2 shrink-0 rounded-lg border border-amber-500/40 bg-amber-500/10 px-4 py-2 text-xs font-semibold text-amber-300 transition-colors hover:bg-amber-500/20 cursor-pointer w-full sm:w-auto"
+              >
+                <RotateCcw className="h-3.5 w-3.5" />
+                <span>Reset All Data</span>
+              </button>
+            </div>
           </div>
 
           {/* Action 2: Terminate Account Entirely */}
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-4 rounded-xl border border-rose-500/25 bg-rose-500/[0.04]">
-            <div className="space-y-0.5">
+          <div className="flex flex-col justify-between gap-4 p-4 sm:p-5 rounded-xl border border-rose-500/25 bg-rose-500/[0.04]">
+            <div className="space-y-1.5">
               <div className="flex items-center gap-2 text-rose-300 text-sm font-semibold">
-                <Trash2 className="h-4 w-4 text-rose-400" />
-                <span>Terminate & Delete Account Entirely</span>
+                <Trash2 className="h-4 w-4 text-rose-400 shrink-0" />
+                <span>Terminate & Delete Account</span>
               </div>
-              <p className="text-xs text-zinc-400">
+              <p className="text-xs text-zinc-400 leading-relaxed">
                 Permanently revokes Google OAuth tokens with Google, deletes your user profile and all database records from Supabase, and logs you out completely.
               </p>
             </div>
-            <button
-              type="button"
-              data-testid="terminate-account-btn"
-              onClick={() => {
-                setDeleteConfirmText('');
-                setShowDeleteModal(true);
-              }}
-              className="flex items-center justify-center gap-2 shrink-0 rounded-lg border border-rose-500/40 bg-rose-500/20 px-4 py-2.5 text-xs font-semibold text-rose-200 transition-colors hover:bg-rose-500/30 cursor-pointer w-full sm:w-auto"
-            >
-              <Trash2 className="h-3.5 w-3.5" />
-              <span>Terminate Account</span>
-            </button>
+            <div className="pt-3 border-t border-rose-500/15 flex justify-end">
+              <button
+                type="button"
+                data-testid="terminate-account-btn"
+                onClick={() => {
+                  setDeleteConfirmText('');
+                  setShowDeleteModal(true);
+                }}
+                className="flex items-center justify-center gap-2 shrink-0 rounded-lg border border-rose-500/40 bg-rose-500/20 px-4 py-2 text-xs font-semibold text-rose-200 transition-colors hover:bg-rose-500/30 cursor-pointer w-full sm:w-auto"
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+                <span>Terminate Account</span>
+              </button>
+            </div>
           </div>
         </div>
       </Card>

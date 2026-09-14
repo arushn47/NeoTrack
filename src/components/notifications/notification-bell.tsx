@@ -15,6 +15,7 @@ import {
   CheckCircle2,
 } from 'lucide-react';
 import { cn, timeAgo } from '@/lib/utils';
+import { usePushNotifications } from '@/hooks/use-push-notifications';
 
 export interface InAppNotification {
   id: string;
@@ -35,6 +36,14 @@ export default function NotificationBell() {
   const [unreadCount, setUnreadCount] = useState(0);
   const [loading, setLoading] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
+
+  const {
+    isSupported: isPushSupported,
+    permission: pushPermission,
+    isSubscribed: isPushSubscribed,
+    subscribeToPush,
+    loading: pushLoading,
+  } = usePushNotifications();
 
   // Fetch notifications from API
   const fetchNotifications = useCallback(async () => {
@@ -181,6 +190,31 @@ export default function NotificationBell() {
             )}
           </div>
 
+          {/* Live Push Notifications Enablement Banner */}
+          {isPushSupported && !isPushSubscribed && pushPermission !== 'denied' && (
+            <div className="mx-3 my-2.5 p-2.5 rounded-xl border border-emerald-500/30 bg-emerald-500/[0.08] flex items-center justify-between gap-2.5">
+              <div className="flex items-start gap-2 min-w-0">
+                <div className="p-1 rounded-md bg-emerald-500/20 text-emerald-400 shrink-0 mt-0.5">
+                  <Bell className="w-3.5 h-3.5" />
+                </div>
+                <div className="min-w-0">
+                  <p className="text-xs font-bold text-zinc-100 leading-tight">Live Shortlist Alerts</p>
+                  <p className="text-[10px] text-zinc-400 mt-0.5 leading-tight">Get instant push alerts on desktop when CDC releases test lists.</p>
+                </div>
+              </div>
+              <button
+                onClick={async (e) => {
+                  e.stopPropagation();
+                  await subscribeToPush();
+                }}
+                disabled={pushLoading}
+                className="shrink-0 px-2.5 py-1 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-zinc-950 font-bold text-[11px] transition-colors cursor-pointer disabled:opacity-50"
+              >
+                {pushLoading ? '...' : 'Enable'}
+              </button>
+            </div>
+          )}
+
           {/* List */}
           <div className="max-h-80 overflow-y-auto divide-y divide-white/5">
             {notifications.length === 0 ? (
@@ -238,7 +272,7 @@ export default function NotificationBell() {
 
                     <div className="flex items-center gap-1 text-[10px] text-zinc-500 pt-0.5">
                       <Clock className="w-3 h-3" />
-                      <span>{timeAgo(notif.created_at)}</span>
+                      <span suppressHydrationWarning>{timeAgo(notif.created_at)}</span>
                     </div>
                   </div>
                 </div>

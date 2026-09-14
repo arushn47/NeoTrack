@@ -68,24 +68,25 @@ export function formatStipend(stipendStr: string | null | undefined): string | n
 
 /**
  * Dynamically detect VIT campus from college email domain.
- * Supports VIT Bhopal, VIT Vellore, VIT Chennai, and VIT-AP.
+ * Strictly matches the 4 campus categories: 'VIT Bhopal', 'VIT Vellore', 'VIT Chennai', 'VIT AP'.
  */
-export function detectCampus(email?: string | null): string {
+export function detectCampus(email?: string | null): 'VIT Bhopal' | 'VIT Vellore' | 'VIT Chennai' | 'VIT AP' {
   if (!email) return 'VIT Bhopal';
   const lower = email.toLowerCase();
+  if (lower.includes('vitbhopal') || lower.includes('bhopal')) return 'VIT Bhopal';
+  if (lower.includes('vitap') || lower.includes('ap.vit') || lower.includes('vitapstudent')) return 'VIT AP';
   if (lower.includes('chennai')) return 'VIT Chennai';
-  if (lower.includes('vellore') || lower.includes('vitstudent.ac.in')) return 'VIT Vellore';
-  if (lower.includes('vitap') || lower.includes('ap.vit')) return 'VIT-AP';
+  if (lower.includes('vellore') || lower.includes('vitstudent.ac.in') || lower.includes('vit.ac.in')) return 'VIT Vellore';
   return 'VIT Bhopal';
 }
 
 /**
- * Extract engineering branch / specialization from VIT student email if available.
- * e.g., 'arush.23bce10472@vitbhopal.ac.in' -> 'CSE'
+ * Extract engineering branch / specialization from VIT student email or registration number.
+ * e.g., 'arush.23bce10472@vitbhopal.ac.in' or '23BCE10472' -> 'CSE'
  */
-export function detectBranch(email?: string | null): string | null {
-  if (!email) return null;
-  const match = email.toLowerCase().match(/\d{2}([a-z]{3})\d+/i);
+export function detectBranch(emailOrReg?: string | null): string | null {
+  if (!emailOrReg) return null;
+  const match = emailOrReg.toLowerCase().match(/\d{2}([a-z]{3})\d+/i);
   if (!match) return null;
   const code = match[1].toUpperCase();
   const branches: Record<string, string> = {
@@ -94,12 +95,25 @@ export function detectBranch(email?: string | null): string | null {
     BCG: 'CSE (Gaming)',
     BAI: 'CSE (AI & ML)',
     BDS: 'CSE (Data Science)',
+    BSA: 'Aerospace',
     BEC: 'ECE',
     BEE: 'EEE',
     BME: 'Mechanical',
     BBI: 'Biotech',
     BCL: 'Civil',
+    BCH: 'Chemical',
+    BIT: 'IT',
   };
   return branches[code] || code;
+}
+
+/**
+ * Extract VIT academic registration number from student email if formatted with reg no.
+ * e.g., 'arush.23bce10472@vitbhopal.ac.in' -> '23BCE10472'
+ */
+export function detectRegNo(email?: string | null): string | null {
+  if (!email) return null;
+  const match = email.toLowerCase().match(/\b(\d{2}[a-z]{3}\d{4,5})\b/i);
+  return match ? match[1].toUpperCase() : null;
 }
 

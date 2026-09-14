@@ -119,20 +119,83 @@ export default function DashboardClient({
   campus,
   branch,
 }: DashboardClientProps) {
-  // Top 4 active drives with urgent stages or high progression
+  // Top 4 active drives prioritizing the most actionable & high-stakes stages
   const spotlightDrives = useMemo(() => {
     const active = activeApplications.filter(
-      (a) => !['not_shortlisted', 'rejected', 'not_applied', 'withdrawn', 'declined'].includes(a.status)
+      (a) => !['not_shortlisted', 'rejected', 'not_applied', 'withdrawn', 'declined'].includes((a.status || '').toLowerCase())
     );
-    return active.slice(0, 4);
+
+    const getStageScore = (status: string) => {
+      const s = (status || '').toLowerCase();
+      // 1. Live rounds happening right now
+      if (s.includes('interview_ongoing')) return 100;
+      if (s.includes('test_ongoing')) return 95;
+      if (s.includes('ppt_ongoing')) return 90;
+
+      // 2. Upcoming scheduled tests or interviews
+      if (['interview_scheduled', 'interview'].includes(s)) return 80;
+      if (['test_scheduled', 'test'].includes(s)) return 75;
+      if (['shortlisted'].includes(s)) return 70;
+
+      // 3. Rounds just completed, awaiting results
+      if (['interview_completed'].includes(s)) return 60;
+      if (['test_completed'].includes(s)) return 55;
+      if (['ppt_scheduled', 'ppt', 'ppt_completed'].includes(s)) return 50;
+
+      // 4. Offers
+      if (['selected', 'offer', 'offer_received'].includes(s)) return 40;
+
+      // 5. Normal applied drives
+      return 10;
+    };
+
+    return [...active]
+      .sort((a, b) => {
+        const scoreA = getStageScore(a.status);
+        const scoreB = getStageScore(b.status);
+        if (scoreA !== scoreB) return scoreB - scoreA;
+        return new Date(b.lastUpdated || 0).getTime() - new Date(a.lastUpdated || 0).getTime();
+      })
+      .slice(0, 4);
   }, [activeApplications]);
 
+  const appliedCount = stats.total_applied ?? stats.applied;
   const funnelCards = [
-    { id: 'total', label: 'Total Drives', value: stats.total_companies, sub: 'synced from CDC circulars', accent: 'indigo' as const },
-    { id: 'active', label: 'Active Drives', value: stats.active_applications, sub: 'across both inboxes', accent: 'sky' as const },
-    { id: 'tests', label: 'Upcoming Tests', value: stats.upcoming_tests + stats.upcoming_interviews, sub: upcomingEvents.length > 0 ? `next ${formatEventTime(upcomingEvents[0].start_time)}` : 'all caught up', accent: 'amber' as const },
-    { id: 'shortlists', label: 'Shortlists', value: stats.shortlisted, sub: 'matched in Excel files', accent: 'violet' as const },
-    { id: 'offers', label: 'Offers Received', value: stats.selected, sub: stats.selected > 0 ? 'congratulations 🎉' : 'radar tracking', accent: 'emerald' as const },
+    {
+      id: 'total',
+      label: 'Applied Drives',
+      value: appliedCount,
+      sub: `out of ${stats.total_companies} campus circulars`,
+      accent: 'indigo' as const,
+    },
+    {
+      id: 'active',
+      label: 'Active Pipeline',
+      value: stats.active_applications,
+      sub: 'currently in contention',
+      accent: 'sky' as const,
+    },
+    {
+      id: 'tests',
+      label: 'Upcoming Rounds',
+      value: stats.upcoming_tests + stats.upcoming_interviews,
+      sub: upcomingEvents.length > 0 ? `next ${formatEventTime(upcomingEvents[0].start_time)}` : 'all caught up',
+      accent: 'amber' as const,
+    },
+    {
+      id: 'shortlists',
+      label: 'Shortlists Cracked',
+      value: stats.shortlisted,
+      sub: 'cleared for tests / interviews',
+      accent: 'violet' as const,
+    },
+    {
+      id: 'offers',
+      label: 'Offers Received',
+      value: stats.selected,
+      sub: stats.selected > 0 ? 'congratulations 🎉' : 'radar tracking',
+      accent: 'emerald' as const,
+    },
   ];
 
   return (
@@ -168,7 +231,7 @@ export default function DashboardClient({
           Placement Pipeline
         </h1>
         <p className="flex flex-wrap items-center gap-1.5 mt-1 text-xs sm:text-sm text-zinc-500">
-          <span>Season {new Date().getFullYear()}</span>
+          <span>2027 Placement Season</span>
           {neoId && (
             <>
               <span>·</span>
@@ -301,10 +364,10 @@ export default function DashboardClient({
             </h2>
           </div>
           <Link
-            href="/companies"
+            href="/companies?filter=active"
             className="flex items-center gap-1.5 text-xs font-bold text-emerald-400 hover:text-emerald-300 transition-colors"
           >
-            View all {stats.total_companies} drives <ArrowRight className="h-3.5 w-3.5" />
+            View all {stats.active_applications} active drives <ArrowRight className="h-3.5 w-3.5" />
           </Link>
         </div>
 
@@ -336,9 +399,14 @@ export default function DashboardClient({
                         </h3>
                         <StatusChip status={c.status} className="shrink-0" />
                       </div>
-                      <div className="mt-1 flex items-center gap-2 min-w-0">
-                        <span className="truncate text-[11px] sm:text-xs text-zinc-400">{c.role || 'Software Engineering'}</span>
-                        <CategoryBadge category={category} className="shrink-0" />
+                      <div className="mt-1 flex items-center gap-1.5 min-w-0 text-[11px] sm:text-xs text-zinc-400">
+                        <span className="truncate">{c.role || 'Software Engineering'}</span>
+                        {category && (
+                          <>
+                            <span className="text-zinc-600 shrink-0">·</span>
+                            <span className="shrink-0 text-zinc-500">{category}</span>
+                          </>
+                        )}
                       </div>
                     </div>
                   </div>
@@ -360,24 +428,6 @@ export default function DashboardClient({
             })}
           </div>
         )}
-
-        {/* Big CTA banner linking to the full Placement Drives directory */}
-        <div className="rounded-2xl border border-zinc-800 bg-gradient-to-r from-zinc-900/80 via-[#101014] to-zinc-900/80 p-4 sm:p-5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-          <div>
-            <h4 className="font-display text-sm sm:text-base font-bold text-zinc-100">
-              Browse All {stats.total_companies} Campus Placement Drives
-            </h4>
-            <p className="text-[11px] sm:text-xs text-zinc-400 mt-0.5">
-              Filter by Applied, Shortlisted, In Progress, Offers, or search by role and CTC in the Placement Drives directory.
-            </p>
-          </div>
-          <Link
-            href="/companies"
-            className="flex items-center justify-center gap-2 rounded-xl bg-emerald-500 px-4 sm:px-5 py-2 sm:py-2.5 text-xs font-bold text-zinc-950 hover:bg-emerald-400 transition-colors shrink-0 shadow-lg shadow-emerald-500/10 w-full sm:w-auto text-center"
-          >
-            <span>Open Placement Drives</span> <ArrowRight className="h-4 w-4" />
-          </Link>
-        </div>
       </div>
     </div>
   );
