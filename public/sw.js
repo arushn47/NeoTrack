@@ -1,4 +1,12 @@
-// NeoTrack Service Worker — Web Push Notification Handler
+// Where's My Offer Service Worker — Web Push Notification Handler
+
+self.addEventListener('install', function () {
+  self.skipWaiting();
+});
+
+self.addEventListener('activate', function (event) {
+  event.waitUntil(self.clients.claim());
+});
 
 self.addEventListener('push', function (event) {
   if (!event.data) {
@@ -8,15 +16,15 @@ self.addEventListener('push', function (event) {
 
   try {
     const payload = event.data.json();
-    const title = payload.title || 'NeoTrack Notification';
+    const title = payload.title || "Where's My Offer?";
     const options = {
       body: payload.body || '',
-      icon: payload.icon || '/icon.svg',
-      badge: payload.badge || '/icon.svg',
-      tag: payload.tag || 'neotrack-alert',
+      icon: payload.icon || '/icon-192.png',
+      badge: payload.badge || '/icon-192.png',
+      tag: payload.tag || 'wmo-alert',
       renotify: true,
       data: payload.data || { url: '/' },
-      vibrate: [100, 50, 100],
+      vibrate: [200, 100, 200],
     };
 
     event.waitUntil(self.registration.showNotification(title, options));
@@ -25,9 +33,10 @@ self.addEventListener('push', function (event) {
     // Fallback for plain text push data
     const text = event.data.text();
     event.waitUntil(
-      self.registration.showNotification('NeoTrack', {
+      self.registration.showNotification("Where's My Offer?", {
         body: text,
-        icon: '/icon.svg',
+        icon: '/icon-192.png',
+        badge: '/icon-192.png',
       })
     );
   }
@@ -63,3 +72,4 @@ self.addEventListener('notificationclick', function (event) {
       })
   );
 });
+

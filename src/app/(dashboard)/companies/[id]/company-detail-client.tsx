@@ -20,6 +20,7 @@ import {
 import { cn, timeAgo } from '@/lib/utils';
 import { CategoryBadge, STATUS_META } from '@/components/ui/status-chip';
 import { StageStepper, getStageIndex, getEffectiveStage } from '@/components/companies/stage-stepper';
+import { cleanLocationString } from '@/lib/sync/locations';
 
 export interface CompanyDetail {
   id: string;
@@ -72,8 +73,53 @@ export interface CompanyDetail {
     matchType: string;
     matchedValue: string | null;
     matchLocation?: string | null;
+    neoId?: string | null;
     createdAt: string;
   }[];
+}
+
+function parseCandidateMatchDetails(matchedValue: string | null, neoId?: string | null) {
+  if (!matchedValue) return null;
+
+  // XLSX match pattern: Matched in <filename> (<sheet>!<cell>) [<col>] [ - <venue>]
+  const xlsxRegex = /^Matched in (.+?)\s*\((.+?)!(.+?)\)(?:\s*\[(.+?)\])?(?:\s*-\s*(.+))?$/i;
+  const xlsxMatch = matchedValue.match(xlsxRegex);
+
+  if (xlsxMatch) {
+    const [, filename, sheet, cell, col, venue] = xlsxMatch;
+    return {
+      type: 'xlsx' as const,
+      filename: filename.trim(),
+      location: `${sheet}!${cell}`,
+      column: col ? (col.startsWith('Col ') ? col : `Col ${col}`) : 'ID Column',
+      venue: venue ? venue.trim() : null,
+      identifier: neoId ? `Neo ID: ${neoId}` : 'Neo ID Verified',
+    };
+  }
+
+  // Google Sheet pattern
+  const gsheetRegex = /^Matched in Google Sheet \((.+?)\):\s*(.+)$/i;
+  const gsheetMatch = matchedValue.match(gsheetRegex);
+  if (gsheetMatch) {
+    const [, sheet, rowText] = gsheetMatch;
+    return {
+      type: 'gsheet' as const,
+      filename: `Google Sheet (${sheet.trim()})`,
+      location: sheet.trim(),
+      column: 'Spreadsheet Row',
+      venue: null,
+      identifier: rowText.trim(),
+    };
+  }
+
+  return {
+    type: 'general' as const,
+    filename: 'Shortlist Roster',
+    location: 'Verified Record',
+    column: 'Direct Match',
+    venue: null,
+    identifier: matchedValue,
+  };
 }
 
 interface CompanyDetailClientProps {
@@ -90,12 +136,14 @@ const ALL_STATUSES = [
   { value: 'ppt_scheduled', label: 'PPT Scheduled' },
   { value: 'shortlisted', label: 'Shortlisted for Test' },
   { value: 'test_scheduled', label: 'Test Scheduled' },
+  { value: 'test_completed', label: 'Test Completed (Awaiting Results)' },
   { value: 'interview_scheduled', label: 'Interview Scheduled' },
-  { value: 'selected', label: 'Selected 🎉' },
-  { value: 'rejected', label: 'Rejected' },
+  { value: 'selected', label: 'Selected / Offer 🎉' },
+  { value: 'not_shortlisted', label: 'Not Shortlisted for Test (Screening)' },
+  { value: 'rejected_test', label: 'Eliminated in Test Round (Post-Test)' },
+  { value: 'rejected_interview', label: 'Interviewed · Not Selected (Post-Interview)' },
   { value: 'declined', label: 'Declined / Opted Out' },
   { value: 'withdrawn', label: 'Withdrawn' },
-  { value: 'not_shortlisted', label: 'Not Shortlisted' },
   { value: 'not_applied', label: 'Not Applied' },
 ];
 
@@ -195,34 +243,70 @@ export default function CompanyDetailClient({
 }: CompanyDetailClientProps) {
   const router = useRouter();
   const rawStatus = company.application?.status || 'applied';
+  const notesStr = company.application?.notes || '';
   const effective = useMemo(
-    () => getEffectiveStage(rawStatus, null, company.events),
-    [rawStatus, company.events]
+    () => getEffectiveStage(rawStatus, null, company.events, notesStr),
+    [rawStatus, company.events, notesStr]
   );
-  const [status, setStatus] = useState(
-    company.application?.manualOverride ? rawStatus : effective.effectiveStatus
-  );
+
+  const initialDropdownStatus = useMemo(() => {
+    if (rawStatus === 'rejected') {
+      if (/interviewed|interview/i.test(notesStr)) return 'rejected_interview';
+      if (/test|oa|assessment/i.test(notesStr)) return 'rejected_test';
+      return effective.effectiveStatus || 'not_shortlisted';
+    }
+    return company.application?.manualOverride ? rawStatus : effective.effectiveStatus;
+  }, [rawStatus, notesStr, company.application?.manualOverride, effective.effectiveStatus]);
+
+  const [status, setStatus] = useState(initialDropdownStatus);
   const [isUpdating, setIsUpdating] = useState(false);
   const [showStatusMenu, setShowStatusMenu] = useState(false);
   const [openAccordion, setOpenAccordion] = useState<number | null>(0);
   const [isDeleting, setIsDeleting] = useState(false);
 
-  const stage = getEffectiveStage(status, null, company.events).stageIndex;
-  const terminal = status === 'rejected' || status === 'not_shortlisted' || status === 'withdrawn' || status === 'declined';
+  const stage = getEffectiveStage(status, null, company.events, notesStr).stageIndex;
+  const terminal =
+    status === 'rejected' ||
+    status === 'rejected_test' ||
+    status === 'rejected_interview' ||
+    status === 'not_shortlisted' ||
+    status === 'withdrawn' ||
+    status === 'declined';
   const hue = useMemo(() => getHue(company.name), [company.name]);
   const initials = company.name.slice(0, 2).toUpperCase();
 
   const handleStatusChange = async (newStatus: string) => {
     setIsUpdating(true);
     setShowStatusMenu(false);
+
+    let patchStatus = newStatus;
+    let patchNotes: string | undefined = undefined;
+
+    if (newStatus === 'rejected_test') {
+      patchStatus = 'rejected';
+      patchNotes = 'Eliminated in Test Round';
+    } else if (newStatus === 'rejected_interview') {
+      patchStatus = 'rejected';
+      patchNotes = 'Interviewed · Not Selected';
+    } else if (newStatus === 'not_shortlisted') {
+      patchStatus = 'not_shortlisted';
+      patchNotes = 'Not Shortlisted for Test';
+    }
+
     try {
       const res = await fetch(`/api/companies/${company.id}/status`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ status: newStatus }),
+        body: JSON.stringify({ status: patchStatus, notes: patchNotes }),
       });
       if (res.ok) {
         setStatus(newStatus);
+        if (company.application) {
+          company.application.status = patchStatus;
+          company.application.notes = patchNotes || company.application.notes;
+          company.application.manualOverride = true;
+        }
+        router.refresh();
       }
     } catch (err) {
       console.error('Failed to update status:', err);
@@ -232,31 +316,32 @@ export default function CompanyDetailClient({
   };
 
   // Clean location
-  const rawLocation = company.application?.location;
-  let cleanedLoc = rawLocation ? rawLocation.replace(/<[^>]+>/g, ' ').replace(/^[*,\.\s>\-]+/, '').replace(/[*,\.\s>\-]+$/, '').trim() : null;
-  if (cleanedLoc) {
-    cleanedLoc = cleanedLoc.replace(/\s*(?:All\s+the|All\s+interested|Placement\s+Office|On\s+(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)|Students\s+with|Registered\s+students|Registration|Note|Eligibility|Skills|Service|Work\s+Mode|Joining|Economy|Round\s+Trip|Depending\s+on|Below\s+attachment|Job\s+Description|JD|You\s+can|Write\s+from|Forwarded|Queries|LC\s*\d|PRP|SJT|Anna|Lab|Hall|Venue|---).*$/i, '');
-    cleanedLoc = cleanedLoc.replace(/\b(?:internship|placement|drive|hiring|offer|job|role|any\s+honeywell\s+site)\b/gi, '');
-    cleanedLoc = cleanedLoc.replace(/^[\.\,\:\-\(\)\–—]+/, '').replace(/[\.\,\:\-\(\)\–—]+$/, '').trim();
-    if (cleanedLoc.length < 2 || /nonsense|queries|forwarded|applicable|round\s+\d+/i.test(cleanedLoc)) {
-      cleanedLoc = null;
-    }
-  }
-  const displayLocation = cleanedLoc || 'Pan-India';
+  const displayLocation = cleanLocationString(company.application?.location);
 
-  // Drive Mode & Travel: Standardized strictly to 5 options:
-  // 'Online', 'VIT Vellore', 'VIT Chennai', 'VIT AP', 'VIT Bhopal'
-  const notesStr = (company.application?.notes || '').toLowerCase();
+  // Drive Mode & Travel: Standardized to operational venues:
+  // 'Online', 'VIT Vellore', 'VIT Chennai', 'VIT AP', or home campus labs ('Vellore Labs', 'Bhopal Labs', etc.)
+  const notesLower = notesStr.toLowerCase();
+  const homeLabs =
+    userCampus === 'VIT Vellore'
+      ? 'Vellore Labs'
+      : userCampus === 'VIT Chennai'
+      ? 'Chennai Labs'
+      : userCampus === 'VIT AP'
+      ? 'AP Labs'
+      : 'Bhopal Labs';
+
   const driveModeDisplay =
-    notesStr.includes('vellore')
-      ? 'VIT Vellore'
-      : notesStr.includes('chennai')
-      ? 'VIT Chennai'
-      : notesStr.includes('ap') || notesStr.includes('amaravati')
-      ? 'VIT AP'
-      : notesStr.includes('online') || notesStr.includes('virtual')
+    notesLower.includes('online') || notesLower.includes('virtual')
       ? 'Online'
-      : 'VIT Bhopal';
+      : notesLower.includes('vellore')
+      ? (userCampus === 'VIT Vellore' ? 'Vellore Labs' : 'VIT Vellore')
+      : notesLower.includes('chennai')
+      ? (userCampus === 'VIT Chennai' ? 'Chennai Labs' : 'VIT Chennai')
+      : notesLower.includes('ap') || notesLower.includes('amaravati')
+      ? (userCampus === 'VIT AP' ? 'AP Labs' : 'VIT AP')
+      : notesLower.includes('bhopal')
+      ? (userCampus === 'VIT Bhopal' ? 'Bhopal Labs' : 'VIT Bhopal')
+      : homeLabs;
 
   // Role display
   const displayRole = (() => {
@@ -436,15 +521,37 @@ export default function CompanyDetailClient({
 
           <div data-testid="ctc-drive-mode" className="rounded-lg border border-zinc-800 bg-zinc-900/50 px-3.5 py-3">
             <div className="font-mono text-[9px] uppercase tracking-widest text-zinc-500">Drive Mode</div>
-            <div className="font-tabular mt-1 font-display text-lg font-bold text-zinc-200 truncate" title={driveModeDisplay}>
-              {driveModeDisplay}
-            </div>
+            {(() => {
+              const driveColor =
+                driveModeDisplay === 'Online'
+                  ? 'text-emerald-300'
+                  : driveModeDisplay.endsWith('Labs')
+                  ? 'text-indigo-300'
+                  : driveModeDisplay === 'VIT Vellore'
+                  ? 'text-amber-300'
+                  : driveModeDisplay === 'VIT Chennai'
+                  ? 'text-orange-300'
+                  : driveModeDisplay === 'VIT AP'
+                  ? 'text-purple-300'
+                  : 'text-cyan-300';
+              return (
+                <div className={cn("font-tabular mt-1 font-display text-lg font-bold truncate", driveColor)} title={driveModeDisplay}>
+                  {driveModeDisplay}
+                </div>
+              );
+            })()}
           </div>
 
           <div data-testid="ctc-location" className="rounded-lg border border-zinc-800 bg-zinc-900/50 px-3.5 py-3">
             <div className="font-mono text-[9px] uppercase tracking-widest text-zinc-500">Work Location</div>
-            <div className="font-tabular mt-1 font-display text-lg font-bold text-zinc-200 truncate" title={displayLocation}>
-              {displayLocation}
+            <div
+              className={cn(
+                "font-tabular mt-1 font-display text-lg font-bold truncate",
+                (!displayLocation || displayLocation === 'Not Specified') ? "text-zinc-500 font-medium text-base" : "text-zinc-200"
+              )}
+              title={displayLocation && displayLocation !== 'Not Specified' ? displayLocation : 'To be announced'}
+            >
+              {displayLocation && displayLocation !== 'Not Specified' ? displayLocation : 'TBA'}
             </div>
           </div>
         </div>
@@ -513,7 +620,7 @@ export default function CompanyDetailClient({
             {effective.statusSubtitle}
           </span>
         </div>
-        <StageStepper status={status} events={company.events} />
+        <StageStepper status={status} events={company.events} notes={notesStr} />
       </motion.div>
 
       {/* Circular & Email Timeline */}
@@ -557,7 +664,7 @@ export default function CompanyDetailClient({
 
               const isOpen = openAccordion === idx;
               const isPersonal = email.sender.includes('noreply.cdcinfo');
-              const matchedCandidate = company.candidateMatches.find((cm) => cm.emailId === email.id) || (isShortlist && company.candidateMatches.length > 0 ? company.candidateMatches[0] : null);
+              const matchedCandidate = company.candidateMatches.find((cm) => cm.emailId === email.id);
 
               return (
                 <div key={email.id} data-testid={`timeline-item-${idx}`} className="relative flex items-start gap-3 sm:gap-4 w-full min-w-0">
@@ -603,38 +710,49 @@ export default function CompanyDetailClient({
                               {getCleanEmailSummary(email.snippet, email.subject, email.classification, company.name)}
                             </p>
 
-                            {/* Candidate Match Evidence if found */}
-                            {matchedCandidate && isShortlist && (
-                              <div
-                                data-testid={`excel-evidence-${idx}`}
-                                className="mt-3 overflow-hidden rounded-lg border border-violet-500/25"
-                              >
-                                <div className="flex items-center justify-between border-b border-zinc-800 bg-violet-500/[0.07] px-3 py-2">
-                                  <span className="flex items-center gap-2 font-mono text-[10px] text-violet-300">
-                                    <FileSpreadsheet className="h-3 w-3" /> {email.attachmentName || `${company.name.replace(/\s+/g, '_')}_Shortlist.xlsx`}
-                                  </span>
-                                  <span className="font-mono text-[9px] text-zinc-500">
-                                    shortlist verified
-                                  </span>
-                                </div>
-                                <div className="overflow-x-auto">
-                                  <div className="min-w-[280px] grid grid-cols-4 gap-px bg-zinc-800/70 font-mono text-[10px]">
-                                    <div className="bg-[#0b0d11] px-2.5 sm:px-3 py-2 text-violet-300 truncate font-semibold">
-                                      {matchedCandidate.matchedValue || company.candidateRegId || 'Candidate ID'}
-                                    </div>
-                                    <div className="bg-[#0b0d11] px-2.5 sm:px-3 py-2 text-zinc-300 truncate">
-                                      {company.candidateName || 'Candidate Verified'}
-                                    </div>
-                                    <div className="bg-[#0b0d11] px-2.5 sm:px-3 py-2 text-zinc-400 truncate">
-                                      {matchedCandidate.matchLocation || 'row verified'}
-                                    </div>
-                                    <div className="bg-[#0b0d11] px-2.5 sm:px-3 py-2 font-bold text-emerald-300 whitespace-nowrap text-center">
-                                      MATCH ✓
+                            {/* Candidate Match Evidence ONLY if verified on THIS specific email */}
+                            {matchedCandidate && (() => {
+                              const matchInfo = parseCandidateMatchDetails(matchedCandidate.matchedValue, matchedCandidate.neoId || company.candidateRegId);
+                              if (!matchInfo) return null;
+
+                              return (
+                                <div
+                                  data-testid={`excel-evidence-${idx}`}
+                                  className="mt-3 overflow-hidden rounded-lg border border-violet-500/25 bg-[#0e0e14]"
+                                >
+                                  <div className="flex items-center justify-between border-b border-zinc-800 bg-violet-500/[0.07] px-3 py-2">
+                                    <span className="flex items-center gap-2 font-mono text-[10px] text-violet-300 font-medium truncate" title={matchInfo.filename}>
+                                      <FileSpreadsheet className="h-3.5 w-3.5 shrink-0 text-violet-400" />
+                                      <span className="truncate">{matchInfo.filename}</span>
+                                    </span>
+                                    <span className="font-mono text-[9px] font-semibold text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-2 py-0.5 rounded shrink-0">
+                                      shortlist verified
+                                    </span>
+                                  </div>
+                                  <div className="overflow-x-auto">
+                                    <div className="min-w-[300px] grid grid-cols-4 gap-px bg-zinc-800/70 font-mono text-[10px]">
+                                      <div className="bg-[#0b0d11] px-2.5 sm:px-3 py-2 text-violet-300 truncate font-semibold">
+                                        {matchInfo.identifier}
+                                      </div>
+                                      <div className="bg-[#0b0d11] px-2.5 sm:px-3 py-2 text-zinc-300 truncate">
+                                        {matchInfo.location}
+                                      </div>
+                                      <div className="bg-[#0b0d11] px-2.5 sm:px-3 py-2 text-zinc-400 truncate">
+                                        {matchInfo.column}
+                                      </div>
+                                      <div className="bg-[#0b0d11] px-2.5 sm:px-3 py-2 font-bold text-emerald-300 whitespace-nowrap text-center">
+                                        MATCH ✓
+                                      </div>
                                     </div>
                                   </div>
+                                  {matchInfo.venue && (
+                                    <div className="border-t border-zinc-800/60 bg-zinc-900/40 px-3 py-1.5 text-[10px] font-mono text-zinc-400">
+                                      Venue / Reporting: <span className="text-zinc-200">{matchInfo.venue}</span>
+                                    </div>
+                                  )}
                                 </div>
-                              </div>
-                            )}
+                              );
+                            })()}
 
                             {/* Action links row: Direct link to original Gmail thread */}
                             <div className="mt-3.5 flex flex-col xs:flex-row xs:items-center justify-between gap-2 pt-2.5 border-t border-zinc-800/60">

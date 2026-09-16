@@ -4,10 +4,15 @@ import { createAdminClient } from '@/lib/supabase/admin';
 import { parseDateTime, extractVenue } from '@/lib/sync/events';
 import { formatDateTime } from '@/lib/utils';
 import { pushEventToGoogleCalendar } from '@/lib/calendar/google-sync';
+import { GoogleGenAI } from '@google/genai';
+
+export const dynamic = 'force-dynamic';
+export const maxDuration = 60;
 
 /**
  * POST /api/chat
- * Natural Language Placement Assistant & Intelligent Command / Query Processor
+ * AI-Powered Placement Copilot & Command Processor
+ * Uses Gemini for deep contextual understanding with deterministic tool execution.
  */
 export async function POST(request: Request) {
   const session = await getSession();
@@ -29,760 +34,402 @@ export async function POST(request: Request) {
   const supabase = createAdminClient();
   const lowerMsg = message.toLowerCase().trim();
 
-  // Fetch all user companies, applications, and events for context
-  const [{ data: companies }, { data: applications }, { data: events }] = await Promise.all([
+  // 1. Fetch comprehensive user context: profile, companies, applications, and events
+  const [
+    { data: userData },
+    { data: companies },
+    { data: applications },
+    { data: events },
+  ] = await Promise.all([
+    supabase
+      .from('users')
+      .select('id, name, email, neo_id, campus')
+      .eq('id', session.userId)
+      .single(),
     supabase
       .from('companies')
       .select('id, name, aliases')
       .eq('user_id', session.userId),
-
     supabase
       .from('applications')
-      .select('id, company_id, status, role, ctc, stipend, location')
+      .select('id, company_id, status, role, ctc, stipend, location, manual_override, notes, applied_at')
       .eq('user_id', session.userId),
-
     supabase
       .from('events')
-      .select('id, company_id, event_type, title, start_time, end_time, venue, mode, gcal_event_id')
+      .select('id, company_id, event_type, title, start_time, end_time, venue, mode, gcal_event_id, manual_override')
       .eq('user_id', session.userId)
       .order('start_time', { ascending: true }),
   ]);
 
   const companyList = companies || [];
   const appMap = new Map((applications || []).map((a) => [a.company_id, a]));
-  const companyEventsMap = new Map<string, typeof events>();
-  (events || []).forEach((e) => {
-    const list = companyEventsMap.get(e.company_id) || [];
-    list.push(e);
-    companyEventsMap.set(e.company_id, list);
+  const companyNameMap = new Map(companyList.map((c) => [c.id, c.name]));
+  const now = new Date();
+
+  // Build pipeline items
+  const pipeline = companyList.map((c) => {
+    const app = appMap.get(c.id);
+    return {
+      id: c.id,
+      name: c.name,
+      status: app?.status || 'not_applied',
+      role: app?.role || 'Campus Placement Drive',
+      ctc: app?.ctc || 'TBA',
+      stipend: app?.stipend || null,
+      location: app?.location || 'Not Specified',
+      manual_override: app?.manual_override || false,
+    };
   });
 
-  const CHAT_STOPWORDS = new Set([
-    'as', 'in', 'at', 'to', 'on', 'for', 'of', 'and', 'or', 'a', 'an', 'the',
-    'is', 'are', 'was', 'were', 'be', 'been', 'being', 'have', 'has', 'had',
-    'do', 'does', 'did', 'mark', 'set', 'update', 'change', 'get', 'got',
-    'status', 'test', 'exam', 'assessment', 'interview', 'ppt', 'talk',
-    'drive', 'drives', 'placement', 'placements', 'campus', 'online', 'offline',
-    'shortlist', 'shortlisted', 'selected', 'rejected', 'declined', 'withdrawn',
-    'applied', 'offer', 'role', 'ctc', 'stipend', 'package', 'my', 'me', 'i',
-    'all', 'what', 'when', 'where', 'which', 'who', 'how', 'show', 'list', 'details',
-    'info', 'information', 'schedule', 'scheduled', 'time', 'date', 'venue', 'location'
-  ]);
+  // Upcoming vs past events
+  const allEvents = events || [];
+  const upcomingEvents = allEvents
+    .filter((e) => e.start_time && new Date(e.start_time) >= now)
+    .map((e) => ({
+      id: e.id,
+      companyId: e.company_id,
+      company: companyNameMap.get(e.company_id) || 'Unknown Company',
+      title: e.title || e.event_type,
+      type: e.event_type,
+      startTime: e.start_time,
+      endTime: e.end_time,
+      venue: e.venue || 'Campus / Online',
+      mode: e.mode || 'online',
+    }));
 
-  const ALLOWED_SHORT_ACRONYMS = new Set(['ey', 'gs', 'hp', 'ge', 'ti', 'ui', 'sap', 'pwc']);
+  const pastEvents = allEvents
+    .filter((e) => e.start_time && new Date(e.start_time) < now)
+    .slice(-15)
+    .map((e) => ({
+      id: e.id,
+      company: companyNameMap.get(e.company_id) || 'Unknown Company',
+      title: e.title || e.event_type,
+      type: e.event_type,
+      startTime: e.start_time,
+      venue: e.venue || 'Campus / Online',
+    }));
 
-  // 1. Detect explicit status update command with candidate company extraction
-  const explicitStatusCmd =
-    lowerMsg.match(/^(?:mark|set|update|change)\s+(?:the\s+status\s+of\s+)?(.+?)\s+(?:status\s+)?(?:to|as)\s+([a-z\s_-]+)$/i) ||
-    lowerMsg.match(/^(.+?)\s+(?:status\s+)?(?:to|as)\s+(shortlisted|selected|rejected|placed|declined|opted\s+out|withdrawn|applied|test_scheduled|interview_scheduled)$/i) ||
-    lowerMsg.match(/^(?:i\s+(?:got\s+)?(?:selected|placed|shortlisted|rejected)\s+(?:in|for|at))\s+(.+)$/i) ||
-    lowerMsg.match(/^(?:i\s+(?:opted\s+out|withdrew|declined)\s+(?:from|of))\s+(.+)$/i);
+  const studentName = userData?.name || session.name || 'Student';
 
-  let targetComp: (typeof companyList)[0] | null = null;
-  let explicitNotFoundName: string | null = null;
+  // ═══════════════════════════════════════════════════════════════════════════
+  // 2. PRIMARY ENGINE: Gemini via @google/genai
+  // ═══════════════════════════════════════════════════════════════════════════
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (apiKey) {
+    try {
+      const ai = new GoogleGenAI({ apiKey });
 
-  if (explicitStatusCmd) {
-    const candidateName = explicitStatusCmd[1].trim();
-    const candidateLower = candidateName.toLowerCase();
+      const contextData = {
+        student: {
+          name: studentName,
+          email: userData?.email || session.email,
+          neoId: userData?.neo_id || 'Not set',
+          homeCampus: userData?.campus || 'VIT Bhopal',
+        },
+        pipelineSummary: {
+          totalDrives: pipeline.length,
+          applied: pipeline.filter((p) => !['not_applied', 'declined', 'withdrawn'].includes(p.status)).length,
+          shortlistedForOA: pipeline.filter((p) => ['shortlisted', 'test_scheduled', 'test_completed', 'interview_scheduled', 'selected'].includes(p.status)).length,
+          interviews: pipeline.filter((p) => ['interview_scheduled', 'selected'].includes(p.status)).length,
+          offers: pipeline.filter((p) => ['selected', 'offer', 'offer_received'].includes(p.status)).length,
+        },
+        upcomingEvents,
+        recentPastEvents: pastEvents,
+        companies: pipeline,
+      };
 
-    // Look for exact name match first
-    targetComp = companyList.find((c) => c.name.toLowerCase() === candidateLower) || null;
+      const systemPrompt = `You are the Placement Assistant for "Where's My Offer?" — an expert, concise campus placement copilot for engineering students.
+Today's local date is ${now.toISOString().split('T')[0]}. The current time is ${now.toISOString()}.
+You have complete, live, real-time access to this student's placement pipeline, company drives, test dates, venues, CTCs, and events.
 
-    // Next check aliases exactly
-    if (!targetComp) {
-      targetComp = companyList.find(
-        (c) => c.aliases && c.aliases.some((a: string) => a.toLowerCase() === candidateLower)
-      ) || null;
-    }
+STUDENT PLACEMENT CONTEXT:
+${JSON.stringify(contextData)}
 
-    // Next check whole-word boundary match
-    if (!targetComp) {
-      targetComp = companyList.find(
-        (c) =>
-          new RegExp(`\\b${escapeRegex(candidateLower)}\\b`, 'i').test(c.name) ||
-          (c.aliases && c.aliases.some((a: string) => new RegExp(`\\b${escapeRegex(candidateLower)}\\b`, 'i').test(a)))
-      ) || null;
-    }
+INSTRUCTIONS & BEHAVIOR:
+1. Always be direct, crisp, and helpful. Use clean Markdown (bullet points, bold company names, emojis where fitting).
+2. Distinguish clearly between recruitment event types:
+   - "PPT": Pre-Placement Talks (informative talks held before tests)
+   - "Test / OA / Assessment": Coding tests, hackathons, aptitude exams
+   - "Interview": Technical, managerial, or HR interview rounds
+   - "Offer / Shortlist": Results and selection
+3. When the student asks about events (e.g. "upcoming ppts?", "what are my upcoming tests?", "when is my next interview?"):
+   - Inspect the 'upcomingEvents' list carefully by 'type' ('ppt', 'online_test', 'coding_test', 'technical_interview', etc.).
+   - If upcoming events exist, list them clearly with company name, title, date/time formatted nicely, and venue (Online / Campus / Labs).
+   - If NO upcoming events exist for that category, state that clearly and mention recent past events if relevant (e.g. "No upcoming PPTs scheduled. Your last PPT was ExxonMobil on Sept 17").
+4. When the student gives a command to update status (e.g. "I gave Infosys test yesterday, didn't make interview shortlist", "mark Cognizant as applied", "rejected in interview for Amazon", "got offer from TCS", "opted out of Wipro"):
+   - Identify the target company from 'companies'.
+   - Decide the correct normalized status:
+     - 'applied'
+     - 'ppt_scheduled'
+     - 'shortlisted' (shortlisted for OA test)
+     - 'test_scheduled'
+     - 'test_completed' (wrote test, waiting for results)
+     - 'interview_scheduled'
+     - 'selected' (offer won 🎉)
+     - 'not_shortlisted' (screened out before test)
+     - 'rejected' (eliminated in test or interview)
+     - 'declined' (opted out by choice)
+     - 'withdrawn'
+   - Include the "action" block in your JSON output.
+5. When the student asks to schedule or add an event (e.g. "Add Accenture interview tomorrow at 3pm at TT Lab 3"):
+   - Include the "action" block of type "add_event" or "update_event" with start_time in ISO format.
+6. When the student asks to sync with Google Calendar (e.g. "sync google calendar", "push events to calendar"):
+   - Include the "action" block of type "sync_gcal".
 
-    if (!targetComp) {
-      explicitNotFoundName = candidateName;
-    }
+OUTPUT SCHEMA:
+Return ONLY valid JSON with this exact structure:
+{
+  "reply": "Your markdown response to the student",
+  "action": null | {
+    "type": "update_status" | "add_event" | "update_event" | "sync_gcal",
+    "company_name"?: string,
+    "status"?: string,
+    "event_type"?: string,
+    "title"?: string,
+    "start_time"?: string,
+    "venue"?: string,
+    "mode"?: "online" | "offline",
+    "notes"?: string
   }
+}`;
 
-  // 2. If not an explicit command or company not yet found, perform general matching
-  if (!targetComp && !explicitNotFoundName) {
-    const sorted = [...companyList].sort((a, b) => b.name.length - a.name.length);
-    for (const comp of sorted) {
-      const cName = comp.name.toLowerCase().trim();
-      if (cName.length >= 2 && !CHAT_STOPWORDS.has(cName)) {
-        if (new RegExp(`\\b${escapeRegex(cName)}\\b`, 'i').test(lowerMsg)) {
-          targetComp = comp;
-          break;
-        }
-      }
-      if (comp.aliases) {
-        let matched = false;
-        for (const alias of comp.aliases) {
-          const aName = alias.toLowerCase().trim();
-          if (CHAT_STOPWORDS.has(aName)) continue;
-          if (aName.length < 3 && !ALLOWED_SHORT_ACRONYMS.has(aName)) continue;
-          if (new RegExp(`\\b${escapeRegex(aName)}\\b`, 'i').test(lowerMsg)) {
-            targetComp = comp;
-            matched = true;
+      // Call Gemini (try gemini-flash-lite-latest, fallback to gemini-flash-latest)
+      const modelCandidates = ['gemini-flash-lite-latest', 'gemini-flash-latest', 'gemini-2.5-flash'];
+      let rawText = '';
+
+      for (const modelName of modelCandidates) {
+        try {
+          const res = await ai.models.generateContent({
+            model: modelName,
+            contents: message,
+            config: {
+              systemInstruction: systemPrompt,
+              responseMimeType: 'application/json',
+              temperature: 0.15,
+            },
+          });
+          if (res.text) {
+            rawText = res.text;
             break;
           }
+        } catch (modelErr: any) {
+          console.warn(`[chat/route] ${modelName} call error:`, modelErr?.message || modelErr);
         }
-        if (matched) break;
       }
-    }
 
-    // Fallback for short corporate keywords
-    if (!targetComp) {
-      if (/\b(?:ey\s*gds|ey|ernst)\b/i.test(lowerMsg)) {
-        targetComp = companyList.find((c) => /ey\s*gds/i.test(c.name)) || companyList.find((c) => /ey/i.test(c.name)) || null;
-      } else if (/\b(?:lseg|london\s*stock)\b/i.test(lowerMsg)) {
-        targetComp = companyList.find((c) => /london|lseg/i.test(c.name)) || null;
-      }
-    }
-  }
+      if (rawText) {
+        try {
+          const parsed = JSON.parse(rawText);
+          let executedAction: string | undefined = undefined;
+          let affectedCompanyId: string | undefined = undefined;
+          let affectedStatus: string | undefined = undefined;
 
-  // If user explicitly gave a command like "Mark [Company] as shortlisted" but that company isn't in their drives:
-  if (explicitNotFoundName && !targetComp) {
-    return NextResponse.json({
-      reply: `❓ I couldn't find "**${explicitNotFoundName}**" in your registered placement drives. Please verify the company name or check your Companies tab.`,
-      action: 'company_not_found',
-    });
-  }
+          // Execute action if Gemini identified one
+          if (parsed.action) {
+            const action = parsed.action;
 
-  // Determine fallback date from targetComp existing events if user only specifies time (e.g. "at 8.30 am")
-  let compFallbackDate: Date | null = null;
-  if (targetComp) {
-    const compEvts = (events || []).filter((e) => e.company_id === targetComp.id);
-    const isPpt = /ppt|pre[\s-]*placement/i.test(lowerMsg);
-    const isTest = /test|exam|assessment|code|coding/i.test(lowerMsg);
-    const isInterview = /interview|tech|hr/i.test(lowerMsg);
-    const existingPpt = compEvts.find((e) => e.event_type === 'ppt');
-    const existingTest = compEvts.find((e) => ['online_test', 'coding_test'].includes(e.event_type));
-    const existingInterview = compEvts.find((e) => ['technical_interview', 'hr_interview', 'interview'].includes(e.event_type));
-    const upcoming = compEvts.find((e) => e.start_time && new Date(e.start_time) >= new Date());
+            if (action.type === 'update_status' && action.company_name && action.status) {
+              const targetComp = companyList.find(
+                (c) =>
+                  c.name.toLowerCase() === action.company_name.toLowerCase() ||
+                  c.name.toLowerCase().includes(action.company_name.toLowerCase()) ||
+                  (c.aliases && c.aliases.some((a: string) => a.toLowerCase().includes(action.company_name.toLowerCase())))
+              );
 
-    if (isPpt && existingTest?.start_time) {
-      compFallbackDate = new Date(existingTest.start_time);
-    } else if (isPpt && existingPpt?.start_time) {
-      compFallbackDate = new Date(existingPpt.start_time);
-    } else if (isTest && existingTest?.start_time) {
-      compFallbackDate = new Date(existingTest.start_time);
-    } else if (isInterview && existingInterview?.start_time) {
-      compFallbackDate = new Date(existingInterview.start_time);
-    } else if (upcoming?.start_time) {
-      compFallbackDate = new Date(upcoming.start_time);
-    } else if (compEvts.length > 0 && compEvts[0].start_time) {
-      compFallbackDate = new Date(compEvts[0].start_time);
-    }
-  }
+              if (targetComp) {
+                let normStatus = action.status;
+                let normNotes = action.notes;
+                if (action.status === 'rejected_test' || action.status === 'test_eliminated') {
+                  normStatus = 'rejected';
+                  normNotes = normNotes || 'Eliminated in Test Round';
+                } else if (action.status === 'rejected_interview' || action.status === 'interview_eliminated') {
+                  normStatus = 'rejected';
+                  normNotes = normNotes || 'Interviewed · Not Selected';
+                } else if (action.status === 'not_shortlisted') {
+                  normStatus = 'not_shortlisted';
+                  normNotes = normNotes || 'Not Shortlisted for Test';
+                }
 
-  const parsedDate = parseDateTime(message, compFallbackDate);
-
-  // ═══════════════════════════════════════════════════════════════════════════
-  // 1. COMMAND: Update Event Location / Venue / Mode
-  // ═══════════════════════════════════════════════════════════════════════════
-  // Triggered when user asks to update venue or mode (e.g. "change the location of the infosys test to physically at the lab")
-  const isVenueUpdateQuery =
-    /location|venue|place|mode|offline|online|physical|in[\s-]person|at\s+the\s+lab|in\s+lab/i.test(lowerMsg) &&
-    (/change|update|set|move|make|switch/i.test(lowerMsg) || /to\s+(?:physically|offline|online|lab|prp|sjt|campus|auditorium)/i.test(lowerMsg));
-
-  if (targetComp && isVenueUpdateQuery) {
-    let targetVenue = extractVenue(message);
-    if (!targetVenue || targetVenue === 'Campus / Offline') {
-      if (/physically\s+at\s+the\s+lab|in\s+the\s+lab|at\s+lab|physical\s+lab|in\s+labs|at\s+the\s+lab/i.test(lowerMsg)) {
-        targetVenue = 'Respective Labs (Offline)';
-      } else if (/offline|physical|in[\s-]person/i.test(lowerMsg)) {
-        targetVenue = 'Campus / Offline';
-      } else if (/online|virtual|own\s+location/i.test(lowerMsg)) {
-        targetVenue = 'Own Location / Online';
-      }
-    }
-
-    if (targetVenue) {
-      const isOwnLoc = /own\s*location/i.test(targetVenue) || /own\s*location/i.test(lowerMsg);
-      const isOffline =
-        !isOwnLoc &&
-        (/offline|lab|campus|prp|sjt|hall|room|auditorium|physical/i.test(targetVenue) ||
-          /offline|physical|in[\s-]person/i.test(lowerMsg));
-      const mode = isOffline ? 'offline' : 'online';
-
-      // Find existing events for this company
-      const compEvents = (events || []).filter((e) => e.company_id === targetComp.id);
-
-      if (compEvents.length > 0) {
-        const primaryEvent = compEvents[0];
-        await supabase
-          .from('events')
-          .update({
-            venue: targetVenue,
-            mode,
-            manual_override: true,
-            updated_at: new Date().toISOString(),
-          })
-          .eq('id', primaryEvent.id);
-
-        // Deduplicate any extra duplicate events for this company
-        if (compEvents.length > 1) {
-          const duplicateIds = compEvents.slice(1).map((e) => e.id);
-          await supabase.from('events').delete().in('id', duplicateIds);
-        }
-
-        // Push update to Google Calendar in background (update in-place if we have a stored ID)
-        if (primaryEvent.start_time) {
-          pushEventToGoogleCalendar({
-            userId: session.userId,
-            title: primaryEvent.title || `${targetComp.name} - Online Assessment`,
-            startTime: primaryEvent.start_time,
-            endTime: primaryEvent.end_time,
-            venue: targetVenue,
-            mode,
-            gcalEventId: primaryEvent.gcal_event_id ?? null,
-          })
-            .then(async (gcalId) => {
-              if (gcalId && gcalId !== primaryEvent.gcal_event_id) {
-                await supabase
-                  .from('events')
-                  .update({ gcal_event_id: gcalId })
-                  .eq('id', primaryEvent.id);
+                await supabase.from('applications').upsert(
+                  {
+                    user_id: session.userId,
+                    company_id: targetComp.id,
+                    status: normStatus,
+                    status_source: 'ai_assistant_chat',
+                    status_confidence: 'manual',
+                    manual_override: true,
+                    notes: normNotes || undefined,
+                    last_updated: new Date().toISOString(),
+                  },
+                  { onConflict: 'user_id,company_id' }
+                );
+                executedAction = 'status_updated';
+                affectedCompanyId = targetComp.id;
+                affectedStatus = normStatus;
               }
-            })
-            .catch((err) => console.error('Google Calendar auto-sync:', err));
-        }
+            } else if ((action.type === 'add_event' || action.type === 'update_event') && action.company_name) {
+              const targetComp = companyList.find(
+                (c) =>
+                  c.name.toLowerCase() === action.company_name.toLowerCase() ||
+                  c.name.toLowerCase().includes(action.company_name.toLowerCase())
+              );
 
-        return NextResponse.json({
-          reply: `📍 Updated **${targetComp.name}** test location to **${targetVenue}** (${mode.toUpperCase()}) on your Placement Calendar & Google Calendar!`,
-          action: 'event_updated',
-          companyId: targetComp.id,
-        });
-      } else {
-        const eventDate = parsedDate || new Date(Date.now() + 24 * 60 * 60 * 1000);
-        const { data: insertedEvt } = await supabase.from('events').insert({
-          user_id: session.userId,
-          company_id: targetComp.id,
-          event_type: 'online_test',
-          title: `${targetComp.name} - Online Assessment`,
-          start_time: eventDate.toISOString(),
-          end_time: new Date(eventDate.getTime() + 3600000).toISOString(),
-          venue: targetVenue,
-          mode,
-          confidence: 'high',
-          manual_override: true,
-        }).select().single();
+              if (targetComp && action.start_time) {
+                const eventType = action.event_type || 'online_test';
+                const venue = action.venue || 'Campus / Online';
+                const mode = action.mode || (/offline|lab|campus|hall/i.test(venue) ? 'offline' : 'online');
+                const title = action.title || `${targetComp.name} - ${eventType.replace(/_/g, ' ').toUpperCase()}`;
+                const startTime = new Date(action.start_time).toISOString();
+                const endTime = new Date(new Date(startTime).getTime() + 3600000).toISOString();
 
-        if (insertedEvt) {
-          pushEventToGoogleCalendar({
-            userId: session.userId,
-            title: `${targetComp.name} - Online Assessment`,
-            startTime: eventDate.toISOString(),
-            endTime: new Date(eventDate.getTime() + 3600000).toISOString(),
-            venue: targetVenue,
-            mode,
-          })
-            .then(async (gcalId) => {
-              if (gcalId) {
-                await supabase
-                  .from('events')
-                  .update({ gcal_event_id: gcalId })
-                  .eq('id', insertedEvt.id);
+                const { data: insertedEvt } = await supabase.from('events').insert({
+                  user_id: session.userId,
+                  company_id: targetComp.id,
+                  event_type: eventType,
+                  title,
+                  start_time: startTime,
+                  end_time: endTime,
+                  venue,
+                  mode,
+                  confidence: 'high',
+                  manual_override: true,
+                }).select().single();
+
+                if (insertedEvt) {
+                  pushEventToGoogleCalendar({
+                    userId: session.userId,
+                    title,
+                    startTime,
+                    endTime,
+                    venue,
+                    mode,
+                  }).catch((gErr) => console.warn('[chat/route] GCal sync error:', gErr));
+                }
+
+                executedAction = 'event_added';
+                affectedCompanyId = targetComp.id;
               }
-            })
-            .catch((err) => console.error('Google Calendar auto-sync:', err));
+            } else if (action.type === 'sync_gcal') {
+              executedAction = 'gcal_synced';
+              for (const evt of upcomingEvents) {
+                pushEventToGoogleCalendar({
+                  userId: session.userId,
+                  title: evt.title,
+                  startTime: evt.startTime!,
+                  endTime: evt.endTime,
+                  venue: evt.venue,
+                  mode: evt.mode,
+                }).catch((gErr) => console.warn('[chat/route] GCal sync error:', gErr));
+              }
+            }
+          }
+
+          return NextResponse.json({
+            reply: parsed.reply,
+            action: executedAction,
+            companyId: affectedCompanyId,
+            status: affectedStatus,
+          });
+        } catch (parseErr) {
+          console.warn('[chat/route] Failed to parse Gemini response as JSON:', rawText);
         }
-
-        return NextResponse.json({
-          reply: `📍 Set **${targetComp.name}** test location to **${targetVenue}** (${mode.toUpperCase()}) on your Placement Calendar & Google Calendar!`,
-          action: 'event_created',
-          companyId: targetComp.id,
-        });
       }
+    } catch (aiErr: any) {
+      console.error('[chat/route] Gemini processing failed, using fallback:', aiErr?.message || aiErr);
     }
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
-  // 2. COMMAND: Update CTC / Stipend / Role / Job Location
+  // 3. DETERMINISTIC FALLBACK (If AI Key is missing or rate limited)
   // ═══════════════════════════════════════════════════════════════════════════
-  const isMetadataUpdate =
-    /set|update|change|add/i.test(lowerMsg) &&
-    /ctc|salary|stipend|package|role|job\s+location/i.test(lowerMsg);
 
-  if (targetComp && isMetadataUpdate) {
-    const appUpdates: Record<string, unknown> = {
-      manual_override: true,
-      last_updated: new Date().toISOString(),
-      status_source: 'ai_assistant_chat',
-    };
-
-    let replyMsg = '';
-
-    const ctcMatch = message.match(/(?:ctc|salary|package)\s*(?:to|is|=)?\s*(?:rs\.?|inr|₹)?\s*(\d+(?:\.\d+)?)\s*(?:lpa|lakhs?|lac)?/i);
-    if (ctcMatch) {
-      const ctcVal = `${ctcMatch[1]} LPA`;
-      appUpdates.ctc = ctcVal;
-      replyMsg += `• **CTC**: ${ctcVal}\n`;
-    }
-
-    const stipendMatch = message.match(/(?:stipend)\s*(?:to|is|=)?\s*(?:rs\.?|inr|₹)?\s*([\d,]+)/i);
-    if (stipendMatch) {
-      const num = parseInt(stipendMatch[1].replace(/,/g, ''), 10);
-      if (num > 0) {
-        const stipendVal = `₹${num.toLocaleString('en-IN')}/month`;
-        appUpdates.stipend = stipendVal;
-        replyMsg += `• **Stipend**: ${stipendVal}\n`;
-      }
-    }
-
-    const roleMatch = message.match(/(?:role|designation|profile|position)\s*(?:to|is|=)\s*([A-Za-z0-9\s\/\-\+]+)/i);
-    if (roleMatch && !/ctc|salary|stipend|location/i.test(roleMatch[1])) {
-      const roleVal = roleMatch[1].trim();
-      appUpdates.role = roleVal;
-      replyMsg += `• **Role**: ${roleVal}\n`;
-    }
-
-    if (Object.keys(appUpdates).length > 3) {
-      await supabase
-        .from('applications')
-        .upsert(
-          {
-            user_id: session.userId,
-            company_id: targetComp.id,
-            ...appUpdates,
-          },
-          { onConflict: 'user_id,company_id' }
-        );
-
-      return NextResponse.json({
-        reply: `✅ Updated **${targetComp.name}** details:\n${replyMsg}`,
-        action: 'metadata_updated',
-        companyId: targetComp.id,
-      });
-    }
-  }
-
-  // ═══════════════════════════════════════════════════════════════════════════
-  // 3. COMMAND: Add / Schedule Placement Event on Calendar (With Date)
-  // ═══════════════════════════════════════════════════════════════════════════
-  if (
-    targetComp &&
-    parsedDate &&
-    (/add|schedule|create|set|mark|book|reschedule|move/i.test(lowerMsg) ||
-      /test|ppt|interview|talk|assessment|round/i.test(lowerMsg))
-  ) {
-    let eventType = 'online_test';
-    let eventLabel = 'Online Assessment';
-    let appStatus = 'test_scheduled';
-
-    if (/ppt|pre[\s-]*placement/i.test(lowerMsg)) {
-      eventType = 'ppt';
-      eventLabel = 'Pre-Placement Talk (PPT)';
-      appStatus = 'ppt_scheduled';
-    } else if (/interview|hr|technical/i.test(lowerMsg)) {
-      eventType = 'technical_interview';
-      eventLabel = 'Technical Interview';
-      appStatus = 'interview_scheduled';
-    }
-
-    const compEvents = (events || []).filter((e) => e.company_id === targetComp.id);
-    const existingEvt = compEvents.find((e) => e.event_type === eventType);
-
-    const extractedVenue = extractVenue(message);
-    const venue = extractedVenue || existingEvt?.venue || 'Campus / Offline';
-    const isOwnLoc = /own\s*location/i.test(venue) || /own\s*location/i.test(lowerMsg);
-    const isOffline =
-      !isOwnLoc &&
-      (/offline|lab|campus|prp|sjt|hall|room|auditorium|audi|ab\s*\d+|physical/i.test(venue) ||
-        /offline|physical|in[\s-]person/i.test(lowerMsg));
-    const mode = isOffline ? 'offline' : 'online';
-
-    let eventRecord;
-    let isReschedule = false;
-
-    if (existingEvt) {
-      isReschedule = true;
-      const { data: updated } = await supabase
-        .from('events')
-        .update({
-          title: `${targetComp.name} - ${eventLabel}`,
-          start_time: parsedDate.toISOString(),
-          end_time: new Date(parsedDate.getTime() + 3600000).toISOString(),
-          venue,
-          mode,
-          manual_override: true,
-          updated_at: new Date().toISOString(),
-        })
-        .eq('id', existingEvt.id)
-        .select()
-        .single();
-
-      eventRecord = updated;
-
-      // Remove duplicate events of the SAME event_type for this company if any exist
-      const duplicateIds = compEvents.filter((e) => e.id !== existingEvt.id && e.event_type === eventType).map((e) => e.id);
-      if (duplicateIds.length > 0) {
-        await supabase.from('events').delete().in('id', duplicateIds);
-      }
-    } else {
-      const { data: insertedEvent } = await supabase
-        .from('events')
-        .insert({
-          user_id: session.userId,
-          company_id: targetComp.id,
-          event_type: eventType,
-          title: `${targetComp.name} - ${eventLabel}`,
-          start_time: parsedDate.toISOString(),
-          end_time: new Date(parsedDate.getTime() + 3600000).toISOString(),
-          venue,
-          mode,
-          confidence: 'high',
-          manual_override: true,
-        })
-        .select()
-        .single();
-
-      eventRecord = insertedEvent;
-    }
-
-    // Only update appStatus if current status is at an earlier stage in pipeline
-    const currentStatus = appMap.get(targetComp.id)?.status;
-    const isHigherStage = currentStatus && ['test_scheduled', 'interview_scheduled', 'selected'].includes(currentStatus);
-    if (!isHigherStage) {
-      await supabase.from('applications').upsert(
-        {
-          user_id: session.userId,
-          company_id: targetComp.id,
-          status: appStatus,
-          status_source: 'ai_assistant_chat',
-          status_confidence: 'manual',
-          manual_override: true,
-          last_updated: new Date().toISOString(),
-        },
-        { onConflict: 'user_id,company_id' }
+  // Upcoming PPTs
+  if (/ppt|pre[\s-]*placement/i.test(lowerMsg)) {
+    const upcomingPpts = upcomingEvents.filter((e) => /ppt/i.test(e.type || e.title));
+    if (upcomingPpts.length > 0) {
+      const list = upcomingPpts.map(
+        (p) => `• **${p.company}** — *${formatDateTime(p.startTime!)}* (${p.venue})`
       );
-    }
-
-    // Push to Google Calendar (update in-place if the event record already has a gcal_event_id)
-    pushEventToGoogleCalendar({
-      userId: session.userId,
-      title: `${targetComp.name} - ${eventLabel}`,
-      startTime: parsedDate.toISOString(),
-      endTime: new Date(parsedDate.getTime() + 3600000).toISOString(),
-      venue,
-      mode,
-      gcalEventId: (eventRecord as { gcal_event_id?: string | null })?.gcal_event_id ?? null,
-    })
-      .then(async (gcalId) => {
-        if (gcalId && eventRecord) {
-          await supabase
-            .from('events')
-            .update({ gcal_event_id: gcalId })
-            .eq('id', (eventRecord as { id: string }).id);
-        }
-      })
-      .catch((err) => console.error('Google Calendar auto-sync:', err));
-
-    const formatted = formatDateTime(parsedDate.toISOString());
-    const actionWord = isReschedule ? 'Rescheduled' : 'Scheduled';
-
-    return NextResponse.json({
-      reply: `📅 ${actionWord} **${targetComp.name} ${eventLabel}** to **${formatted}** (${venue}) on your Placement Calendar & Google Calendar!`,
-      action: isReschedule ? 'event_updated' : 'event_added',
-      event: eventRecord,
-      companyId: targetComp.id,
-      status: appStatus,
-    });
-  }
-
-  // ═══════════════════════════════════════════════════════════════════════════
-  // 4. COMMAND: Sync All Scheduled Events to Google Calendar
-  // ═══════════════════════════════════════════════════════════════════════════
-  if (/sync.*google\s*calendar|push.*google\s*calendar|add\s+all.*to\s+google\s*calendar|sync\s+calendar/i.test(lowerMsg)) {
-    const upcomingEvents = (events || []).filter((e) => e.start_time && new Date(e.start_time) >= new Date());
-    const companyMap = new Map(companyList.map((c) => [c.id, c.name]));
-    let count = 0;
-
-    for (const evt of upcomingEvents) {
-      const cName = companyMap.get(evt.company_id) || 'Placement Event';
-      const gid = await pushEventToGoogleCalendar({
-        userId: session.userId,
-        title: evt.title || `${cName} - Online Assessment`,
-        startTime: evt.start_time!,
-        endTime: evt.end_time,
-        venue: evt.venue,
-        mode: evt.mode,
-        gcalEventId: (evt as { gcal_event_id?: string | null }).gcal_event_id ?? null,
-      });
-      if (gid) {
-        count++;
-        if (gid !== (evt as { gcal_event_id?: string | null }).gcal_event_id) {
-          await supabase
-            .from('events')
-            .update({ gcal_event_id: gid })
-            .eq('id', evt.id);
-        }
-      }
-    }
-
-    if (count > 0) {
       return NextResponse.json({
-        reply: `🗓️ Successfully pushed **${count} upcoming events** directly to your Google Calendar!`,
-        action: 'gcal_synced',
-      });
-    } else {
-      return NextResponse.json({
-        reply: `📅 Checked your placement schedule — make sure the **Google Calendar API** is enabled on Google Cloud and your account is connected to sync events automatically.`,
-        action: 'gcal_needed',
+        reply: `📢 **Upcoming Pre-Placement Talks (PPTs):**\n\n${list.join('\n')}`,
       });
     }
-  }
-
-  // ═══════════════════════════════════════════════════════════════════════════
-  // 5. COMMAND: Update Status (Without Date)
-  // ═══════════════════════════════════════════════════════════════════════════
-  if (
-    targetComp &&
-    !parsedDate &&
-    !isVenueUpdateQuery &&
-    !isMetadataUpdate &&
-    (/mark|set|change|update|got\s+selected|placed|shortlisted|declined|opted\s+out|rejected|withdrew|applied/i.test(lowerMsg))
-  ) {
-    let targetStatus: string | null = null;
-    if (/not\s+shortlist|not\s+selected\s+in\s+shortlist/i.test(lowerMsg)) targetStatus = 'not_shortlisted';
-    else if (lowerMsg.includes('shortlist')) targetStatus = 'shortlisted';
-    else if (/select|offer|placed/i.test(lowerMsg)) targetStatus = 'selected';
-    else if (/reject|eliminated/i.test(lowerMsg)) targetStatus = 'rejected';
-    else if (/decline|opt\s*out|opted\s*out/i.test(lowerMsg)) targetStatus = 'declined';
-    else if (/withdraw|withdrew/i.test(lowerMsg)) targetStatus = 'withdrawn';
-    else if (/ppt|pre[\s-]*placement/i.test(lowerMsg)) targetStatus = 'ppt_scheduled';
-    else if (/test/i.test(lowerMsg)) targetStatus = 'test_scheduled';
-    else if (/interview/i.test(lowerMsg)) targetStatus = 'interview_scheduled';
-    else if (/not\s+applied|didnt\s+apply|didn't\s+apply/i.test(lowerMsg)) targetStatus = 'not_applied';
-    else if (/applied|registered/i.test(lowerMsg)) targetStatus = 'applied';
-
-    if (targetStatus) {
-      await supabase
-        .from('applications')
-        .upsert(
-          {
-            user_id: session.userId,
-            company_id: targetComp.id,
-            status: targetStatus,
-            status_source: 'ai_assistant_chat',
-            status_confidence: 'manual',
-            manual_override: true,
-            last_updated: new Date().toISOString(),
-          },
-          { onConflict: 'user_id,company_id' }
-        );
-
-      const emoji =
-        targetStatus === 'selected' ? '🎉' : targetStatus === 'shortlisted' ? '✨' : '✅';
-
-      return NextResponse.json({
-        reply: `${emoji} Updated **${targetComp.name}** status to **${targetStatus.replace('_', ' ').toUpperCase()}**!`,
-        action: 'status_updated',
-        companyId: targetComp.id,
-        status: targetStatus,
-      });
-    }
-  }
-
-  // ═══════════════════════════════════════════════════════════════════════════
-  // 3. COMPANY-SPECIFIC QUERY (e.g. "infosys test", "when is chubb test", "status of ey", "infosys ctc")
-  // ═══════════════════════════════════════════════════════════════════════════
-  if (targetComp) {
-    const app = appMap.get(targetComp.id);
-    const compEvents = companyEventsMap.get(targetComp.id) || [];
-    const now = new Date();
-
-    const upcoming = compEvents.filter((e) => e.start_time && new Date(e.start_time) >= now);
-    const past = compEvents.filter((e) => e.start_time && new Date(e.start_time) < now);
-
-    const isTestOrScheduleQuery = /test|exam|assessment|ppt|interview|round|when|date|time|venue|schedule|calendar/i.test(lowerMsg);
-    const isCtcQuery = /ctc|salary|stipend|package|lpa|money|pay/i.test(lowerMsg);
-
-    // If query is specifically about tests / events for this company:
-    if (isTestOrScheduleQuery) {
-      if (upcoming.length > 0) {
-        const list = upcoming.map((e) => {
-          const dateStr = formatDateTime(e.start_time!);
-          return `• ⏰ **${e.title || e.event_type}**: **${dateStr}** (@ ${e.venue || 'Online'})`;
-        });
-
-        return NextResponse.json({
-          reply: `🗓️ **${targetComp.name} Scheduled Events:**\n${list.join('\n')}\n\n• **Current Status**: *${(app?.status || 'applied').replace('_', ' ').toUpperCase()}*\n• **Role**: ${app?.role || 'Software Engineer'}`,
-        });
-      }
-
-      if (past.length > 0) {
-        const list = past.map((e) => {
-          const dateStr = formatDateTime(e.start_time!);
-          return `• 📋 **${e.title || e.event_type}** (*${dateStr}* @ ${e.venue || 'Online'})`;
-        });
-
-        return NextResponse.json({
-          reply: `📋 **${targetComp.name} Past Events:**\n${list.join('\n')}\n\n• **Status**: *${(app?.status || 'applied').replace('_', ' ').toUpperCase()}* (No future tests currently scheduled).`,
-        });
-      }
-
-      // No events in calendar for this company
-      let statusExplanation = '';
-      const s = app?.status || 'applied';
-      if (s === 'applied') {
-        statusExplanation = 'You have registered and are currently **Applied (In Screening)**. The test date has not been officially announced yet.';
-      } else if (s === 'not_shortlisted') {
-        statusExplanation = 'Initial screening shortlist was released for this drive and you were **Not Shortlisted**.';
-      } else if (s === 'rejected') {
-        statusExplanation = 'You took the online assessment and were **Eliminated in Test**.';
-      } else if (s === 'declined' || s === 'withdrawn') {
-        statusExplanation = 'You **Opted Out** of this placement drive.';
-      } else if (s === 'not_applied') {
-        statusExplanation = 'You did not register for this placement drive.';
-      } else {
-        statusExplanation = `Current status: **${s.replace('_', ' ').toUpperCase()}**.`;
-      }
-
-      return NextResponse.json({
-        reply: `📌 **${targetComp.name}**: ${statusExplanation}\n\n• **Role**: ${app?.role || 'Software Engineer'}\n• **CTC**: ${app?.ctc || 'Not specified'}\n• **Upcoming Tests**: None scheduled yet.`,
-      });
-    }
-
-    // If query is specifically about CTC / Compensation:
-    if (isCtcQuery) {
-      return NextResponse.json({
-        reply: `💰 **${targetComp.name} Compensation Details:**\n• **CTC**: ${app?.ctc || 'Not specified'}\n• **Stipend**: ${app?.stipend || 'Not specified'}\n• **Role**: ${app?.role || 'Software Engineer'}\n• **Location**: ${app?.location || 'Not specified'}`,
-      });
-    }
-
-    // General company overview:
-    const statusStr = (app?.status || 'APPLIED').replace('_', ' ').toUpperCase();
-    const eventSummary = upcoming.length > 0
-      ? `\n• **Next Event**: ${upcoming[0].title} on ${formatDateTime(upcoming[0].start_time!)} (@ ${upcoming[0].venue || 'Online'})`
+    const pastPpts = pastEvents.filter((e) => /ppt/i.test(e.type || e.title));
+    const pastNote = pastPpts.length > 0
+      ? `\n\nYour past PPTs include: **${pastPpts.map((p) => p.company).join(', ')}**.`
       : '';
-
     return NextResponse.json({
-      reply: `🏢 **${targetComp.name} Overview:**\n• **Status**: **${statusStr}**\n• **Role**: ${app?.role || 'Software Engineer'}\n• **CTC**: ${app?.ctc || 'Not specified'}\n• **Stipend**: ${app?.stipend || 'Not specified'}\n• **Location**: ${app?.location || 'Not specified'}${eventSummary}`,
+      reply: `You don't have any upcoming Pre-Placement Talks (PPTs) scheduled right now.${pastNote}`,
     });
   }
 
-  // ═══════════════════════════════════════════════════════════════════════════
-  // 4. GLOBAL QUERIES (When no specific company was mentioned)
-  // ═══════════════════════════════════════════════════════════════════════════
-
-  // A. All Tests Query (Past, Given, Upcoming)
-  if (
-    lowerMsg.includes('test') ||
-    lowerMsg.includes('interview') ||
-    lowerMsg.includes('upcoming') ||
-    lowerMsg.includes('schedule') ||
-    lowerMsg.includes('given') ||
-    lowerMsg.includes('past') ||
-    lowerMsg.includes('history')
-  ) {
-    const isPastQuery = /past|previous|given|attended|history|already|completed|done|was|were/i.test(lowerMsg);
-    const now = new Date();
-    const companyMap = new Map(companyList.map((c) => [c.id, c.name]));
-
-    const pastEvents = (events || []).filter((e) => e.start_time && new Date(e.start_time) < now);
-    const upcomingEvents = (events || []).filter((e) => e.start_time && new Date(e.start_time) >= now);
-
-    if (isPastQuery || !lowerMsg.includes('upcoming')) {
-      const replyParts: string[] = [];
-
-      if (pastEvents.length > 0) {
-        const list = pastEvents.map((e) => {
-          const cName = companyMap.get(e.company_id) || 'Company';
-          const dateStr = formatDateTime(e.start_time!);
-          const app = appMap.get(e.company_id);
-          const statusText = app?.status ? ` · Status: *${app.status.replace('_', ' ')}*` : '';
-          return `• **${cName}** — ${e.title || e.event_type} (*${dateStr}* @ ${e.venue || 'Online'})${statusText}`;
-        });
-        replyParts.push(`📋 **Past Tests & Events Attended (${pastEvents.length}):**\n${list.join('\n')}`);
-      }
-
-      if (upcomingEvents.length > 0) {
-        const list = upcomingEvents.map((e) => {
-          const cName = companyMap.get(e.company_id) || 'Company';
-          const dateStr = formatDateTime(e.start_time!);
-          return `• **${cName}** — ${e.title || e.event_type} (*${dateStr}* @ ${e.venue || 'Online'})`;
-        });
-        replyParts.push(`⏰ **Upcoming Scheduled Tests (${upcomingEvents.length}):**\n${list.join('\n')}`);
-      }
-
-      if (replyParts.length > 0) {
-        return NextResponse.json({ reply: replyParts.join('\n\n') });
-      }
-    }
-
-    // Explicit "upcoming" query
-    if (upcomingEvents.length === 0) {
+  // Upcoming Tests
+  if (/test|assessment|exam|coding|oa/i.test(lowerMsg) && /upcoming|next|when|schedule/i.test(lowerMsg)) {
+    const upcomingTests = upcomingEvents.filter((e) =>
+      /test|assessment|coding|exam/i.test(e.type || e.title)
+    );
+    if (upcomingTests.length > 0) {
+      const list = upcomingTests.map(
+        (t) => `• **${t.company}** — *${formatDateTime(t.startTime!)}* (${t.venue})`
+      );
       return NextResponse.json({
-        reply: "You don't have any upcoming tests or interviews scheduled right now. Check back after email syncs!",
+        reply: `⏰ **Upcoming Online Assessments & Tests (${upcomingTests.length}):**\n\n${list.join('\n')}`,
       });
     }
-
-    const list = upcomingEvents.map((e) => {
-      const cName = companyMap.get(e.company_id) || 'Placement Event';
-      const dateStr = formatDateTime(e.start_time!);
-      return `• **${cName}** — ${e.title || e.event_type} on *${dateStr}* (${e.venue || 'Online'})`;
-    });
-
     return NextResponse.json({
-      reply: `⏰ **Upcoming Placement Schedule (${upcomingEvents.length}):**\n\n${list.join('\n')}`,
+      reply: "You don't have any upcoming tests scheduled right now. All caught up! 🎯",
     });
   }
 
-  // B. Shortlisted Companies Query
-  if (lowerMsg.includes('shortlist') || lowerMsg.includes('shortlisted')) {
-    const shortlistedComps = companyList.filter((c) => {
-      const app = appMap.get(c.id);
-      return ['shortlisted', 'test_scheduled', 'interview_scheduled'].includes(app?.status || '');
-    });
-
-    if (shortlistedComps.length === 0) {
+  // Upcoming Interviews
+  if (/interview/i.test(lowerMsg) && /upcoming|next|when|schedule/i.test(lowerMsg)) {
+    const upcomingInts = upcomingEvents.filter((e) => /interview/i.test(e.type || e.title));
+    if (upcomingInts.length > 0) {
+      const list = upcomingInts.map(
+        (t) => `• **${t.company}** — *${formatDateTime(t.startTime!)}* (${t.venue})`
+      );
       return NextResponse.json({
-        reply: "You don't have any active shortlists right now. When NeoPAT shortlist Excel files or emails match your Neo ID, they will appear here automatically!",
+        reply: `🤝 **Upcoming Interviews (${upcomingInts.length}):**\n\n${list.join('\n')}`,
       });
     }
-
-    const list = shortlistedComps.map((c) => {
-      const app = appMap.get(c.id);
-      return `• **${c.name}** (${app?.role || 'Software Engineer'}) — Status: *${app?.status?.replace('_', ' ').toUpperCase()}*`;
-    });
-
     return NextResponse.json({
-      reply: `✨ You are currently shortlisted for **${shortlistedComps.length}** companies:\n\n${list.join('\n')}`,
+      reply: "You don't have any interviews scheduled right now. Check back once test shortlists are released!",
     });
   }
 
-  // C. In Progress / Active Pipeline Query
-  if (/active|in\s+progress|pipeline/i.test(lowerMsg)) {
-    const activeComps = companyList.filter((c) => {
-      const app = appMap.get(c.id);
-      return !['not_applied', 'withdrawn', 'declined', 'not_shortlisted', 'rejected', 'selected'].includes(app?.status || 'not_applied');
-    });
-
-    const list = activeComps.map((c) => {
-      const app = appMap.get(c.id);
-      return `• **${c.name}** — *${app?.status?.replace('_', ' ').toUpperCase()}*`;
-    });
-
+  // General Upcoming Schedule
+  if (/upcoming|next|schedule/i.test(lowerMsg)) {
+    if (upcomingEvents.length > 0) {
+      const list = upcomingEvents.map(
+        (e) => `• **${e.company}** (${e.title}) — *${formatDateTime(e.startTime!)}* (${e.venue})`
+      );
+      return NextResponse.json({
+        reply: `🗓️ **Your Upcoming Placement Schedule (${upcomingEvents.length}):**\n\n${list.join('\n')}`,
+      });
+    }
     return NextResponse.json({
-      reply: `💼 **Active Opportunities in Pipeline (${activeComps.length}):**\n\n${list.join('\n')}`,
+      reply: "You don't have any upcoming rounds scheduled right now. Check back as new CDC circulars land!",
     });
   }
 
-  // ═══════════════════════════════════════════════════════════════════════════
-  // 5. DEFAULT GENERAL HELP
-  // ═══════════════════════════════════════════════════════════════════════════
+  // Shortlisted Companies
+  if (/shortlist/i.test(lowerMsg)) {
+    const shortlisted = pipeline.filter((p) =>
+      ['shortlisted', 'test_scheduled', 'test_completed', 'interview_scheduled'].includes(p.status)
+    );
+    if (shortlisted.length > 0) {
+      const list = shortlisted.map((s) => `• **${s.name}** (${s.role}) — ${s.ctc}`);
+      return NextResponse.json({
+        reply: `✨ You are currently shortlisted for **${shortlisted.length}** companies:\n\n${list.join('\n')}`,
+      });
+    }
+    return NextResponse.json({
+      reply: "You don't have any active test/interview shortlists right now.",
+    });
+  }
+
+  // Default fallback response
   return NextResponse.json({
-    reply: `Hi Arush! I'm your Placement Command Assistant. You can ask me:\n• *"When is Infosys test?"*\n• *"Schedule Chubb test on 2nd Sept at 3:30pm @ PRP 717"*\n• *"Mark EY GDS as shortlisted"*\n• *"What is the CTC for Veeva Systems?"*\n• *"Show all upcoming tests"*\n• *"What are my active pipeline companies?"*`,
+    reply: `Hi ${studentName}! I'm your Placement Copilot. You can ask me:\n• *"What are my upcoming tests?"*\n• *"Upcoming PPTs?"*\n• *"What is the CTC for Infosys?"*\n• *"Mark Cognizant as applied"*\n• *"I gave Infosys test yesterday, didn't make shortlist"*\n• *"Sync with Google Calendar"*`,
   });
-}
-
-function escapeRegex(string: string) {
-  return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }

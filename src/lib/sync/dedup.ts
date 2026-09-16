@@ -43,14 +43,14 @@ export async function deduplicateUserCompanies(
 
   const { data: driveEmails } = await supabase
     .from('emails')
-    .select('company_id, body_snippet')
+    .select('company_id, body_snippet, body_plain')
     .eq('user_id', userId)
-    .not('company_id', 'is', null)
-    .ilike('body_snippet', '%pat-PL-%');
+    .not('company_id', 'is', null);
 
   for (const e of driveEmails || []) {
-    if (e.company_id && e.body_snippet) {
-      const drives = extractAllDriveNumbers(e.body_snippet).map((d) => d.toLowerCase());
+    const emailText = [e.body_snippet, e.body_plain].filter(Boolean).join('\n');
+    if (e.company_id && emailText) {
+      const drives = extractAllDriveNumbers(emailText).map((d) => d.toLowerCase());
       const existing = boundDrivesMap.get(e.company_id) || [];
       boundDrivesMap.set(e.company_id, Array.from(new Set([...existing, ...drives])));
     }
@@ -59,10 +59,8 @@ export async function deduplicateUserCompanies(
   const areDrivesConflicting = (id1: string, id2: string): boolean => {
     const d1 = boundDrivesMap.get(id1) || [];
     const d2 = boundDrivesMap.get(id2) || [];
-    if (d1.length > 0 && d2.length > 0) {
-      // Conflicting if neither set contains any drive number from the other
-      const hasOverlap = d1.some((d) => d2.includes(d));
-      return !hasOverlap;
+    if (d1.length > 0 || d2.length > 0) {
+      return !d1.some((d) => d2.includes(d));
     }
     return false;
   };

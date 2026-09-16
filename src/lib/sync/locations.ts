@@ -9,6 +9,43 @@
  */
 
 /**
+ * Cleans and sanitizes a raw location string for display, stripping out accidental email text
+ * like "Criteria : Fluent English communication is", "Requirements : ...", etc.
+ */
+export function cleanLocationString(raw: string | null | undefined): string {
+  if (!raw) return 'Not Specified';
+
+  let cleaned = raw
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/\s*(?:Criteria|Eligibility|Requirements?|Note|Job\s+Description|JD|Mandatory|Fluent\s+English|Communication|Service\s+Agreement|Bond|Selection|Process|Registration|CTC|Stipend|Designation|Role|PPO|About)\b.*$/i, '')
+    .replace(/\b(?:fluent\s+english|english\s+communication|communication\s+skills?|good\s+communication)\b.*$/i, '')
+    .replace(/\s*\(?(?:work\s+from\s+office|wfo|in\s+person|on\s*site|remote|hybrid|in\s+office)\)?/gi, '')
+    .replace(/[*_~`]+/g, '')
+    .replace(/[:\-–—\s*]+$/, '')
+    .replace(/^[:\-–—\s*]+/, '')
+    .replace(/\bHyderabed\b/gi, 'Hyderabad')
+    .replace(/\bbngalore\b/gi, 'Bangalore')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  // Fix unclosed parenthesis (e.g. "Hybrid (Gurgaon/Bangalore/Chennai" -> "Hybrid (Gurgaon/Bangalore/Chennai)")
+  if (cleaned.includes('(') && !cleaned.includes(')')) {
+    cleaned = cleaned + ')';
+  }
+
+  if (!cleaned || /^(?:tba|tbd|not\s+specified|not\s+mentioned|to\s+be\s+announced)$/i.test(cleaned)) {
+    return 'Not Specified';
+  }
+
+  // Filter out if it became purely numbers or punctuation
+  if (/^[\d\s,.\-]+$/.test(cleaned)) {
+    return 'Not Specified';
+  }
+
+  return cleaned;
+}
+
+/**
  * Normalizes and extracts distinct physical work locations from a raw string.
  * Consolidates address hierarchies ("Whitefield, Bangalore" -> ["Whitefield, Bangalore"])
  * while preserving distinct cities ("Bangalore, Mumbai and Gurgaon" -> ["Bangalore", "Mumbai", "Gurgaon"]).
@@ -16,7 +53,12 @@
 export function parseAssignedLocations(rawLocation: string | null | undefined): string[] {
   if (!rawLocation) return [];
 
-  const trimmed = rawLocation.replace(/\s+/g, ' ').trim();
+  const sanitized = cleanLocationString(rawLocation);
+  if (!sanitized || sanitized === 'Pan-India') {
+    return rawLocation && /pan\s+india/i.test(rawLocation) ? ['Pan India'] : [];
+  }
+
+  const trimmed = sanitized.replace(/\s+/g, ' ').trim();
   if (
     !trimmed ||
     /^(?:to\s+be\s+announced|tbd|tba|not\s+(?:specified|mentioned))$/i.test(trimmed)
@@ -79,3 +121,4 @@ export function parseAssignedLocations(rawLocation: string | null | undefined): 
 
   return cleaned;
 }
+

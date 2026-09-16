@@ -11,12 +11,14 @@ import {
   Mail,
   ExternalLink,
   Scale,
-  Radar,
   XCircle,
+  Sparkles,
+  Shield,
+  Clock,
 } from 'lucide-react';
 import { AppLogoMark } from '@/components/brand/logo';
 
-const LAST_UPDATED = 'September 12, 2026';
+const LAST_UPDATED = 'September 16, 2026';
 const APP_NAME = "Where's My Offer?";
 const APP_URL = 'https://www.wheresmyoffer.in';
 
@@ -68,7 +70,7 @@ export default function TermsClient() {
 
   return (
     <div className="min-h-screen bg-[#09090b] text-zinc-300 selection:bg-emerald-500/20 font-sans overflow-x-hidden">
-      {/* Animated Background */}
+      {/* Ambient Background */}
       <div className="pointer-events-none fixed inset-0 z-0 overflow-hidden">
         <div className="absolute -top-32 -right-32 h-[500px] w-[500px] rounded-full bg-violet-500/[0.06] blur-[120px] animate-pulse" />
         <div className="absolute -bottom-32 -left-32 h-[600px] w-[600px] rounded-full bg-emerald-500/[0.05] blur-[140px]" />
@@ -94,7 +96,7 @@ export default function TermsClient() {
                   {APP_NAME}
                 </span>
                 <span className="rounded bg-emerald-500/10 px-1.5 py-0.5 font-mono text-[9px] font-semibold text-emerald-400 border border-emerald-500/20">
-                  LEGAL
+                  TERMS
                 </span>
               </div>
               <p className="text-[10px] font-mono text-zinc-500">Placement Radar · Live</p>
@@ -124,282 +126,300 @@ export default function TermsClient() {
         </div>
       </header>
 
-      {/* Main Content */}
+      {/* Main Legal Content */}
       <main className="relative z-10 max-w-4xl mx-auto px-4 sm:px-6 py-12 sm:py-16">
         {/* Hero Header */}
         <AnimatedSection>
-          <div className="mb-14">
+          <div className="mb-12">
             <div className="inline-flex items-center gap-2 rounded-full border border-emerald-500/20 bg-emerald-500/10 px-3 py-1 text-xs font-mono text-emerald-400 mb-5">
               <span className="relative flex h-2 w-2">
                 <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" />
                 <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-400" />
               </span>
-              BINDING AGREEMENT · VIT STUDENT PLATFORM
+              TRANSPARENT TERMS · STUDENT PLATFORM
             </div>
 
-            <h1 className="text-4xl sm:text-6xl font-black text-white tracking-tight mb-5 font-display leading-tight">
+            <h1 className="text-4xl sm:text-6xl font-black text-white tracking-tight mb-4 font-display leading-tight">
               Terms of{' '}
               <span className="bg-gradient-to-r from-emerald-400 to-teal-300 bg-clip-text text-transparent">
                 Service
               </span>
             </h1>
 
-            <div className="flex flex-wrap items-center gap-4 text-xs font-mono text-zinc-400 mb-7">
+            <div className="flex flex-wrap items-center gap-3 text-xs font-mono text-zinc-400 mb-8">
               <span>
-                Last updated: <span className="text-zinc-200 font-semibold">{LAST_UPDATED}</span>
+                Effective: <span className="text-zinc-200 font-semibold">{LAST_UPDATED}</span>
               </span>
               <span className="text-zinc-700">·</span>
-              <span>App: {APP_NAME}</span>
+              <span>Platform: {APP_NAME}</span>
               <span className="text-zinc-700">·</span>
-              <span className="text-emerald-400">Status: Active & Enforced</span>
+              <span className="text-emerald-400 font-semibold">Clear &amp; Enforceable</span>
             </div>
 
-            <div className="rounded-2xl border border-zinc-800/80 bg-[#101014]/80 backdrop-blur-sm p-5 text-sm leading-relaxed text-zinc-300 shadow-xl shadow-black/40">
-              These Terms of Service (&quot;Terms&quot;) govern your access to and use of{' '}
-              <strong className="text-white">{APP_NAME}</strong> (
-              <a
-                href={APP_URL}
-                className="text-emerald-400 underline underline-offset-2 hover:text-emerald-300 font-mono text-xs transition-colors"
-              >
-                {APP_URL}
-              </a>
-              ), an automated campus placement intelligence and application tracking platform built for VIT students. By signing in or accessing the service, you agree to be bound by these Terms.
+            {/* Plain English TL;DR */}
+            <div className="rounded-2xl border border-emerald-500/30 bg-gradient-to-br from-emerald-950/20 via-[#101014]/90 to-[#0c1410]/90 backdrop-blur-md p-6 shadow-2xl shadow-emerald-950/20">
+              <div className="flex items-center gap-2.5 mb-3 text-emerald-400 font-semibold text-sm font-display tracking-tight">
+                <Sparkles className="h-4 w-4" />
+                <span>The Plain-English Summary (The TL;DR)</span>
+              </div>
+              <p className="text-sm leading-relaxed text-zinc-300 mb-4">
+                We designed <strong className="text-white">{APP_NAME}</strong> as a student companion to help you organize campus placement drives, track interview slots, and never miss an eligibility deadline. Here is the bottom line:
+              </p>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs text-zinc-300">
+                <div className="flex items-start gap-2 rounded-lg bg-zinc-900/60 p-3 border border-zinc-800/80">
+                  <CheckCircle2 className="h-4 w-4 text-emerald-400 shrink-0 mt-0.5" />
+                  <span><strong>Personal companion:</strong> Use it to track your drives and applications. Please don&apos;t share accounts or scrape candidate data belonging to classmates.</span>
+                </div>
+                <div className="flex items-start gap-2 rounded-lg bg-zinc-900/60 p-3 border border-zinc-800/80">
+                  <CheckCircle2 className="h-4 w-4 text-emerald-400 shrink-0 mt-0.5" />
+                  <span><strong>Always check official emails:</strong> We parse dates and links automatically, but official university circulars are always your ultimate source of truth.</span>
+                </div>
+                <div className="flex items-start gap-2 rounded-lg bg-zinc-900/60 p-3 border border-zinc-800/80">
+                  <CheckCircle2 className="h-4 w-4 text-emerald-400 shrink-0 mt-0.5" />
+                  <span><strong>Respect the platform:</strong> Don&apos;t attempt to probe endpoints, spam the sync engine, or overload our background worker jobs.</span>
+                </div>
+                <div className="flex items-start gap-2 rounded-lg bg-zinc-900/60 p-3 border border-zinc-800/80">
+                  <CheckCircle2 className="h-4 w-4 text-emerald-400 shrink-0 mt-0.5" />
+                  <span><strong>Your data, your call:</strong> You can wipe your account and all tracked entries with one click in Settings at any time.</span>
+                </div>
+              </div>
             </div>
           </div>
         </AnimatedSection>
 
         {/* Legal Sections */}
-        <div className="space-y-5">
-          {/* 1. Acceptance */}
-          <AnimatedSection delay={50}>
-            <section className="rounded-2xl border border-zinc-800/60 bg-[#101014]/80 backdrop-blur-sm p-6 sm:p-8 shadow-xl shadow-black/40 hover:border-zinc-700/60 hover:shadow-emerald-500/5 transition-all duration-300">
+        <div className="space-y-6">
+          {/* 1. Acceptance & Eligibility */}
+          <AnimatedSection delay={40}>
+            <section className="rounded-2xl border border-zinc-800/70 bg-[#101014]/80 backdrop-blur-sm p-6 sm:p-8 shadow-xl shadow-black/40 hover:border-zinc-700/60 transition-all duration-300">
               <div className="flex items-center gap-3 mb-5">
-                <span className="font-mono text-xs font-bold text-emerald-400 tracking-wider border border-emerald-500/30 bg-emerald-500/10 rounded-lg px-2 py-1">01</span>
-                <h2 className="text-lg font-bold text-white">Acceptance of Terms & Eligibility</h2>
+                <span className="font-mono text-xs font-bold text-emerald-400 tracking-wider border border-emerald-500/30 bg-emerald-500/10 rounded-lg px-2.5 py-1">01</span>
+                <h2 className="text-lg font-bold text-white">Acceptance of Terms &amp; Eligibility</h2>
               </div>
               <p className="text-sm leading-relaxed text-zinc-400">
-                By accessing or using {APP_NAME}, you confirm that you are at least 13 years old, a current or prospective student of VIT Bhopal University (or affiliated VIT campuses), and that you agree to be bound by these Terms and our{' '}
+                By logging into or accessing {APP_NAME} (<a href={APP_URL} className="text-emerald-400 underline underline-offset-2 hover:text-emerald-300 font-mono text-xs">{APP_URL}</a>), you agree to be bound by these Terms and our companion{' '}
                 <Link href="/privacy" className="text-emerald-400 underline underline-offset-2 hover:text-emerald-300 transition-colors">
                   Privacy Policy
                 </Link>
-                . If you do not agree to these Terms, you must discontinue using the platform immediately.
+                . To use the platform, you must be a current or prospective student of VIT Bhopal University (or affiliated VIT campuses) participating in campus placements. If you do not agree with these terms, you should not use the platform.
               </p>
             </section>
           </AnimatedSection>
 
-          {/* 2. Description of Service */}
+          {/* 2. Nature of Service */}
+          <AnimatedSection delay={60}>
+            <section className="rounded-2xl border border-zinc-800/70 bg-[#101014]/80 backdrop-blur-sm p-6 sm:p-8 shadow-xl shadow-black/40 hover:border-zinc-700/60 transition-all duration-300">
+              <div className="flex items-center gap-3 mb-5">
+                <span className="font-mono text-xs font-bold text-emerald-400 tracking-wider border border-emerald-500/30 bg-emerald-500/10 rounded-lg px-2.5 py-1">02</span>
+                <h2 className="text-lg font-bold text-white">The Service &amp; What It Does</h2>
+              </div>
+              <p className="text-sm leading-relaxed text-zinc-400 mb-4">
+                {APP_NAME} is an automated personal productivity assistant that helps candidates organize incoming placement data into an intuitive visual command center:
+              </p>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+                <div className="rounded-xl border border-zinc-800/80 bg-zinc-900/40 p-3.5">
+                  <div className="flex items-center gap-2 font-semibold text-zinc-200 mb-1">
+                    <CheckCircle2 className="h-4 w-4 text-emerald-400" />
+                    Automated Email Parsing
+                  </div>
+                  <p className="text-zinc-400 text-[11px] leading-relaxed">
+                    Indexes incoming CDC circulars and NeoPAT confirmation emails, extracting company names, job profiles, CTC packages, and deadlines.
+                  </p>
+                </div>
+
+                <div className="rounded-xl border border-zinc-800/80 bg-zinc-900/40 p-3.5">
+                  <div className="flex items-center gap-2 font-semibold text-zinc-200 mb-1">
+                    <CheckCircle2 className="h-4 w-4 text-emerald-400" />
+                    Shortlist Verification
+                  </div>
+                  <p className="text-zinc-400 text-[11px] leading-relaxed">
+                    Automatically scans attached PDF and Excel rosters to alert you the moment your candidate registration ID is shortlisted for subsequent rounds.
+                  </p>
+                </div>
+
+                <div className="rounded-xl border border-zinc-800/80 bg-zinc-900/40 p-3.5">
+                  <div className="flex items-center gap-2 font-semibold text-zinc-200 mb-1">
+                    <CheckCircle2 className="h-4 w-4 text-emerald-400" />
+                    Timeline &amp; Calendar Sync
+                  </div>
+                  <p className="text-zinc-400 text-[11px] leading-relaxed">
+                    Organizes your upcoming online tests, coding challenges, PPT sessions, and interview windows, with optional sync to Google Calendar.
+                  </p>
+                </div>
+
+                <div className="rounded-xl border border-zinc-800/80 bg-zinc-900/40 p-3.5">
+                  <div className="flex items-center gap-2 font-semibold text-zinc-200 mb-1">
+                    <CheckCircle2 className="h-4 w-4 text-emerald-400" />
+                    Proactive Alerts
+                  </div>
+                  <p className="text-zinc-400 text-[11px] leading-relaxed">
+                    Dispatches instant browser notifications when tests are commencing or urgent shortlists are released.
+                  </p>
+                </div>
+              </div>
+            </section>
+          </AnimatedSection>
+
+          {/* 3. Official Email Priority Disclaimer */}
           <AnimatedSection delay={80}>
-            <section className="rounded-2xl border border-zinc-800/60 bg-[#101014]/80 backdrop-blur-sm p-6 sm:p-8 shadow-xl shadow-black/40 hover:border-zinc-700/60 transition-all duration-300">
-              <div className="flex items-center gap-3 mb-5">
-                <span className="font-mono text-xs font-bold text-emerald-400 tracking-wider border border-emerald-500/30 bg-emerald-500/10 rounded-lg px-2 py-1">02</span>
-                <h2 className="text-lg font-bold text-white">Description of Service & Scope</h2>
+            <section className="rounded-2xl border border-amber-500/30 bg-gradient-to-b from-[#141210]/90 to-[#0f0e0a]/90 backdrop-blur-sm p-6 sm:p-8 shadow-xl shadow-black/40 hover:border-amber-500/50 transition-all duration-300">
+              <div className="flex items-center gap-3 mb-4">
+                <AlertTriangle className="h-5 w-5 text-amber-400" />
+                <h2 className="text-lg font-bold text-white">Important Campus Disclaimer — Official Emails Take Precedence</h2>
               </div>
-              <p className="text-sm leading-relaxed text-zinc-400 mb-4">
-                {APP_NAME} is a personal productivity platform designed to help candidates track campus placement recruitment drives, online tests, interviews, and offer letters. Core automated services include:
+              <p className="text-sm leading-relaxed text-zinc-300 mb-3">
+                {APP_NAME} is an auxiliary companion engineered to assist you. However, campus recruitment drives move fast, and placement cells may alter assessment links, reporting halls, or interview schedules with short notice.
               </p>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-4">
-                {[
-                  { title: 'Email Parsing', desc: 'Reads official placement updates from CDC and NeoPAT dispatch addresses.' },
-                  { title: 'Drive Indexing', desc: 'Categorizes company profiles, salary packages, CTC tiers, and deadlines.' },
-                  { title: 'Shortlist Scanning', desc: 'Parses Excel/PDF attachments to verify your candidate registration ID.' },
-                  { title: 'Calendar Sync', desc: 'Optionally creates synchronized Google Calendar events for tests and interviews.' },
-                ].map((feature, i) => (
-                  <div key={i} className="flex items-start gap-3 rounded-xl border border-zinc-800/80 bg-zinc-900/40 p-3.5 hover:border-zinc-700/60 transition-colors">
-                    <CheckCircle2 className="h-4 w-4 text-emerald-400 shrink-0 mt-0.5" />
-                    <div>
-                      <h3 className="text-xs font-semibold text-zinc-200">{feature.title}</h3>
-                      <p className="text-[11px] text-zinc-400 mt-0.5">{feature.desc}</p>
-                    </div>
-                  </div>
-                ))}
+              <div className="rounded-xl border border-amber-500/20 bg-amber-500/5 p-4 text-xs text-amber-300/90 leading-relaxed font-mono">
+                ⚠️ <strong>Golden Rule:</strong> Always cross-reference your actual inbox for official CDC emails before tests or interviews. {APP_NAME} does not guarantee that third-party servers, email deliverability, or university dispatch portals will remain error-free.
               </div>
-
-              <p className="text-xs text-zinc-500 font-mono">
-                {APP_NAME} is provided &quot;as is&quot; as a personal productivity service. We make no representations or warranties regarding third-party college portal uptime.
-              </p>
             </section>
           </AnimatedSection>
 
-          {/* 3. Google Account & Permissions */}
+          {/* 4. Acceptable Use */}
           <AnimatedSection delay={100}>
-            <section className="rounded-2xl border border-zinc-800/60 bg-[#101014]/80 backdrop-blur-sm p-6 sm:p-8 shadow-xl shadow-black/40 hover:border-zinc-700/60 transition-all duration-300">
+            <section className="rounded-2xl border border-zinc-800/70 bg-[#101014]/80 backdrop-blur-sm p-6 sm:p-8 shadow-xl shadow-black/40 hover:border-zinc-700/60 transition-all duration-300">
               <div className="flex items-center gap-3 mb-5">
-                <span className="font-mono text-xs font-bold text-emerald-400 tracking-wider border border-emerald-500/30 bg-emerald-500/10 rounded-lg px-2 py-1">03</span>
-                <h2 className="text-lg font-bold text-white">Google Account Access & OAuth Scopes</h2>
+                <span className="font-mono text-xs font-bold text-emerald-400 tracking-wider border border-emerald-500/30 bg-emerald-500/10 rounded-lg px-2.5 py-1">04</span>
+                <h2 className="text-lg font-bold text-white">Community &amp; Acceptable Use Policy</h2>
               </div>
               <p className="text-sm leading-relaxed text-zinc-400 mb-4">
-                {APP_NAME} interfaces with Google APIs to retrieve your placement communications. When connecting, you authorize access under the following explicit OAuth scopes:
+                To keep the service reliable, secure, and fair for all students, you agree not to:
               </p>
 
-              <div className="space-y-2.5 mb-4">
+              <div className="space-y-2.5 text-xs text-zinc-300">
                 {[
-                  {
-                    name: 'gmail.readonly',
-                    purpose: 'Restricted read-only access to identify placement emails from official CDC/NeoPAT senders. Never modifies or sends emails.',
-                  },
-                  {
-                    name: 'calendar.events',
-                    purpose: 'Optional scope used strictly to create, update, and manage placement assessment and interview calendar events.',
-                  },
-                  {
-                    name: 'userinfo.profile',
-                    purpose: 'Basic profile identifiers used to authenticate your session and render candidate details.',
-                  },
-                ].map((item, i) => (
-                  <div key={i} className="rounded-xl border border-zinc-800/80 bg-zinc-900/40 p-3.5 hover:border-zinc-700/60 transition-colors">
-                    <div className="flex items-center justify-between gap-2 mb-1">
-                      <span className="font-mono text-xs font-bold text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/20">
-                        {item.name}
-                      </span>
-                      <span className="text-[10px] font-mono text-zinc-500">OAuth 2.0</span>
-                    </div>
-                    <p className="text-xs text-zinc-400 leading-relaxed">{item.purpose}</p>
+                  'Attempt to access, crawl, or scrape data belonging to any other candidate or student.',
+                  'Abuse, hammer, or flood API routes or background sync mechanisms beyond standard user limits.',
+                  'Probe, scan, or test the vulnerability of the system without explicit developer authorization.',
+                  'Share your authenticated account with unauthorized parties or use dummy profiles to bypass quotas.',
+                  'Use automated bots or crawlers to manipulate application statuses or simulate fake accounts.',
+                ].map((rule, i) => (
+                  <div key={i} className="flex items-start gap-2.5 rounded-lg border border-zinc-800/80 bg-zinc-900/40 p-3 hover:border-zinc-700/60 transition-colors">
+                    <XCircle className="h-4 w-4 text-rose-400 shrink-0 mt-0.5" />
+                    <span>{rule}</span>
                   </div>
                 ))}
+              </div>
+            </section>
+          </AnimatedSection>
+
+          {/* 5. Google Permissions & Revocation */}
+          <AnimatedSection delay={120}>
+            <section className="rounded-2xl border border-zinc-800/70 bg-[#101014]/80 backdrop-blur-sm p-6 sm:p-8 shadow-xl shadow-black/40 hover:border-zinc-700/60 transition-all duration-300">
+              <div className="flex items-center gap-3 mb-5">
+                <span className="font-mono text-xs font-bold text-emerald-400 tracking-wider border border-emerald-500/30 bg-emerald-500/10 rounded-lg px-2.5 py-1">05</span>
+                <h2 className="text-lg font-bold text-white">Google OAuth &amp; API Permissions</h2>
+              </div>
+              <p className="text-sm leading-relaxed text-zinc-400 mb-4">
+                {APP_NAME} interacts with Google APIs under the explicit scopes you grant upon signing in:
+              </p>
+
+              <div className="space-y-2.5 mb-4 text-xs">
+                <div className="rounded-xl border border-zinc-800/80 bg-zinc-900/40 p-3.5">
+                  <div className="flex items-center justify-between gap-2 mb-1">
+                    <span className="font-mono font-bold text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/20">
+                      gmail.readonly
+                    </span>
+                    <span className="font-mono text-zinc-500 text-[10px]">Restricted Scope</span>
+                  </div>
+                  <p className="text-zinc-400 leading-relaxed">
+                    Used strictly to detect and parse placement correspondence from recognized campus senders. We never alter, delete, or compose emails.
+                  </p>
+                </div>
+
+                <div className="rounded-xl border border-zinc-800/80 bg-zinc-900/40 p-3.5">
+                  <div className="flex items-center justify-between gap-2 mb-1">
+                    <span className="font-mono font-bold text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/20">
+                      calendar.events
+                    </span>
+                    <span className="font-mono text-zinc-500 text-[10px]">Optional Scope</span>
+                  </div>
+                  <p className="text-zinc-400 leading-relaxed">
+                    Used strictly to place scheduled recruitment rounds and assessments onto your personal Google Calendar.
+                  </p>
+                </div>
               </div>
 
               <p className="text-xs text-zinc-400 leading-relaxed">
-                You may revoke permissions at any time via{' '}
+                You can revoke access anytime through your{' '}
                 <a
                   href="https://myaccount.google.com/permissions"
                   target="_blank"
                   rel="noopener noreferrer"
                   className="text-emerald-400 underline underline-offset-2 hover:text-emerald-300 inline-flex items-center gap-1 font-mono text-[11px] transition-colors"
                 >
-                  myaccount.google.com/permissions <ExternalLink className="h-3 w-3 inline" />
+                  Google Account Permissions <ExternalLink className="h-3 w-3 inline" />
                 </a>
-                . Revoking tokens halts synchronization but retains existing indexed data until you request deletion via Settings.
+                .
               </p>
             </section>
           </AnimatedSection>
 
-          {/* 4. Acceptable Use */}
-          <AnimatedSection delay={120}>
-            <section className="rounded-2xl border border-zinc-800/60 bg-[#101014]/80 backdrop-blur-sm p-6 sm:p-8 shadow-xl shadow-black/40 hover:border-zinc-700/60 transition-all duration-300">
-              <div className="flex items-center gap-3 mb-5">
-                <span className="font-mono text-xs font-bold text-emerald-400 tracking-wider border border-emerald-500/30 bg-emerald-500/10 rounded-lg px-2 py-1">04</span>
-                <h2 className="text-lg font-bold text-white">Acceptable Use Policy</h2>
-              </div>
-              <p className="text-sm leading-relaxed text-zinc-400 mb-3">
-                You agree to use {APP_NAME} solely for legitimate personal placement tracking. You shall not:
-              </p>
-
-              <ul className="space-y-2">
-                {[
-                  'Use the service for any unlawful purpose or in violation of institutional university policies.',
-                  'Share your authenticated session credentials or create accounts on behalf of unauthorized third parties.',
-                  'Attempt to probe, reverse-engineer, exploit, or disrupt API endpoints or background sync services.',
-                  'Scrape, harvest, or aggregate candidate information belonging to other students.',
-                  'Circumvent rate limits, caching mechanisms, or security controls enforced on the platform.',
-                ].map((prohibition, i) => (
-                  <li key={i} className="flex items-start gap-2.5 text-xs sm:text-sm text-zinc-400 rounded-lg border border-zinc-800/80 bg-zinc-900/40 p-3 hover:border-zinc-700/60 transition-colors">
-                    <XCircle className="h-4 w-4 text-rose-400 shrink-0 mt-0.5" />
-                    <span>{prohibition}</span>
-                  </li>
-                ))}
-              </ul>
-            </section>
-          </AnimatedSection>
-
-          {/* 5. Data Accuracy Disclaimer */}
+          {/* 6. Limitation of Liability */}
           <AnimatedSection delay={140}>
-            <section className="rounded-2xl border border-amber-500/20 bg-gradient-to-b from-[#141210]/80 to-[#0f0e0a]/80 backdrop-blur-sm p-6 sm:p-8 shadow-xl shadow-black/40 hover:border-amber-500/35 transition-all duration-300">
-              <div className="flex items-center gap-3 mb-5">
-                <AlertTriangle className="h-5 w-5 text-amber-400" />
-                <h2 className="text-lg font-bold text-white">Data Accuracy & Verification Disclaimer</h2>
-              </div>
-              <p className="text-sm leading-relaxed text-zinc-300 mb-3">
-                {APP_NAME} leverages automated regex parsing and heuristic extraction to parse email communications and shortlist attachments. While engineered for maximum precision,{' '}
-                <strong className="text-white">you must always verify mission-critical details directly with official CDC circulars and company emails.</strong>
-              </p>
-              <p className="text-xs leading-relaxed text-amber-300/80 font-mono">
-                Do not rely solely on automated calendar notifications or drive statuses for final test links, reporting venues, or interview slots. {APP_NAME} is an auxiliary companion tool.
-              </p>
-            </section>
-          </AnimatedSection>
-
-          {/* 6. Service Availability */}
-          <AnimatedSection delay={155}>
-            <section className="rounded-2xl border border-zinc-800/60 bg-[#101014]/80 backdrop-blur-sm p-6 sm:p-8 shadow-xl shadow-black/40 hover:border-zinc-700/60 transition-all duration-300">
-              <div className="flex items-center gap-3 mb-5">
-                <span className="font-mono text-xs font-bold text-emerald-400 tracking-wider border border-emerald-500/30 bg-emerald-500/10 rounded-lg px-2 py-1">06</span>
-                <h2 className="text-lg font-bold text-white">Service Availability & Revisions</h2>
-              </div>
-              <p className="text-sm leading-relaxed text-zinc-400 mb-3">
-                As an evolving student productivity system, {APP_NAME} does not guarantee 100% uninterrupted uptime. We reserve the right to:
-              </p>
-              <ul className="space-y-2 text-xs sm:text-sm text-zinc-400">
-                {[
-                  'Update or deprecate features based on academic recruitment seasons.',
-                  'Perform background index optimizations and cron synchronization adjustments.',
-                  'Revise these Terms to reflect compliance or architectural updates.',
-                ].map((item, i) => (
-                  <li key={i} className="flex items-center gap-2 rounded-lg border border-zinc-800/80 bg-zinc-900/40 p-3 hover:border-zinc-700/60 transition-colors">
-                    <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 shrink-0" />
-                    {item}
-                  </li>
-                ))}
-              </ul>
-            </section>
-          </AnimatedSection>
-
-          {/* 7. Limitation of Liability */}
-          <AnimatedSection delay={165}>
-            <section className="rounded-2xl border border-zinc-800/60 bg-[#101014]/80 backdrop-blur-sm p-6 sm:p-8 shadow-xl shadow-black/40 hover:border-zinc-700/60 transition-all duration-300">
+            <section className="rounded-2xl border border-zinc-800/70 bg-[#101014]/80 backdrop-blur-sm p-6 sm:p-8 shadow-xl shadow-black/40 hover:border-zinc-700/60 transition-all duration-300">
               <div className="flex items-center gap-3 mb-5">
                 <Scale className="h-5 w-5 text-emerald-400" />
-                <h2 className="text-lg font-bold text-white">Limitation of Liability</h2>
+                <h2 className="text-lg font-bold text-white">Limitation of Liability &amp; Warranty</h2>
               </div>
-              <p className="text-sm leading-relaxed text-zinc-400">
-                To the fullest extent permitted by applicable law, {APP_NAME} and its authors shall not be held liable for any indirect, incidental, punitive, or consequential damages resulting from your use of (or inability to use) the service, including missed assessment windows, lost opportunity costs, or third-party email delivery delays. The platform is provided strictly{' '}
-                <strong className="text-zinc-200">&quot;as is&quot; without warranty of any kind</strong>.
+              <p className="text-sm leading-relaxed text-zinc-400 mb-3">
+                {APP_NAME} is provided &quot;as is&quot; and &quot;as available&quot; without warranties of any kind, whether express or implied. To the maximum extent permitted by applicable law, the developers and contributors shall not be liable for any indirect, incidental, special, or consequential damages resulting from:
               </p>
+              <ul className="space-y-1.5 text-xs text-zinc-400 list-disc list-inside ml-2">
+                <li>Missed assessments, interview rounds, or deadline submissions.</li>
+                <li>Temporary service outages, cloud maintenance, or network connectivity failures.</li>
+                <li>Inaccuracies originating from malformed email bodies or third-party format changes.</li>
+              </ul>
             </section>
           </AnimatedSection>
 
-          {/* 8. Termination */}
-          <AnimatedSection delay={175}>
-            <section className="rounded-2xl border border-zinc-800/60 bg-[#101014]/80 backdrop-blur-sm p-6 sm:p-8 shadow-xl shadow-black/40 hover:border-zinc-700/60 transition-all duration-300">
-              <div className="flex items-center gap-3 mb-5">
+          {/* 7. Termination & Deletion */}
+          <AnimatedSection delay={160}>
+            <section className="rounded-2xl border border-zinc-800/70 bg-[#101014]/80 backdrop-blur-sm p-6 sm:p-8 shadow-xl shadow-black/40 hover:border-zinc-700/60 transition-all duration-300">
+              <div className="flex items-center gap-3 mb-4">
                 <Lock className="h-5 w-5 text-emerald-400" />
-                <h2 className="text-lg font-bold text-white">Termination & Data Erasure</h2>
+                <h2 className="text-lg font-bold text-white">Account Deletion &amp; Data Wipe</h2>
               </div>
               <p className="text-sm leading-relaxed text-zinc-400 mb-3">
-                You retain complete sovereignty over your data. You may terminate your account and wipe all stored application records, sync states, and cached tokens at any moment directly via:
+                You can delete your account and completely erase all stored emails, company profiles, and application statuses whenever you choose:
               </p>
-              <div className="rounded-xl border border-zinc-800 bg-zinc-900/50 p-3.5 flex items-center justify-between hover:border-zinc-700/60 transition-colors">
-                <span className="font-mono text-xs text-zinc-300">Dashboard → Settings → Danger Zone</span>
+              <div className="rounded-xl border border-zinc-800 bg-zinc-900/50 p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+                <div>
+                  <p className="text-xs font-semibold text-white">Self-Service Immediate Deletion</p>
+                  <p className="text-[11px] text-zinc-500 font-mono">Irreversibly deletes your account from our PostgreSQL database.</p>
+                </div>
                 <Link
                   href="/settings"
-                  className="text-xs font-semibold text-emerald-400 hover:text-emerald-300 transition-colors"
+                  className="rounded-lg border border-rose-500/30 bg-rose-500/10 px-3.5 py-1.5 text-xs font-semibold text-rose-300 hover:bg-rose-500/20 transition-colors whitespace-nowrap"
                 >
-                  Go to Settings →
+                  Settings → Danger Zone →
                 </Link>
               </div>
             </section>
           </AnimatedSection>
 
-          {/* 9. Contact & Support */}
-          <AnimatedSection delay={185}>
-            <section className="rounded-2xl border border-zinc-800/60 bg-[#101014]/80 backdrop-blur-sm p-6 sm:p-8 shadow-xl shadow-black/40 hover:border-zinc-700/60 transition-all duration-300">
-              <div className="flex items-center gap-3 mb-5">
+          {/* 8. Contact & Feedback */}
+          <AnimatedSection delay={180}>
+            <section className="rounded-2xl border border-zinc-800/70 bg-[#101014]/80 backdrop-blur-sm p-6 sm:p-8 shadow-xl shadow-black/40 hover:border-zinc-700/60 transition-all duration-300">
+              <div className="flex items-center gap-3 mb-4">
                 <Mail className="h-5 w-5 text-emerald-400" />
-                <h2 className="text-lg font-bold text-white">Contact & Support Desk</h2>
+                <h2 className="text-lg font-bold text-white">Questions &amp; Contact Desk</h2>
               </div>
               <p className="text-sm leading-relaxed text-zinc-400 mb-4">
-                For legal inquiries, clarification on these Terms, or technical support requests, please submit a ticket via our Feedback & Support Desk:
+                If you have questions about these Terms, need support, or wish to suggest improvements, our student team is always open to feedback:
               </p>
               <div className="rounded-xl border border-zinc-800 bg-zinc-900/60 p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
                 <div>
-                  <p className="text-xs font-semibold text-white">{APP_NAME} Engineering & Compliance</p>
+                  <p className="text-xs font-semibold text-white">{APP_NAME} Team</p>
                   <p className="text-[11px] text-zinc-500 font-mono">VIT Bhopal University · Student Project</p>
                 </div>
                 <Link
                   href="/feedback"
                   className="inline-flex items-center gap-2 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3.5 py-1.5 text-xs font-semibold text-emerald-300 hover:bg-emerald-500/20 transition-colors"
                 >
-                  <span>Submit Inquiry or Feedback →</span>
+                  <span>Open Feedback &amp; Support →</span>
                 </Link>
               </div>
             </section>
@@ -409,21 +429,21 @@ export default function TermsClient() {
         {/* Footer */}
         <AnimatedSection delay={200}>
           <div className="mt-16 pt-8 border-t border-zinc-800/60 flex flex-col sm:flex-row items-center justify-between gap-4 text-xs font-mono text-zinc-500">
-            <p>© {new Date().getFullYear()} {APP_NAME}. All rights reserved.</p>
+            <p>© {new Date().getFullYear()} {APP_NAME}. Built for students, with fairness and transparency.</p>
             <div className="flex items-center justify-center gap-3 sm:gap-4 whitespace-nowrap text-[11px]">
               <Link href="/privacy" className="hover:text-zinc-200 transition-colors whitespace-nowrap">
                 Privacy Policy
               </Link>
               <span className="text-zinc-700">·</span>
               <Link href="/feedback" className="hover:text-zinc-200 transition-colors whitespace-nowrap">
-                Feedback & Support
+                Feedback &amp; Support
               </Link>
             </div>
           </div>
         </AnimatedSection>
       </main>
 
-      {/* Hovering / Floating Scroll to Top Arrow Button */}
+      {/* Floating Scroll to Top */}
       <button
         type="button"
         onClick={scrollToTop}

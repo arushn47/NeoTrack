@@ -398,10 +398,11 @@ const SUBJECT_COMPANY_PATTERNS: RegExp[] = [
   // NeoPAT Eligibility & Registration:
   // "Congratulations! You're Eligible for M/s.Value Labs Placement Drive"
   // "Confirmed: Your Registration for Sabre Placement Drive"
-  /(?:congratulations!{1,3}\s*(?:you'?re\s+)?eligible\s+for\s+|confirmed:\s*(?:your\s+registration\s+for\s+)?)(?:m\/s\.?\s*)?([A-Za-z0-9&\s\-\.]+?)\s*(?:\([^)]+\))?\s+placement\s+drive/i,
+  /(?:congratulations\s*!{0,3}\s*(?:you'?re\s+)?eligible\s+for\s+|confirmed:\s*(?:your\s+registration\s+for\s+)?)(?:m\/s\.?\s*)?([A-Za-z0-9&\s\-\.]+?)\s*(?:\([^)]+\))?\s+placement\s+drive/i,
   // "Congratulations!! Zluri Super Dream Internship Selection List - 2027 Batch"
   // "Congratulations!! Flipkart Super Dream Internship Selection list 2027 Batch"
-  /(?:congratulations!{1,3}\s*)(?:for\s+)?([A-Za-z0-9&\s\-\.]+?)\s*(?:\([^)]+\))?\s+(?:super\s+dream|dream|regular|summer)?\s*(?:internship|placement|ppo|offer)?\s*(?:selection\s+list|shortlist)/i,
+  // "Congratulations !! Valuelabs Super Dream Internship Selection list - 2027 Batch !!"
+  /(?:congratulations\s*!{0,3}\s*)(?:for\s+)?([A-Za-z0-9&\s\-\.]+?)\s*(?:\([^)]+\))?\s+(?:super\s+dream|dream|regular|summer)?\s*(?:internship|placement|ppo|offer)?\s*(?:selection\s+list|shortlist)/i,
   // "Important: Date Change for Value Labs Placement Drive"
   // "Important: Date Change for Infosy 2027 batch Placement Drive"
   // "Important : Date change : Sandisk Device Design Centre Placement Drive"
@@ -437,9 +438,11 @@ const SUBJECT_COMPANY_PATTERNS: RegExp[] = [
   // "Reminder : ProcDNA Analytics Pvt. Ltd's Next round..."
   /reminder\s*:\s*([A-Za-z0-9&\s\-\.]+?)(?:'s|\s+next\s+round|\s+selection)/i,
   // "Urgent : MUFG (Mitsubishi UFJ Financial Group) : Registration..."
-  /^(?:urgent\s*:\s*)?(?:kind\s+attention!!?\s*)?([A-Za-z0-9&\s\-\.]+?)\s*(?:\([^)]+\))?\s*:\s*(?:registration|ppt|test|interview|shortlist|super\s+dream|dream|regular|placement|hiring|drive)/i,
+  /^(?:urgent\s*:\s*)?(?:kind\s+(?:attention|attn\.?)|attention|attn\.?)\s*!{0,3}\s*([A-Za-z0-9&\s\-\.]+?)\s*(?:\([^)]+\))?\s*:\s*(?:registration|ppt|test|interview|shortlist|super\s+dream|dream|regular|placement|hiring|drive)/i,
   // "Urgent : Kind Attention!! MUFG Applied candidates!!"
-  /^(?:urgent\s*:\s*)?(?:kind\s+attention!!?\s*)?([A-Za-z0-9&\s\-\.]+?)\s*(?:\([^)]+\))?\s+(?:applied|shortlisted|registered|selected)\s+(?:candidates|students|list)/i,
+  // "Kind Attn: Value labs applied students"
+  /^(?:urgent\s*:\s*)?(?:kind\s+(?:attention|attn\.?)|attention|attn\.?)\s*!{0,3}\s*([A-Za-z0-9&\s\-\.]+?)\s*(?:\([^)]+\))?\s+(?:applied|shortlisted|registered|selected)\s+(?:candidates|students|list)/i,
+  /^([A-Za-z0-9&\s\-\.]+?)\s*(?:\([^)]+\))?\s+(?:applied|shortlisted|registered|selected)\s+(?:candidates|students|list)/i,
   // "Fwd: MUFG (Mitsubishi UFJ Financial Group) Pre-placement talk..."
   /^(?:urgent\s*:\s*)?([A-Za-z0-9&\s\-\.]+?)\s*(?:\([^)]+\))?\s+(?:pre-placement|ppt|online\s+test|coding\s+test|interview|placement\s+drive|next\s+round)/i,
   // "Campus Placement | Company Name | Role"
@@ -458,10 +461,10 @@ const SUBJECT_PREFIXES = [
   /^(?:extended\s+deadline|extension\s+of\s+deadline|deadline\s+extended)\s*(?:[-:]\s*)?/i,
   /^(?:updated|update|revised|revision)\s*(?:regarding|on|for)?\s*(?:[-:]\s*)?/i,
   /^(?:urgent|immediately|immediate|important|critical)\s*(?:[-:]\s*)?/i,
-  /^(?:kind\s+attention!!?|attention!!?)\s*(?:[-:]\s*)?/i,
+  /^(?:kind\s+(?:attention|attn\.?)|attention|attn\.?)\s*!{0,3}\s*(?:[-:]\s*)?/i,
   /^confirmed\s*:\s*(?:your\s+registration\s+for\s+)?/i,
   /^confirmation\s*:\s*/i,
-  /^congratulations!{1,3}\s*(?:you'?re\s+)?(?:eligible\s+for\s+)?/i,
+  /^congratulations\s*!{0,3}\s*(?:you'?re\s+)?(?:eligible\s+for\s+)?/i,
   /^(?:important|urgent|update|reminder)?\s*[-:]?\s*date\s+change\s+(?:for|:)\s*/i,
   /^(?:date\s+change|rescheduled|schedule\s+change|time\s+change|venue\s+change)\s*(?:for|:)\s*/i,
   /^(?:placement\s+drive\s+date\s+update|drive\s+date\s+update)\s*(?:[-:]\s*)?/i,
@@ -469,7 +472,7 @@ const SUBJECT_PREFIXES = [
   /^venue\s+update\s*:\s*/i,
   /^registration\s*(?:for)?\s*(?:[-:]\s*)?/i,
   /^reminder\s*:\s*/i,
-  /^report\s+immediately\s*:\s*/i,
+  /^report\s+immediately\s*[-–—:]\s*/i,
   /^shortlist(?:ed)?\s+(?:candidates|students)?\s*(?:for|of)?\s*(?:[-:]\s*)?/i,
   /^selection\s+(?:list|process)\s+(?:for|of)?\s*(?:[-:]\s*)?/i,
   /^(?:corrigendum|addendum|rescheduled)\s*(?:[-:]\s*)?/i,
@@ -492,8 +495,9 @@ const SUBJECT_SUFFIXES = [
   /\s+2027\s+batch.*$/i,
   /\s+2026\s+batch.*$/i,
   /\s+pre[\s-]*placement.*$/i,
-  /\s+applied\s+candidates.*$/i,
-  /\s+shortlist.*$/i,
+  /\s+(?:applied|shortlisted|registered|selected)\s+(?:candidates|students).*$/i,
+  /\s+(?:super\s+dream|dream|regular)?\s*(?:internship|placement|ppo|offer)?\s*(?:selection\s+list|shortlist).*$/i,
+  /\s*[-–—:]\s*(?:urgent|immediate|important|critical|reminder|update)$/i,
 ];
 
 /**
@@ -676,6 +680,17 @@ export function extractCompanyAliases(rawName: string, canonicalName: string, dr
 
   add(canonicalName);
   add(rawName);
+
+  if (/^superjoin(?:\s+finance)?$/i.test(canonicalName.trim())) {
+    add('super join');
+    add('super join finance');
+  }
+
+  // Add collapsed alphanumeric form (e.g. "Value Labs" -> "valuelabs", "Squad Stack" -> "squadstack")
+  const collapsed = canonicalName.toLowerCase().replace(/[^a-z0-9]/g, '');
+  if (collapsed.length >= 3 && !ENGLISH_STOPWORDS.has(collapsed) && !isInvalidCompanyName(collapsed)) {
+    add(collapsed);
+  }
 
   // ROOT STEM EXTRACTION: Strip generic corporate suffixes to generate a shorter root alias.
   // e.g. "Unilever Industries" → also aliases "unilever", so college circulars that drop the
@@ -882,16 +897,14 @@ export function extractCompanyName(
       hasHighConfidenceCompany = candidates.some((c) => c.score >= 50);
     }
 
-    // 2. Drive Name: <Name> (Only consider if Company: was NOT specified)
-    if (!hasHighConfidenceCompany) {
-      const driveNameMatch = bodySnippet.match(
-        /(?:drive\s+name|name\s+of\s+the\s+drive)\s*[:\-*]*\s*([A-Za-z0-9&\s\-\.()]+?)(?:\s+(?:drive\s+number|new\s+drive\s+date|category|date\s+of\s+visit|eligibility|eligible|ctc|role|stipend|company|\n|\r|\*|$))/i
-      );
-      if (driveNameMatch && driveNameMatch[1]) {
-        // Strip trailing academic level tags (e.g. "Pallav tech ug" -> "Pallav tech")
-        const cleanDriveRaw = driveNameMatch[1].replace(/\s+(?:ug|pg|b\.?tech|m\.?tech|mca|mba)\b.*$/i, '');
-        addCandidate(cleanDriveRaw, 10);
-      }
+    // 2. Drive Name: <Name> (Specific drive identity like "EY GDS", "EY SAP", "Apple SDET")
+    const driveNameMatch = bodySnippet.match(
+      /(?:drive\s+name|name\s+of\s+the\s+drive)\s*[:\-*]*\s*([A-Za-z0-9&\s\-\.()]+?)(?:\s+(?:drive\s+number|new\s+drive\s+date|category|date\s+of\s+visit|eligibility|eligible|ctc|role|stipend|company|\n|\r|\*|$))/i
+    );
+    if (driveNameMatch && driveNameMatch[1]) {
+      // Strip trailing academic level tags (e.g. "Pallav tech ug" -> "Pallav tech")
+      const cleanDriveRaw = driveNameMatch[1].replace(/\s+(?:ug|pg|b\.?tech|m\.?tech|mca|mba)\b.*$/i, '');
+      addCandidate(cleanDriveRaw, 70);
     }
 
     if (candidates.length > 0) {

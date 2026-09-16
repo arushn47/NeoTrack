@@ -18,7 +18,10 @@ import {
   ShieldAlert,
 } from 'lucide-react';
 import { StatusChip, CategoryBadge } from '@/components/ui/status-chip';
-import { formatStipend } from '@/lib/utils';
+import { InstallPwaBanner } from '@/components/notifications/install-pwa-banner';
+import { formatStipend, cn } from '@/lib/utils';
+import { cleanLocationString } from '@/lib/sync/locations';
+import { isInactiveStatus } from '@/lib/stages';
 import type { DashboardStats } from '@/types';
 
 export interface ActiveApplicationItem {
@@ -122,7 +125,7 @@ export default function DashboardClient({
   // Top 4 active drives prioritizing the most actionable & high-stakes stages
   const spotlightDrives = useMemo(() => {
     const active = activeApplications.filter(
-      (a) => !['not_shortlisted', 'rejected', 'not_applied', 'withdrawn', 'declined'].includes((a.status || '').toLowerCase())
+      (a) => !isInactiveStatus(a.status)
     );
 
     const getStageScore = (status: string) => {
@@ -225,6 +228,9 @@ export default function DashboardClient({
         </div>
       )}
 
+      {/* PWA Mobile Install & Instant Notifications Banner */}
+      <InstallPwaBanner />
+
       {/* Page Header */}
       <div>
         <h1 className="font-display text-xl sm:text-3xl font-extrabold tracking-tight text-zinc-100">
@@ -256,7 +262,11 @@ export default function DashboardClient({
             initial={{ opacity: 0, y: 18 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.5, delay: i * 0.06 }}
-            className={`rounded-xl border p-3 sm:p-4 min-w-0 ${ACCENTS[f.accent]}`}
+            className={cn(
+              "rounded-xl border p-3 sm:p-4 min-w-0",
+              ACCENTS[f.accent],
+              i === 4 && "col-span-2 sm:col-span-1"
+            )}
           >
             <div className="font-tabular font-display text-2xl sm:text-3xl font-extrabold tracking-tight">{f.value}</div>
             <div className="mt-1 text-[11px] sm:text-xs font-semibold text-zinc-300 truncate">{f.label}</div>
@@ -291,28 +301,58 @@ export default function DashboardClient({
 
       {/* Section 1: Upcoming Schedule & Assessment Agenda */}
       <div className="space-y-4 pt-2">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <Calendar className="h-4 w-4 text-emerald-400" />
-            <h2 className="font-display text-lg font-bold tracking-tight text-zinc-100">
+        <div className="flex items-center justify-between gap-2 min-w-0">
+          <div className="flex items-center gap-2 min-w-0">
+            <Calendar className="h-4 w-4 text-emerald-400 shrink-0" />
+            <h2 className="font-display text-sm sm:text-base md:text-lg font-bold tracking-tight text-zinc-100 truncate">
               Upcoming Assessment Schedule
             </h2>
           </div>
           <Link
             href="/calendar"
-            className="flex items-center gap-1 text-xs font-semibold text-zinc-500 hover:text-emerald-400 transition-colors"
+            className="flex items-center gap-1 text-xs font-semibold text-zinc-400 hover:text-emerald-400 transition-colors shrink-0 whitespace-nowrap"
           >
             Full Calendar <ArrowRight className="h-3.5 w-3.5" />
           </Link>
         </div>
 
         {upcomingEvents.length === 0 ? (
-          <div className="rounded-2xl border border-zinc-800 bg-[#101014] p-8 text-center">
-            <CheckCircle2 className="mx-auto h-8 w-8 text-emerald-400/80 mb-2" />
-            <h3 className="font-display text-sm font-bold text-zinc-200">No imminent assessments in the queue</h3>
-            <p className="mt-1 text-xs text-zinc-500 max-w-sm mx-auto">
-              You are all caught up for upcoming tests. When CDC circulars release new test dates, they appear right here.
+          <div className="relative overflow-hidden rounded-2xl border border-zinc-800/80 bg-gradient-to-b from-[#121218] to-[#0a0a0e] p-6 sm:p-8 text-center shadow-lg">
+            {/* Ambient subtle glow background */}
+            <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-emerald-500/10 via-transparent to-transparent pointer-events-none" />
+
+            {/* Layered Icon Badge with Radar / Calendar aura */}
+            <div className="relative mx-auto mb-3.5 flex h-14 w-14 items-center justify-center rounded-2xl border border-emerald-500/25 bg-emerald-500/10 shadow-[0_0_24px_rgba(16,185,129,0.15)]">
+              <Calendar className="h-6 w-6 text-emerald-400" />
+              <span className="absolute -bottom-1 -right-1 flex h-5 w-5 items-center justify-center rounded-full bg-[#0a0a0e] border border-emerald-500/40 shadow-sm">
+                <CheckCircle2 className="h-3.5 w-3.5 text-emerald-400" />
+              </span>
+            </div>
+
+            <h3 className="font-display text-sm sm:text-base font-bold text-zinc-100 tracking-tight">
+              All Caught Up on Assessments
+            </h3>
+            <p className="mt-1.5 text-xs text-zinc-400 max-w-md mx-auto leading-relaxed">
+              No imminent online tests or interviews scheduled right now. The live inbox radar scans 24/7 for new CDC circulars and will notify you immediately.
             </p>
+
+            {/* Quick Status & Action Pills */}
+            <div className="mt-4 flex flex-wrap items-center justify-center gap-2 pt-1">
+              <div className="inline-flex items-center gap-1.5 rounded-full border border-zinc-800 bg-zinc-900/80 px-3 py-1 text-[11px] font-mono text-zinc-400 select-none">
+                <span className="relative flex h-1.5 w-1.5">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
+                  <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-emerald-400" />
+                </span>
+                <span>Active Radar · {stats.active_applications} drives tracked</span>
+              </div>
+              <Link
+                href="/calendar"
+                className="inline-flex items-center gap-1.5 rounded-full border border-zinc-700/60 bg-zinc-800/60 hover:bg-zinc-800 px-3 py-1 text-[11px] font-medium text-zinc-300 hover:text-white transition-all group"
+              >
+                <span>Browse calendar</span>
+                <ArrowRight className="h-3 w-3 text-zinc-400 group-hover:translate-x-0.5 transition-transform" />
+              </Link>
+            </div>
           </div>
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 w-full min-w-0 max-w-full">
@@ -327,7 +367,7 @@ export default function DashboardClient({
                     <span className="font-display text-sm font-bold text-zinc-100 group-hover:text-emerald-300 transition-colors truncate">
                       {ev.companyName || 'Company'}
                     </span>
-                    <span className="rounded-full border border-amber-500/30 bg-amber-500/10 px-2 py-0.5 font-mono text-[9px] font-bold uppercase tracking-wider text-amber-300">
+                    <span className={`rounded-full border px-2 py-0.5 font-mono text-[9px] font-bold uppercase tracking-wider ${NEXT_EVENT_CLS[ev.event_type] || 'border-amber-500/30 bg-amber-500/10 text-amber-300'}`}>
                       {ev.event_type.replace(/_/g, ' ')}
                     </span>
                   </div>
@@ -365,15 +405,17 @@ export default function DashboardClient({
           </div>
           <Link
             href="/companies?filter=active"
-            className="flex items-center gap-1.5 text-xs font-bold text-emerald-400 hover:text-emerald-300 transition-colors"
+            className="flex items-center gap-1.5 text-xs font-bold text-emerald-400 hover:text-emerald-300 transition-colors shrink-0 whitespace-nowrap"
           >
             View all {stats.active_applications} active drives <ArrowRight className="h-3.5 w-3.5" />
           </Link>
         </div>
 
         {spotlightDrives.length === 0 ? (
-          <div className="rounded-2xl border border-zinc-800 bg-[#101014] p-6 sm:p-8 text-center">
-            <p className="font-mono text-xs sm:text-sm text-zinc-500">No active applications in the spotlight right now.</p>
+          <div className="relative overflow-hidden rounded-2xl border border-zinc-800/80 bg-gradient-to-b from-[#121218] to-[#0a0a0e] p-6 sm:p-8 text-center shadow-lg">
+            <Zap className="mx-auto h-8 w-8 text-zinc-600 mb-2" />
+            <p className="font-display text-sm font-bold text-zinc-300">No active applications in the spotlight</p>
+            <p className="mt-1 font-mono text-xs text-zinc-500">Apply to campus circulars or explore all tracked drives.</p>
           </div>
         ) : (
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 w-full min-w-0 max-w-full">
@@ -415,9 +457,12 @@ export default function DashboardClient({
                     <span className="font-tabular font-mono text-xs sm:text-sm font-bold text-zinc-200 shrink-0">
                       {c.ctc || formatStipend(c.stipend) || 'TBA'}
                     </span>
-                    <span className="flex items-center gap-1 min-w-0 max-w-[130px] sm:max-w-none truncate shrink-0">
-                      <MapPin className="h-3 w-3 shrink-0 text-zinc-500" />
-                      <span className="truncate">{c.location || 'Pan-India'}</span>
+                    <span
+                      className="flex items-center gap-1 min-w-0 max-w-[130px] sm:max-w-none truncate shrink-0 text-zinc-400"
+                      title={`Work Location: ${cleanLocationString(c.location)}`}
+                    >
+                      <MapPin className="h-3.5 w-3.5 shrink-0 text-zinc-400" />
+                      <span className="truncate">{cleanLocationString(c.location)}</span>
                     </span>
                     <span className="ml-auto font-mono text-[10px] text-zinc-600 shrink-0 transition-colors duration-200 group-hover:text-emerald-400">
                       Open drive details ↗

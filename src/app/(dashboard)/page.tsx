@@ -2,7 +2,7 @@ import type { Metadata } from 'next';
 import { requireSession } from '@/lib/auth';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { detectCampus, detectBranch } from '@/lib/utils';
-import { getEffectiveStage } from '@/lib/stages';
+import { getEffectiveStage, isInactiveStatus, isEliminatedStatus } from '@/lib/stages';
 import DashboardClient from './dashboard-client';
 
 export const metadata: Metadata = {
@@ -70,18 +70,17 @@ export default async function DashboardPage() {
   };
 
   const nonAppliedStatuses = ['not_applied', 'withdrawn', 'declined'];
-  const inactiveStatuses = ['not_shortlisted', 'rejected', 'not_applied', 'withdrawn', 'declined'];
   const appStatusMap = new Map<string, string>();
 
   if (applications) {
     for (const app of applications) {
       appStatusMap.set(app.company_id, app.status);
       if (!nonAppliedStatuses.includes(app.status)) stats.total_applied++;
-      if (!inactiveStatuses.includes(app.status)) stats.active_applications++;
+      if (!isInactiveStatus(app.status)) stats.active_applications++;
       if (app.status === 'applied') stats.applied++;
       if (['shortlisted', 'test_scheduled', 'test_completed', 'interview_scheduled', 'interview_completed'].includes(app.status)) stats.shortlisted++;
       if (app.status === 'not_shortlisted') stats.not_shortlisted++;
-      if (app.status === 'rejected') stats.rejected++;
+      if (isEliminatedStatus(app.status)) stats.rejected++;
       if (app.status === 'withdrawn' || app.status === 'declined') stats.withdrawn++;
       if (['selected', 'offer', 'offer_received'].includes(app.status)) stats.selected++;
     }
@@ -140,7 +139,7 @@ export default async function DashboardPage() {
         if (hasApplied) continue;
       } else {
         // Skip eliminated or opted-out companies
-        if (['not_shortlisted', 'rejected', 'not_applied', 'withdrawn', 'declined'].includes(companyStatus)) {
+        if (isInactiveStatus(companyStatus)) {
           continue;
         }
 

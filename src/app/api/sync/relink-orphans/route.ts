@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { getSession } from '@/lib/auth';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { extractCompanyName } from '@/lib/sync/classifier';
+import { isFuzzyCompanyMatch } from '@/lib/sync/engine';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
@@ -56,8 +57,18 @@ export async function POST() {
     for (const company of companies) {
       const compNameLower = company.name.toLowerCase().trim();
 
-      // Exact match
-      if (compNameLower === extLower) {
+      // Exact or collapsed alphanumeric match (e.g. "Value Labs" === "Valuelabs", "Squad Stack" === "SquadStack")
+      const compAlpha = compNameLower.replace(/[^a-z0-9]/g, '');
+      const extAlpha = extLower.replace(/[^a-z0-9]/g, '');
+
+      if (compNameLower === extLower || (compAlpha.length >= 3 && extAlpha.length >= 3 && compAlpha === extAlpha)) {
+        matchedCompanyId = company.id;
+        matchedCompanyName = company.name;
+        break;
+      }
+
+      // Fuzzy match engine check
+      if (isFuzzyCompanyMatch(company.name, extractedName)) {
         matchedCompanyId = company.id;
         matchedCompanyName = company.name;
         break;
@@ -74,10 +85,16 @@ export async function POST() {
         break;
       }
 
-      // Check aliases with word boundary
+      // Check aliases with word boundary and alphanumeric match
       const aliases: string[] = company.aliases || [];
       for (const alias of aliases) {
         const aliasLower = alias.toLowerCase().trim();
+        const aliasAlpha = aliasLower.replace(/[^a-z0-9]/g, '');
+        if (aliasAlpha.length >= 3 && extAlpha.length >= 3 && aliasAlpha === extAlpha) {
+          matchedCompanyId = company.id;
+          matchedCompanyName = company.name;
+          break;
+        }
         if (aliasLower.length >= 2) {
           const escaped = aliasLower.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
           const regex = new RegExp(`(?:^|[^a-z0-9])${escaped}(?:[^a-z0-9]|$)`, 'i');

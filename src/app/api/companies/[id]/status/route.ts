@@ -30,6 +30,20 @@ export async function PATCH(
     );
   }
 
+  let normalizedStatus = status;
+  let normalizedNotes = notes;
+
+  if (status === 'rejected_test' || status === 'test_eliminated') {
+    normalizedStatus = 'rejected';
+    normalizedNotes = notes || 'Eliminated in Test Round';
+  } else if (status === 'rejected_interview' || status === 'interview_eliminated') {
+    normalizedStatus = 'rejected';
+    normalizedNotes = notes || 'Interviewed · Not Selected';
+  } else if (status === 'not_shortlisted') {
+    normalizedStatus = 'not_shortlisted';
+    normalizedNotes = notes || 'Not Shortlisted for Test';
+  }
+
   const supabase = createAdminClient();
 
   // Upsert application record with manual override flag
@@ -39,14 +53,14 @@ export async function PATCH(
       {
         user_id: session.userId,
         company_id: companyId,
-        status,
+        status: normalizedStatus,
         status_source: 'manual_override',
         status_confidence: 'manual',
         manual_override: true,
         role: role || undefined,
         ctc: ctc || undefined,
         location: location || undefined,
-        notes: notes || undefined,
+        notes: normalizedNotes || undefined,
         last_updated: new Date().toISOString(),
       },
       { onConflict: 'user_id,company_id' }

@@ -9,11 +9,13 @@ import {
   CalendarDays,
   PieChart,
   Settings as SettingsIcon,
+  Search,
 } from 'lucide-react';
 
 const navItems = [
   { label: 'Dashboard', href: '/', icon: LayoutGrid, exact: true },
   { label: 'Companies', href: '/companies', icon: Building2 },
+  { label: 'Search', href: '/search', icon: Search },
   { label: 'Calendar', href: '/calendar', icon: CalendarDays },
   { label: 'Analytics', href: '/analytics', icon: PieChart },
   { label: 'Settings', href: '/settings', icon: SettingsIcon },
@@ -23,7 +25,7 @@ export default function MobileNav() {
   const pathname = usePathname();
 
   return (
-    <nav className="lg:hidden fixed bottom-0 left-0 right-0 z-40 flex items-stretch border-t border-zinc-800/80 bg-[#0b0b0e]/95 backdrop-blur-xl safe-area-pb">
+    <nav className="lg:hidden fixed inset-x-0 bottom-0 z-50 flex items-stretch border-t border-zinc-800/80 bg-[#0b0b0e] safe-area-pb select-none">
       <div className="flex items-center justify-around w-full h-14 px-1 max-w-lg mx-auto">
         {navItems.map((item) => {
           const isActive = item.exact

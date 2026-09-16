@@ -17,6 +17,7 @@ export interface StageStepperProps {
   stage?: number;
   latestEvent?: EventLike | null;
   events?: EventLike[] | null;
+  notes?: string | null;
   compact?: boolean;
   className?: string;
 }
@@ -26,10 +27,11 @@ export function StageStepper({
   stage: stageProp,
   latestEvent,
   events,
+  notes,
   compact = false,
   className,
 }: StageStepperProps) {
-  const effective = getEffectiveStage(status, latestEvent, events);
+  const effective = getEffectiveStage(status, latestEvent, events, notes);
   const currentStage = stageProp ?? effective.stageIndex;
   const eliminatedStage = effective.eliminatedStage;
   const furthestPassed = effective.furthestPassedStage;
@@ -162,8 +164,12 @@ export function StageStepper({
         if (isEliminated) {
           if (i === 0) {
             displayLabel = compact ? 'Screening' : 'Screened Out';
-          } else if (i === 2 && effective.effectiveStatus === 'not_shortlisted') {
+          } else if (i === 2) {
             displayLabel = compact ? 'Shortlist' : 'Not Shortlisted';
+          } else if (i === 3) {
+            displayLabel = compact ? 'Eliminated' : 'Eliminated (Test)';
+          } else if (i === 4) {
+            displayLabel = compact ? 'Not Selected' : 'Not Selected (Interview)';
           }
         }
 
@@ -189,12 +195,12 @@ export function StageStepper({
                     isEliminated
                       ? 'border-rose-500/70 bg-rose-500/20 text-rose-400 ring-2 ring-rose-500/40 shadow-[0_0_12px_rgba(244,63,94,0.35)]'
                       : isCurrent
-                      ? activeStyle.circle
-                      : isHistoricalPassed
-                      ? 'border-emerald-500/35 bg-emerald-500/10 text-emerald-400/80'
-                      : isWithdrawn && i <= furthestPassed
-                      ? 'border-zinc-700 bg-zinc-850 text-zinc-400'
-                      : 'border-zinc-800 bg-[#141418] text-zinc-600'
+                        ? activeStyle.circle
+                        : isHistoricalPassed
+                          ? 'border-emerald-500/35 bg-emerald-500/10 text-emerald-400/80'
+                          : isWithdrawn && i <= furthestPassed
+                            ? 'border-zinc-700 bg-zinc-850 text-zinc-400'
+                            : 'border-zinc-800 bg-[#141418] text-zinc-600'
                   )}
                 >
                   {isEliminated ? '✕' : (isCompleted || isHistoricalPassed) ? '✓' : i + 1}
@@ -208,10 +214,10 @@ export function StageStepper({
                   isEliminated
                     ? 'text-rose-400 font-bold'
                     : isCurrent
-                    ? activeStyle.text
-                    : isHistoricalPassed
-                    ? 'text-emerald-400/75 font-medium'
-                    : 'text-zinc-600 font-medium'
+                      ? activeStyle.text
+                      : isHistoricalPassed
+                        ? 'text-emerald-400/75 font-medium'
+                        : 'text-zinc-600 font-medium'
                 )}
               >
                 {displayLabel}
@@ -225,8 +231,8 @@ export function StageStepper({
                   eliminatedStage !== -1 && i === eliminatedStage - 1
                     ? 'bg-rose-500/70'
                     : i < currentStage
-                    ? 'bg-emerald-500/45'
-                    : 'bg-zinc-800'
+                      ? 'bg-emerald-500/45'
+                      : 'bg-zinc-800'
                 )}
               />
             )}

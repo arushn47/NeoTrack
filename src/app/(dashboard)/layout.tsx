@@ -4,6 +4,7 @@ import Sidebar from '@/components/layout/sidebar';
 import Topbar from '@/components/layout/topbar';
 import MobileNav from '@/components/layout/mobile-nav';
 import ChatAssistant from '@/components/shared/chat-assistant';
+import { SyncProvider } from '@/context/sync-context';
 
 export default async function DashboardLayout({
   children,
@@ -25,20 +26,26 @@ export default async function DashboardLayout({
   const lastSyncAt = accounts?.[0]?.last_sync_at || null;
 
   return (
-    <div className="min-h-screen bg-bg-primary relative w-full max-w-full overflow-x-clip">
-      <Sidebar />
-      <div className="flex-1 flex flex-col min-w-0 lg:pl-60 w-full max-w-full">
-        <Topbar
+    <SyncProvider initialLastSyncAt={lastSyncAt}>
+      <div className="min-h-screen bg-bg-primary relative w-full max-w-full overflow-x-clip">
+        <Sidebar
           userName={session.name}
           userAvatar={session.avatar}
           lastSyncAt={lastSyncAt}
         />
-        <main className="flex-1 px-5 sm:px-8 md:px-12 lg:px-16 xl:px-20 2xl:px-24 py-6 sm:py-8 pb-28 lg:pb-12 min-w-0 w-full">
-          {children}
-        </main>
+        <div className="flex-1 flex flex-col min-w-0 lg:pl-72 w-full max-w-full">
+          <Topbar
+            userName={session.name}
+            userAvatar={session.avatar}
+            lastSyncAt={lastSyncAt}
+          />
+          <main className="flex-1 px-4 sm:px-6 md:px-8 lg:px-10 xl:px-12 py-3 sm:py-3.5 lg:py-4 pb-28 lg:pb-4 min-w-0 w-full">
+            {children}
+          </main>
+        </div>
+        <MobileNav />
+        <ChatAssistant />
       </div>
-      <MobileNav />
-      <ChatAssistant />
-    </div>
+    </SyncProvider>
   );
 }

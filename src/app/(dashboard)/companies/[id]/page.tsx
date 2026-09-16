@@ -77,7 +77,7 @@ export default async function CompanyDetailPage({
 
     supabase
       .from('candidate_matches')
-      .select('id, match_type, matched_value, match_location, created_at, email_id')
+      .select('id, match_type, matched_value, match_location, created_at, email_id, neo_id')
       .eq('user_id', session.userId),
 
     supabase
@@ -170,6 +170,7 @@ export default async function CompanyDetailPage({
       matchType: cm.match_type,
       matchedValue: cm.matched_value,
       matchLocation: (cm as { match_location?: string | null }).match_location || null,
+      neoId: (cm as { neo_id?: string | null }).neo_id || null,
       createdAt: cm.created_at,
     })),
   };

@@ -221,7 +221,22 @@ body::after {
 }
 
 .safe-area-pb {
-  padding-bottom: max(1rem, env(safe-area-inset-bottom, 1rem));
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+@media (max-width: 1023px) {
+  [data-sonner-toaster].app-toaster {
+    top: auto !important;
+    right: 12px !important;
+    bottom: calc(68px + env(safe-area-inset-bottom, 0px)) !important;
+    left: 12px !important;
+    width: auto !important;
+  }
+
+  [data-sonner-toaster].app-toaster [data-sonner-toast] {
+    width: 100%;
+    max-width: none;
+  }
 }
 
 /* Where's My Offer — Custom Utilities */
@@ -296,4 +311,27 @@ body::after {
 
 .animate-marquee {
   animation: marquee 28s linear infinite;
+}
+
+/* Sonner Toast Styling: Default dark card fallback + Transparent wrapper for custom PremiumToast */
+[data-sonner-toaster] [data-sonner-toast] {
+  background: #101014 !important;
+  border: 1px solid rgba(39, 39, 42, 0.9) !important;
+  box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.6), 0 8px 10px -6px rgba(0, 0, 0, 0.5) !important;
+  border-radius: 0.875rem !important;
+  padding: 0.75rem 1rem !important;
+  color: #f4f4f5 !important;
+  backdrop-filter: blur(16px) !important;
+}
+
+[data-sonner-toaster] [data-sonner-toast]:has([data-premium-toast]) {
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+  padding: 0 !important;
+  backdrop-filter: none !important;
+}
+
+[data-sonner-toaster] [data-close-button] {
+  display: none !important;
 }

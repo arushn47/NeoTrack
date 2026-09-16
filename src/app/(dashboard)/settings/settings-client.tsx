@@ -1,10 +1,10 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { motion, AnimatePresence } from 'framer-motion';
-import { toast } from 'sonner';
+import { appToast } from '@/lib/toast';
 import {
   Mail,
   Fingerprint,
@@ -19,6 +19,8 @@ import {
   X,
   Zap,
   Wrench,
+  GraduationCap,
+  Hash,
 } from 'lucide-react';
 import NotificationSettings from '@/components/notifications/notification-settings';
 import { cn } from '@/lib/utils';
@@ -47,6 +49,7 @@ const Card = ({
   children,
   danger,
   testid,
+  id,
   className,
 }: {
   icon: React.ComponentType<{ className?: string }>;
@@ -55,25 +58,44 @@ const Card = ({
   children: React.ReactNode;
   danger?: boolean;
   testid?: string;
+  id?: string;
   className?: string;
 }) => (
   <motion.section
+    id={id}
     data-testid={testid}
-    initial={{ opacity: 0, y: 16 }}
+    initial={{ opacity: 0, y: 12 }}
     animate={{ opacity: 1, y: 0 }}
-    transition={{ duration: 0.45 }}
+    transition={{ duration: 0.35 }}
     className={cn(
-      'rounded-2xl border p-5 sm:p-6',
-      danger ? 'border-rose-500/25 bg-rose-500/[0.03]' : 'border-zinc-800 bg-[#101014]',
+      'rounded-2xl border p-4 sm:p-6 shadow-sm',
+      danger
+        ? 'border-rose-500/25 bg-rose-500/[0.03]'
+        : 'border-white/[0.07] bg-[#121217]',
       className
     )}
   >
-    <div className="flex items-center gap-2.5">
-      <Icon className={`h-4 w-4 ${danger ? 'text-rose-400' : 'text-emerald-400'}`} />
-      <h2 className="font-display text-base font-bold tracking-tight text-white">{title}</h2>
+    <div className="flex items-center gap-3">
+      <div
+        className={cn(
+          'flex h-9 w-9 items-center justify-center rounded-xl border shrink-0',
+          danger
+            ? 'border-rose-500/25 bg-rose-500/10 text-rose-400'
+            : 'border-emerald-500/25 bg-emerald-500/10 text-emerald-400'
+        )}
+      >
+        <Icon className="h-4 w-4" />
+      </div>
+      <div className="min-w-0">
+        <h2 className="font-display text-sm sm:text-base font-bold tracking-tight text-white truncate">
+          {title}
+        </h2>
+        <p className="text-[11px] sm:text-xs text-zinc-400 leading-snug mt-0.5 line-clamp-2 sm:line-clamp-none">
+          {desc}
+        </p>
+      </div>
     </div>
-    <p className="mt-1.5 text-xs leading-relaxed text-zinc-500">{desc}</p>
-    <div className="mt-5">{children}</div>
+    <div className="mt-4 sm:mt-5">{children}</div>
   </motion.section>
 );
 
@@ -92,7 +114,7 @@ export default function SettingsClient({
 
   const [selectedCampus, setSelectedCampus] = useState<'VIT Bhopal' | 'VIT Vellore' | 'VIT Chennai' | 'VIT AP'>(() => {
     if (typeof window !== 'undefined') {
-      const stored = localStorage.getItem('neotrack_home_campus');
+      const stored = localStorage.getItem('wmo_home_campus');
       if (stored && ['VIT Bhopal', 'VIT Vellore', 'VIT Chennai', 'VIT AP'].includes(stored)) {
         return stored as 'VIT Bhopal' | 'VIT Vellore' | 'VIT Chennai' | 'VIT AP';
       }
@@ -103,9 +125,9 @@ export default function SettingsClient({
   const handleSelectCampus = (c: 'VIT Bhopal' | 'VIT Vellore' | 'VIT Chennai' | 'VIT AP') => {
     setSelectedCampus(c);
     if (typeof window !== 'undefined') {
-      localStorage.setItem('neotrack_home_campus', c);
+      localStorage.setItem('wmo_home_campus', c);
     }
-    toast.success(`Home campus updated to ${c}`);
+    appToast.success(`Home campus updated to ${c}`);
   };
 
   // Reprocess state with live progress
@@ -130,15 +152,24 @@ export default function SettingsClient({
   const [deleteConfirmText, setDeleteConfirmText] = useState('');
   const [isDeleting, setIsDeleting] = useState(false);
 
+  // Prevent accidental navigation or tab closing while archive is being reprocessed
+  useEffect(() => {
+    if (!reprocessing) return;
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      e.returnValue = '';
+    };
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, [reprocessing]);
+
   const personalAccount = accounts.find((a) => a.account_type === 'personal' && a.is_connected);
   const collegeAccount = accounts.find((a) => a.account_type === 'college' && a.is_connected);
 
   const handleSaveRegId = async () => {
     const trimmed = regId.trim().toUpperCase();
     if (trimmed && !/^[A-Z0-9]{6,12}$/.test(trimmed)) {
-      toast.error('Invalid Registration ID', {
-        description: 'ID should be 6-12 alphanumeric characters (e.g. 21BCE0492).',
-      });
+      appToast.error('Invalid Registration ID', 'ID should be 6-12 alphanumeric characters (e.g. 21BCE0492).');
       return;
     }
 
@@ -153,10 +184,10 @@ export default function SettingsClient({
       if (!res.ok) throw new Error('Failed to save ID');
 
       setRegId(trimmed);
-      toast.success(`Registration ID saved: ${trimmed || 'None'}`);
+      appToast.success(`Registration ID saved: ${trimmed || 'None'}`);
       router.refresh();
     } catch {
-      toast.error('Failed to save Registration ID');
+      appToast.error('Failed to save Registration ID');
     } finally {
       setIsSavingId(false);
     }
@@ -172,13 +203,13 @@ export default function SettingsClient({
         body: JSON.stringify({ gmail_account_id: accountId }),
       });
       if (res.ok) {
-        toast.success('Gmail account disconnected');
+        appToast.success('Gmail account disconnected');
         window.location.reload();
       } else {
-        toast.error('Failed to disconnect');
+        appToast.error('Failed to disconnect');
       }
     } catch {
-      toast.error('Failed to disconnect');
+      appToast.error('Failed to disconnect');
     } finally {
       setDisconnecting(null);
     }
@@ -188,9 +219,7 @@ export default function SettingsClient({
   const handleTriggerSync = () => {
     window.dispatchEvent(new CustomEvent('start-placement-sync'));
     window.scrollTo({ top: 0, behavior: 'smooth' });
-    toast.info('Starting sync…', {
-      description: 'Watch the live progress banner in the top navigation bar.',
-    });
+    appToast.info('Starting sync…', 'Watch live progress in the top navigation bar.');
   };
 
   // Handle Reprocess Archive with live streaming progress
@@ -250,12 +279,13 @@ export default function SettingsClient({
                   collegeCircularsLinked: parsed.collegeCircularsLinked,
                   updatedApplications: parsed.updatedApplications,
                 });
-                toast.success('Archive re-index complete', {
-                  description: `${parsed.neoPatDrivesCount || 0} official drives tracked, ${parsed.updatedApplications || 0} applications updated.`,
-                });
+                appToast.success(
+                  'Archive re-index complete',
+                  `${parsed.neoPatDrivesCount || 0} official drives tracked, ${parsed.updatedApplications || 0} applications updated.`
+                );
                 router.refresh();
               } else if (event === 'error') {
-                toast.error('Re-index error', { description: parsed.message });
+                appToast.error('Re-index error', parsed.message);
               }
             } catch {
               // Ignore parse error
@@ -264,7 +294,7 @@ export default function SettingsClient({
         }
       }
     } catch (err: any) {
-      toast.error('Reprocess failed', { description: err?.message || 'Network error' });
+      appToast.error('Reprocess failed', err?.message || 'Network error');
     } finally {
       setReprocessing(false);
       setReprocessProgress(null);
@@ -279,19 +309,16 @@ export default function SettingsClient({
       const res = await fetch('/api/user/reset', { method: 'POST' });
       const data = await res.json();
       if (res.ok) {
-        toast.success('All placement data wiped', {
-          description: 'Account reset to fresh candidate state. Starting clean sync…',
-        });
+        appToast.success('All placement data wiped', 'Account reset to fresh candidate state. Starting clean sync…');
         setShowResetModal(false);
         setResetConfirmText('');
-        // Trigger fresh sync immediately
         handleTriggerSync();
         router.refresh();
       } else {
-        toast.error('Reset failed', { description: data.error });
+        appToast.error('Reset failed', data.error);
       }
     } catch {
-      toast.error('Network error during data reset');
+      appToast.error('Network error during data reset');
     } finally {
       setIsResetting(false);
     }
@@ -305,68 +332,73 @@ export default function SettingsClient({
       const res = await fetch('/api/user/account', { method: 'DELETE' });
       const data = await res.json();
       if (res.ok) {
-        toast.success('Account terminated permanently');
+        appToast.success('Account terminated permanently');
         setShowDeleteModal(false);
         setDeleteConfirmText('');
         window.location.href = '/login';
       } else {
-        toast.error('Termination failed', { description: data.error });
+        appToast.error('Termination failed', data.error);
         setIsDeleting(false);
       }
     } catch {
-      toast.error('Network error during account termination');
+      appToast.error('Network error during account termination');
       setIsDeleting(false);
     }
   };
 
   return (
-    <div data-testid="settings-page" className="mx-auto max-w-7xl space-y-6 w-full min-w-0">
+    <div data-testid="settings-page" className="mx-auto max-w-7xl space-y-4 sm:space-y-6 w-full min-w-0 pb-16">
       {/* Header */}
       <div>
-        <h1 className="font-display text-xl sm:text-3xl font-extrabold tracking-tight text-white">
-          Settings
+        <h1 className="font-display text-xl sm:text-2xl font-extrabold tracking-tight text-white">
+          Settings & Radar
         </h1>
-        <p className="mt-1 text-xs sm:text-sm text-zinc-500">
-          Connected inboxes, registration ID & sync preferences
+        <p className="mt-0.5 text-xs sm:text-sm text-zinc-400">
+          Connected inboxes, applicant ID & sync preferences
         </p>
       </div>
 
-      {/* Section: Candidate Profile & Campus Setup (2-Column Grid on Desktop) */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 sm:gap-6 items-stretch">
+      {/* Section 1: Candidate Profile & Campus Setup */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-6 items-stretch">
         {/* Card 1: Candidate Registration ID */}
         <Card
           icon={Fingerprint}
-          title="NeoPAT Candidate Registration ID"
-          desc="Your unique campus ID — the Excel scanner matches this in every shortlist attachment."
+          title="Registration ID (NeoPAT)"
+          desc="Excel shortlist scanner matches this unique ID across all attachment sheets."
           testid="regid-card"
           className="flex flex-col justify-between"
         >
-          <div className="space-y-3">
-            <div className="flex flex-col sm:flex-row gap-2.5 sm:gap-3 w-full">
+          <div className="space-y-2.5">
+            {/* Integrated app input row */}
+            <div className="flex items-center rounded-xl border border-white/[0.08] bg-zinc-900/60 p-1.5 focus-within:border-emerald-500/50 transition-colors">
+              <div className="pl-2 pr-1 text-emerald-400/80">
+                <Hash className="h-4 w-4" />
+              </div>
               <input
                 data-testid="regid-input"
                 value={regId}
                 onChange={(e) => setRegId(e.target.value.toUpperCase())}
                 placeholder="e.g. 21BCE0492"
                 maxLength={12}
-                className="h-11 flex-1 rounded-lg border border-zinc-800 bg-zinc-900/60 px-4 font-mono text-sm tracking-widest text-zinc-100 placeholder:text-zinc-600 placeholder:font-sans placeholder:tracking-normal focus:border-emerald-500/40 focus:outline-none"
+                className="h-9 flex-1 bg-transparent px-2 font-mono text-sm tracking-widest text-zinc-100 placeholder:text-zinc-600 placeholder:font-sans placeholder:tracking-normal focus:outline-none uppercase"
               />
               <button
                 data-testid="regid-save-btn"
                 onClick={handleSaveRegId}
                 disabled={isSavingId}
-                className="h-11 rounded-lg bg-emerald-500 px-5 text-sm font-bold text-zinc-950 transition-colors hover:bg-emerald-400 disabled:opacity-60 cursor-pointer w-full sm:w-auto text-center shrink-0"
+                className="h-9 rounded-lg bg-emerald-500 px-3.5 sm:px-4 text-xs font-bold text-zinc-950 transition-all hover:bg-emerald-400 active:scale-95 disabled:opacity-60 cursor-pointer shrink-0"
               >
                 {isSavingId ? 'Saving…' : 'Save ID'}
               </button>
             </div>
-            <p className="text-[11px] text-zinc-500 leading-relaxed">
-              Matched against roll number columns, candidate tables, and shortlist attachments.
+            <p className="text-[11px] text-zinc-400 leading-snug">
+              Matched against roll number columns, candidate tables & Excel sheets.
             </p>
           </div>
-          <div className="mt-4 pt-3 border-t border-zinc-800/80 flex items-center justify-between text-[11px] text-zinc-400">
-            <span className="text-zinc-500">Shortlist Scanner:</span>
-            <span className="font-mono text-emerald-400 font-semibold flex items-center gap-1.5">
+
+          <div className="mt-3.5 pt-2.5 border-t border-white/[0.05] flex items-center justify-between text-[11px]">
+            <span className="text-zinc-500 font-mono">Shortlist Scanner</span>
+            <span className="font-mono text-emerald-400 font-semibold flex items-center gap-1.5 text-[11px]">
               <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" /> Active & Monitoring
             </span>
           </div>
@@ -375,54 +407,54 @@ export default function SettingsClient({
         {/* Card 2: Home Campus & Academic Profile */}
         <Card
           icon={Building2}
-          title="Home Campus & Academic Profile"
-          desc="Used to calculate whether campus placement drives require travel, and to verify branch eligibility."
+          title="Campus & Academic Profile"
+          desc="Used to calculate travel requirements and verify branch eligibility criteria."
           testid="campus-card"
           className="flex flex-col justify-between"
         >
-          <div className="space-y-3.5">
+          <div className="space-y-3">
             <div>
-              <label className="text-xs font-semibold text-zinc-300 mb-2 block">Home Campus</label>
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+              <span className="font-mono text-[10px] font-bold uppercase tracking-wider text-zinc-400 block mb-2">
+                Home Campus
+              </span>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5 p-1 rounded-xl bg-zinc-900/60 border border-white/[0.06]">
                 {(['VIT Bhopal', 'VIT Vellore', 'VIT Chennai', 'VIT AP'] as const).map((c) => (
                   <button
                     key={c}
                     type="button"
                     onClick={() => handleSelectCampus(c)}
-                    className={`rounded-lg border px-3 py-2 text-xs font-semibold transition-all text-center cursor-pointer ${
+                    className={cn(
+                      'rounded-lg py-2 px-2 text-xs font-semibold transition-all text-center cursor-pointer active:scale-95',
                       selectedCampus === c
-                        ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300 shadow-[0_0_12px_rgba(16,185,129,0.12)]'
-                        : 'border-zinc-800 bg-zinc-900/60 text-zinc-400 hover:border-zinc-700 hover:text-zinc-200'
-                    }`}
+                        ? 'border border-emerald-500/40 bg-emerald-500/15 text-emerald-300 shadow-[0_0_12px_rgba(16,185,129,0.12)]'
+                        : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/50'
+                    )}
                   >
                     {c}
                   </button>
                 ))}
               </div>
               <p className="mt-2 text-[11px] text-zinc-500">
-                {collegeAccount?.email ? `Auto-detected from ${collegeAccount.email}: ` : 'Active campus: '}
+                {collegeAccount?.email ? 'Auto-detected from inbox: ' : 'Active campus: '}
                 <span className="text-zinc-300 font-mono font-bold">{selectedCampus}</span>
               </p>
             </div>
           </div>
 
           {(detectedBranch || detectedRegNo) && (
-            <div className="mt-4 pt-3 border-t border-zinc-800/80 flex flex-wrap items-center gap-3 text-xs text-zinc-400">
+            <div className="mt-3.5 pt-2.5 border-t border-white/[0.05] flex flex-wrap items-center gap-2 text-xs">
               {detectedBranch && (
-                <div className="flex items-center gap-1.5">
-                  <span className="text-zinc-500 text-[11px]">Branch:</span>
-                  <span className="font-mono text-zinc-200 font-semibold px-2 py-0.5 rounded bg-zinc-800 border border-zinc-700 text-[11px]">
-                    {detectedBranch}
-                  </span>
+                <div className="flex items-center gap-1.5 rounded-lg bg-zinc-900/80 border border-white/[0.06] px-2.5 py-1">
+                  <GraduationCap className="w-3.5 h-3.5 text-zinc-500" />
+                  <span className="text-zinc-500 text-[10px] uppercase font-mono">Branch:</span>
+                  <span className="font-mono text-zinc-200 font-semibold text-[11px]">{detectedBranch}</span>
                 </div>
               )}
-              {detectedBranch && detectedRegNo && <span className="text-zinc-600">·</span>}
               {detectedRegNo && (
-                <div className="flex items-center gap-1.5">
-                  <span className="text-zinc-500 text-[11px]">Reg No:</span>
-                  <span className="font-mono text-zinc-200 font-semibold px-2 py-0.5 rounded bg-zinc-800 border border-zinc-700 text-[11px]">
-                    {detectedRegNo}
-                  </span>
+                <div className="flex items-center gap-1.5 rounded-lg bg-zinc-900/80 border border-white/[0.06] px-2.5 py-1">
+                  <Fingerprint className="w-3.5 h-3.5 text-zinc-500" />
+                  <span className="text-zinc-500 text-[10px] uppercase font-mono">Reg No:</span>
+                  <span className="font-mono text-zinc-200 font-semibold text-[11px]">{detectedRegNo}</span>
                 </div>
               )}
             </div>
@@ -430,151 +462,160 @@ export default function SettingsClient({
         </Card>
       </div>
 
-      {/* Card 3: Connected Gmail Accounts (2-Column Grid on Desktop) */}
+      {/* Section 2: Connected Gmail Accounts */}
       <Card
         icon={Mail}
-        title="Connected Gmail Accounts"
-        desc="Both inboxes are read-only. Tokens are AES-256 encrypted and revocable anytime."
+        title="Connected Gmail Inboxes"
+        desc="Dual inboxes are read-only. Access tokens are AES-256 encrypted and revocable anytime."
         testid="gmail-card"
       >
-        <div className="space-y-4">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5 sm:gap-4">
+        <div className="space-y-3 sm:space-y-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             {/* Personal Gmail Box */}
-            <div className="flex flex-col justify-between gap-4 rounded-xl border border-zinc-800 bg-zinc-900/40 p-4 sm:p-5">
-              <div className="flex items-start gap-3 min-w-0">
-                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-emerald-500/25 bg-emerald-500/10">
-                  <Mail className="h-5 w-5 text-emerald-400" />
-                </div>
-                <div className="min-w-0 flex-1">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span className="text-sm font-semibold text-zinc-100">Personal Gmail</span>
-                    {personalAccount ? (
-                      <span className="flex items-center gap-1 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider text-emerald-300">
-                        <CheckCheck className="h-2.5 w-2.5" /> Connected
-                      </span>
-                    ) : (
-                      <span className="rounded-full border border-zinc-700 bg-zinc-800 px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider text-zinc-400">
-                        Not Connected
-                      </span>
-                    )}
+            <div className="rounded-xl border border-white/[0.06] bg-zinc-900/50 p-3.5 sm:p-4 space-y-3">
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex items-center gap-2.5 min-w-0">
+                  <div className="h-9 w-9 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center shrink-0">
+                    <Mail className="h-4 w-4 text-emerald-400" />
                   </div>
-                  <div className="mt-1 truncate font-mono text-xs text-zinc-300">
-                    {personalAccount ? personalAccount.email : userEmail || 'your.personal@gmail.com'}
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-xs sm:text-sm font-semibold text-zinc-100 truncate">
+                        Personal Gmail
+                      </span>
+                      {personalAccount ? (
+                        <span className="inline-flex items-center gap-1 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-1.5 py-0.5 text-[9px] font-bold text-emerald-300">
+                          <CheckCheck className="h-2.5 w-2.5" /> Synced
+                        </span>
+                      ) : (
+                        <span className="rounded-full border border-zinc-700 bg-zinc-800 px-1.5 py-0.5 text-[9px] font-bold text-zinc-400">
+                          Offline
+                        </span>
+                      )}
+                    </div>
+                    <div className="font-mono text-[11px] text-zinc-400 truncate mt-0.5">
+                      {personalAccount?.email || userEmail || 'your.personal@gmail.com'}
+                    </div>
                   </div>
-                  <p className="mt-1 text-[11px] text-zinc-500 leading-relaxed">
-                    Official registrations, application submissions, and offer letters.
-                  </p>
                 </div>
-              </div>
-              <div className="pt-3 border-t border-zinc-800/80 flex items-center justify-between">
-                <span className="text-[11px] text-zinc-500">Master company records</span>
                 {personalAccount ? (
                   <button
                     data-testid="disconnect-personal-btn"
                     onClick={() => handleDisconnect(personalAccount.id)}
                     disabled={disconnecting === personalAccount.id}
-                    className="shrink-0 rounded-lg border border-zinc-800 px-3.5 py-1.5 text-xs font-semibold text-zinc-400 transition-colors hover:border-rose-500/40 hover:text-rose-300 cursor-pointer"
+                    className="shrink-0 rounded-lg border border-zinc-800 hover:border-rose-500/40 px-2.5 py-1 text-[11px] font-semibold text-zinc-400 hover:text-rose-300 active:scale-95 transition-all cursor-pointer"
                   >
                     {disconnecting === personalAccount.id ? 'Disconnecting…' : 'Disconnect'}
                   </button>
                 ) : (
                   <a
                     href="/api/auth/google?type=personal"
-                    className="flex items-center justify-center gap-1.5 shrink-0 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3.5 py-1.5 text-xs font-semibold text-emerald-300 hover:bg-emerald-500/20 transition-colors"
+                    className="flex items-center gap-1 shrink-0 rounded-lg bg-emerald-500 hover:bg-emerald-400 px-3 py-1 text-[11px] font-bold text-zinc-950 active:scale-95 transition-all"
                   >
-                    <Plus className="h-3.5 w-3.5" /> Connect
+                    <Plus className="h-3 w-3" /> Connect
                   </a>
                 )}
+              </div>
+              <div className="pt-2 border-t border-white/[0.04] flex items-center justify-between text-[10px] text-zinc-500">
+                <span>NeoPAT registrations & offer letters</span>
+                <span className="font-mono text-zinc-400">Master Drives</span>
               </div>
             </div>
 
             {/* College Gmail Box */}
-            <div className="flex flex-col justify-between gap-4 rounded-xl border border-zinc-800 bg-zinc-900/40 p-4 sm:p-5">
-              <div className="flex items-start gap-3 min-w-0">
-                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-emerald-500/25 bg-emerald-500/10">
-                  <Mail className="h-5 w-5 text-emerald-400" />
-                </div>
-                <div className="min-w-0 flex-1">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span className="text-sm font-semibold text-zinc-100">
-                      College Gmail ({selectedCampus})
-                    </span>
-                    {collegeAccount ? (
-                      <span className="flex items-center gap-1 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider text-emerald-300">
-                        <CheckCheck className="h-2.5 w-2.5" /> Connected
-                      </span>
-                    ) : (
-                      <span className="rounded-full border border-amber-500/30 bg-amber-500/10 px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider text-amber-300">
-                        Action Required
-                      </span>
-                    )}
+            <div className="rounded-xl border border-white/[0.06] bg-zinc-900/50 p-3.5 sm:p-4 space-y-3">
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex items-center gap-2.5 min-w-0">
+                  <div className="h-9 w-9 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center shrink-0">
+                    <Mail className="h-4 w-4 text-emerald-400" />
                   </div>
-                  <div className="mt-1 truncate font-mono text-xs text-zinc-300">
-                    {collegeAccount ? collegeAccount.email : 'student.23bce@vitbhopal.ac.in'}
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-xs sm:text-sm font-semibold text-zinc-100 truncate">
+                        College Gmail
+                      </span>
+                      {collegeAccount ? (
+                        <span className="inline-flex items-center gap-1 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-1.5 py-0.5 text-[9px] font-bold text-emerald-300">
+                          <CheckCheck className="h-2.5 w-2.5" /> Synced
+                        </span>
+                      ) : (
+                        <span className="rounded-full border border-amber-500/30 bg-amber-500/10 px-1.5 py-0.5 text-[9px] font-bold text-amber-300">
+                          Action Required
+                        </span>
+                      )}
+                    </div>
+                    <div className="font-mono text-[11px] text-zinc-400 truncate mt-0.5">
+                      {collegeAccount?.email || 'student.23bce@vitbhopal.ac.in'}
+                    </div>
                   </div>
-                  <p className="mt-1 text-[11px] text-zinc-500 leading-relaxed">
-                    CDC circulars, eligibility sheets, test links & shortlist attachments.
-                  </p>
                 </div>
-              </div>
-              <div className="pt-3 border-t border-zinc-800/80 flex items-center justify-between">
-                <span className="text-[11px] text-zinc-500">Shortlist scanner sync</span>
                 {collegeAccount ? (
                   <button
                     data-testid="disconnect-college-btn"
                     onClick={() => handleDisconnect(collegeAccount.id)}
                     disabled={disconnecting === collegeAccount.id}
-                    className="shrink-0 rounded-lg border border-zinc-800 px-3.5 py-1.5 text-xs font-semibold text-zinc-400 transition-colors hover:border-rose-500/40 hover:text-rose-300 cursor-pointer"
+                    className="shrink-0 rounded-lg border border-zinc-800 hover:border-rose-500/40 px-2.5 py-1 text-[11px] font-semibold text-zinc-400 hover:text-rose-300 active:scale-95 transition-all cursor-pointer"
                   >
                     {disconnecting === collegeAccount.id ? 'Disconnecting…' : 'Disconnect'}
                   </button>
                 ) : (
                   <a
                     href="/api/auth/google?type=college"
-                    className="flex items-center justify-center gap-1.5 shrink-0 rounded-lg border border-emerald-500/40 bg-emerald-500 px-3.5 py-1.5 text-xs font-bold text-zinc-950 hover:bg-emerald-400 transition-colors"
+                    className="flex items-center gap-1 shrink-0 rounded-lg bg-emerald-500 hover:bg-emerald-400 px-3 py-1 text-[11px] font-bold text-zinc-950 active:scale-95 transition-all"
                   >
-                    <Plus className="h-3.5 w-3.5" /> Link College Gmail
+                    <Plus className="h-3 w-3" /> Connect
                   </a>
                 )}
+              </div>
+              <div className="pt-2 border-t border-white/[0.04] flex items-center justify-between text-[10px] text-zinc-500">
+                <span>CDC circulars & shortlist Excel attachments</span>
+                <span className="font-mono text-zinc-400">{selectedCampus}</span>
               </div>
             </div>
           </div>
 
           {/* Sync Trigger Action */}
-          <div className="pt-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-t border-zinc-800/80">
-            <div className="text-xs text-zinc-400">
-              Fetch incoming emails from both Gmail inboxes. Live status shows in the top navigation bar.
+          <div className="rounded-xl border border-white/[0.05] bg-zinc-900/40 p-3 sm:p-3.5 flex items-center justify-between gap-3">
+            <div className="flex items-center gap-2.5 min-w-0">
+              <div className="h-8 w-8 rounded-lg bg-emerald-500/10 border border-emerald-500/25 flex items-center justify-center shrink-0">
+                <Zap className="h-3.5 w-3.5 text-emerald-400" />
+              </div>
+              <div className="min-w-0">
+                <p className="text-xs font-semibold text-zinc-200 truncate">Manual Inbox Sync</p>
+                <p className="text-[10px] text-zinc-400 truncate">Check both Gmail accounts immediately</p>
+              </div>
             </div>
             <button
               type="button"
               onClick={handleTriggerSync}
-              className="flex items-center justify-center gap-2 rounded-lg border border-emerald-500/40 bg-emerald-500/10 px-4 py-2 text-xs font-semibold text-emerald-300 hover:bg-emerald-500/20 transition-all cursor-pointer shrink-0 w-full sm:w-auto"
+              className="flex items-center gap-1.5 rounded-lg bg-emerald-500/15 border border-emerald-500/35 px-3 py-1.5 text-xs font-semibold text-emerald-300 hover:bg-emerald-500/25 active:scale-95 transition-all cursor-pointer shrink-0"
             >
-              <Zap className="h-3.5 w-3.5 text-emerald-400" />
-              <span>Sync Inboxes Now</span>
+              <Zap className="h-3 w-3" />
+              <span>Sync Now</span>
             </button>
           </div>
         </div>
       </Card>
 
-      {/* Card 3: Real Persistent Notification & Reminder Preferences */}
+      {/* Section 3: Notification Settings */}
       <NotificationSettings />
 
-      {/* Card 4: Archive Re-index & Engine Diagnostics */}
+      {/* Section 4: Engine Diagnostics & Archive Re-index */}
       <Card
+        id="engine-diagnostics"
         icon={Wrench}
         title="Placement Engine Diagnostics & Archive Re-index"
-        desc="Re-run the latest extraction rules, drive matching algorithms, and bug fixes across all your stored emails without re-downloading from Gmail. Use this whenever you report an error in the Feedback tab and a fix is deployed."
+        desc="Re-run extraction rules, drive matching algorithms, and bug fixes across saved emails."
         testid="reprocess-card"
       >
-        <div className="space-y-4">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-4 rounded-xl border border-zinc-800 bg-zinc-900/40">
+        <div className="space-y-3">
+          <div className="rounded-xl border border-white/[0.06] bg-zinc-900/50 p-3.5 sm:p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
             <div className="space-y-0.5">
-              <div className="text-sm font-semibold text-zinc-200">
+              <div className="text-xs sm:text-sm font-semibold text-zinc-200">
                 Reprocess Stored Placement Records
               </div>
-              <p className="text-xs text-zinc-500">
-                Re-evaluates drive numbers, stages, CTCs, and shortlists for all stored emails.
+              <p className="text-[11px] text-zinc-400 leading-snug">
+                Re-evaluates drive numbers, stages, CTCs & shortlists across saved emails.
               </p>
             </div>
             <button
@@ -582,22 +623,22 @@ export default function SettingsClient({
               data-testid="reprocess-btn"
               onClick={handleReprocessArchive}
               disabled={reprocessing}
-              className="flex items-center justify-center gap-2 shrink-0 rounded-lg border border-indigo-500/40 bg-indigo-500/10 px-4 py-2 text-xs font-semibold text-indigo-300 hover:bg-indigo-500/20 disabled:opacity-50 transition-all cursor-pointer w-full sm:w-auto"
+              className="flex items-center justify-center gap-2 shrink-0 rounded-lg border border-indigo-500/40 bg-indigo-500/15 px-3.5 py-2 text-xs font-semibold text-indigo-300 hover:bg-indigo-500/25 disabled:opacity-50 active:scale-95 transition-all cursor-pointer w-full sm:w-auto"
             >
-              <RefreshCw className={`h-3.5 w-3.5 ${reprocessing ? 'animate-spin text-indigo-400' : ''}`} />
-              <span>{reprocessing ? 'Reprocessing…' : 'Reprocess & Apply Fixes'}</span>
+              <RefreshCw className={cn('h-3.5 w-3.5', reprocessing && 'animate-spin text-indigo-400')} />
+              <span>{reprocessing ? 'Reprocessing…' : 'Reprocess Archive'}</span>
             </button>
           </div>
 
           {/* Live Reprocess Progress Banner */}
           {reprocessProgress && (
-            <div className="p-4 rounded-xl border border-indigo-500/30 bg-indigo-500/[0.06] space-y-2.5 animate-fade-in">
+            <div className="p-3.5 rounded-xl border border-indigo-500/30 bg-indigo-500/[0.06] space-y-2.5 animate-fade-in">
               <div className="flex items-center justify-between text-xs">
-                <span className="font-semibold text-indigo-200 flex items-center gap-2">
-                  <RefreshCw className="h-3.5 w-3.5 text-indigo-400 animate-spin" />
-                  Step {reprocessProgress.step} of {reprocessProgress.totalSteps}: {reprocessProgress.message}
+                <span className="font-semibold text-indigo-200 flex items-center gap-2 truncate">
+                  <RefreshCw className="h-3.5 w-3.5 text-indigo-400 animate-spin shrink-0" />
+                  <span className="truncate">Step {reprocessProgress.step} of {reprocessProgress.totalSteps}: {reprocessProgress.message}</span>
                 </span>
-                <span className="font-mono text-indigo-300 font-bold">
+                <span className="font-mono text-indigo-300 font-bold ml-2 shrink-0">
                   {Math.min(99, Math.round((reprocessProgress.step / reprocessProgress.totalSteps) * 100))}%
                 </span>
               </div>
@@ -607,81 +648,78 @@ export default function SettingsClient({
                   style={{ width: `${Math.min(99, (reprocessProgress.step / reprocessProgress.totalSteps) * 100)}%` }}
                 />
               </div>
+              <p className="text-[10px] font-mono text-indigo-300/80">
+                ⚡ Please keep this tab open until re-indexing completes (~30s).
+              </p>
             </div>
           )}
 
           {reprocessResult && !reprocessing && (
             <div className="flex items-center gap-2 p-3 rounded-xl border border-emerald-500/30 bg-emerald-500/[0.06] text-xs text-emerald-300 animate-fade-in">
               <CheckCheck className="h-4 w-4 text-emerald-400 shrink-0" />
-              <span>
-                Re-indexed successfully: {reprocessResult.neoPatDrivesCount} official drives tracked, {reprocessResult.updatedApplications} applications updated.
+              <span className="leading-snug">
+                Re-indexed successfully: {reprocessResult.neoPatDrivesCount} drives tracked, {reprocessResult.updatedApplications} applications updated.
               </span>
             </div>
           )}
         </div>
       </Card>
 
-      {/* Card 5: Danger Zone */}
+      {/* Section 5: Danger Zone */}
       <Card
         icon={AlertOctagon}
         title="Danger Zone"
-        desc="Irreversible actions for data purging or account termination."
+        desc="Irreversible actions for data purging or complete account termination."
         danger
         testid="danger-card"
       >
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           {/* Action 1: Reset All Data */}
-          <div className="flex flex-col justify-between gap-4 p-4 sm:p-5 rounded-xl border border-amber-500/20 bg-amber-500/[0.04]">
-            <div className="space-y-1.5">
-              <div className="flex items-center gap-2 text-amber-300 text-sm font-semibold">
-                <RotateCcw className="h-4 w-4 text-amber-400 shrink-0" />
-                <span>Reset Placement Data (Fresh Mode)</span>
+          <div className="rounded-xl border border-amber-500/20 bg-amber-500/[0.04] p-3.5 sm:p-4 flex flex-col justify-between gap-3">
+            <div className="space-y-1">
+              <div className="flex items-center gap-2 text-amber-300 text-xs sm:text-sm font-semibold">
+                <RotateCcw className="h-3.5 w-3.5 shrink-0" />
+                <span>Reset Placement Data</span>
               </div>
-              <p className="text-xs text-zinc-400 leading-relaxed">
-                Wipes all stored companies, applications, emails, shortlists, and events. Keeps your Google login and Candidate ID so you can re-sync from scratch.
+              <p className="text-[11px] text-zinc-400 leading-snug">
+                Clears drives, applications & calendar. Keeps Google accounts & Candidate ID.
               </p>
             </div>
-            <div className="pt-3 border-t border-amber-500/15 flex justify-end">
-              <button
-                type="button"
-                data-testid="reset-data-btn"
-                onClick={() => {
-                  setResetConfirmText('');
-                  setShowResetModal(true);
-                }}
-                className="flex items-center justify-center gap-2 shrink-0 rounded-lg border border-amber-500/40 bg-amber-500/10 px-4 py-2 text-xs font-semibold text-amber-300 transition-colors hover:bg-amber-500/20 cursor-pointer w-full sm:w-auto"
-              >
-                <RotateCcw className="h-3.5 w-3.5" />
-                <span>Reset All Data</span>
-              </button>
-            </div>
+            <button
+              type="button"
+              data-testid="reset-data-btn"
+              onClick={() => {
+                setResetConfirmText('');
+                setShowResetModal(true);
+              }}
+              className="w-full py-2 rounded-lg border border-amber-500/40 bg-amber-500/10 text-xs font-semibold text-amber-300 hover:bg-amber-500/20 active:scale-95 transition-all cursor-pointer text-center"
+            >
+              Reset All Data
+            </button>
           </div>
 
           {/* Action 2: Terminate Account Entirely */}
-          <div className="flex flex-col justify-between gap-4 p-4 sm:p-5 rounded-xl border border-rose-500/25 bg-rose-500/[0.04]">
-            <div className="space-y-1.5">
-              <div className="flex items-center gap-2 text-rose-300 text-sm font-semibold">
-                <Trash2 className="h-4 w-4 text-rose-400 shrink-0" />
-                <span>Terminate & Delete Account</span>
+          <div className="rounded-xl border border-rose-500/25 bg-rose-500/[0.04] p-3.5 sm:p-4 flex flex-col justify-between gap-3">
+            <div className="space-y-1">
+              <div className="flex items-center gap-2 text-rose-300 text-xs sm:text-sm font-semibold">
+                <Trash2 className="h-3.5 w-3.5 shrink-0" />
+                <span>Terminate Account</span>
               </div>
-              <p className="text-xs text-zinc-400 leading-relaxed">
-                Permanently revokes Google OAuth tokens with Google, deletes your user profile and all database records from Supabase, and logs you out completely.
+              <p className="text-[11px] text-zinc-400 leading-snug">
+                Permanently deletes profile, revokes Google OAuth tokens & purges all data.
               </p>
             </div>
-            <div className="pt-3 border-t border-rose-500/15 flex justify-end">
-              <button
-                type="button"
-                data-testid="terminate-account-btn"
-                onClick={() => {
-                  setDeleteConfirmText('');
-                  setShowDeleteModal(true);
-                }}
-                className="flex items-center justify-center gap-2 shrink-0 rounded-lg border border-rose-500/40 bg-rose-500/20 px-4 py-2 text-xs font-semibold text-rose-200 transition-colors hover:bg-rose-500/30 cursor-pointer w-full sm:w-auto"
-              >
-                <Trash2 className="h-3.5 w-3.5" />
-                <span>Terminate Account</span>
-              </button>
-            </div>
+            <button
+              type="button"
+              data-testid="terminate-account-btn"
+              onClick={() => {
+                setDeleteConfirmText('');
+                setShowDeleteModal(true);
+              }}
+              className="w-full py-2 rounded-lg border border-rose-500/40 bg-rose-500/20 text-xs font-semibold text-rose-200 hover:bg-rose-500/30 active:scale-95 transition-all cursor-pointer text-center"
+            >
+              Terminate Account
+            </button>
           </div>
         </div>
       </Card>
@@ -689,22 +727,22 @@ export default function SettingsClient({
       {/* Confirmation Modal: Reset All Data */}
       <AnimatePresence>
         {showResetModal && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-fade-in">
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/85 backdrop-blur-sm animate-fade-in">
             <motion.div
               initial={{ scale: 0.95, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
               exit={{ scale: 0.95, opacity: 0 }}
-              className="w-full max-w-md rounded-2xl border border-amber-500/30 bg-[#121218] p-6 shadow-2xl space-y-4"
+              className="w-full max-w-md rounded-2xl border border-amber-500/30 bg-[#121218] p-5 sm:p-6 shadow-2xl space-y-3.5"
             >
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2.5 text-amber-400">
                   <AlertTriangle className="h-5 w-5" />
-                  <h3 className="font-display font-bold text-base text-white">Reset Placement Data?</h3>
+                  <h3 className="font-display font-bold text-sm sm:text-base text-white">Reset Placement Data?</h3>
                 </div>
                 <button
                   type="button"
                   onClick={() => setShowResetModal(false)}
-                  className="p-1 rounded-lg text-zinc-400 hover:text-white hover:bg-zinc-800"
+                  className="p-1.5 rounded-lg text-zinc-400 hover:text-white hover:bg-zinc-800 transition-colors"
                 >
                   <X className="h-4 w-4" />
                 </button>
@@ -712,14 +750,14 @@ export default function SettingsClient({
 
               <div className="text-xs text-zinc-300 space-y-2 leading-relaxed">
                 <p>
-                  This will permanently delete all your scanned drives, applications, events, and shortlists from Supabase.
+                  This permanently deletes stored companies, applications, emails & shortlists from the database.
                 </p>
-                <div className="p-3 rounded-lg bg-zinc-900 border border-zinc-800 font-mono text-[11px] text-zinc-400">
-                  ✓ Preserved: Google account links, Registration ID<br />
-                  ✗ Deleted: Companies, emails, applications, calendar events
+                <div className="p-2.5 rounded-lg bg-zinc-900 border border-zinc-800 font-mono text-[11px] text-zinc-400">
+                  ✓ Preserved: Google login, Candidate Registration ID<br />
+                  ✗ Purged: Companies, circulars, shortlist matches
                 </div>
                 <p className="text-zinc-400">
-                  Type <strong className="text-amber-400 font-mono">RESET</strong> below to confirm.
+                  Type <strong className="text-amber-400 font-mono">RESET</strong> to confirm:
                 </p>
               </div>
 
@@ -727,14 +765,14 @@ export default function SettingsClient({
                 value={resetConfirmText}
                 onChange={(e) => setResetConfirmText(e.target.value)}
                 placeholder="RESET"
-                className="h-10 w-full rounded-lg border border-zinc-800 bg-zinc-900 px-3 font-mono text-sm text-amber-300 placeholder:text-zinc-600 focus:border-amber-500/50 focus:outline-none"
+                className="h-10 w-full rounded-lg border border-zinc-800 bg-zinc-900 px-3 font-mono text-sm text-amber-300 placeholder:text-zinc-600 focus:border-amber-500/50 focus:outline-none uppercase"
               />
 
-              <div className="flex items-center justify-end gap-2.5 pt-2">
+              <div className="flex items-center justify-end gap-2 pt-2">
                 <button
                   type="button"
                   onClick={() => setShowResetModal(false)}
-                  className="px-4 py-2 rounded-lg border border-zinc-800 text-xs font-semibold text-zinc-400 hover:text-white transition-colors"
+                  className="px-3.5 py-1.5 rounded-lg border border-zinc-800 text-xs font-semibold text-zinc-400 hover:text-white transition-colors cursor-pointer"
                 >
                   Cancel
                 </button>
@@ -742,7 +780,7 @@ export default function SettingsClient({
                   type="button"
                   onClick={handleResetData}
                   disabled={resetConfirmText.trim().toUpperCase() !== 'RESET' || isResetting}
-                  className="flex items-center gap-2 px-4 py-2 rounded-lg bg-amber-500 text-xs font-bold text-zinc-950 hover:bg-amber-400 disabled:opacity-40 transition-colors cursor-pointer"
+                  className="flex items-center gap-2 px-4 py-1.5 rounded-lg bg-amber-500 text-xs font-bold text-zinc-950 hover:bg-amber-400 disabled:opacity-40 transition-colors cursor-pointer"
                 >
                   {isResetting ? (
                     <>
@@ -762,22 +800,22 @@ export default function SettingsClient({
       {/* Confirmation Modal: Terminate Account Entirely */}
       <AnimatePresence>
         {showDeleteModal && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/85 backdrop-blur-sm animate-fade-in">
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/90 backdrop-blur-sm animate-fade-in">
             <motion.div
               initial={{ scale: 0.95, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
               exit={{ scale: 0.95, opacity: 0 }}
-              className="w-full max-w-md rounded-2xl border border-rose-500/40 bg-[#141012] p-6 shadow-2xl space-y-4"
+              className="w-full max-w-md rounded-2xl border border-rose-500/40 bg-[#141012] p-5 sm:p-6 shadow-2xl space-y-3.5"
             >
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2.5 text-rose-400">
                   <AlertOctagon className="h-5 w-5" />
-                  <h3 className="font-display font-bold text-base text-white">Permanently Delete Account?</h3>
+                  <h3 className="font-display font-bold text-sm sm:text-base text-white">Permanently Delete Account?</h3>
                 </div>
                 <button
                   type="button"
                   onClick={() => setShowDeleteModal(false)}
-                  className="p-1 rounded-lg text-zinc-400 hover:text-white hover:bg-zinc-800"
+                  className="p-1.5 rounded-lg text-zinc-400 hover:text-white hover:bg-zinc-800 transition-colors"
                 >
                   <X className="h-4 w-4" />
                 </button>
@@ -787,13 +825,13 @@ export default function SettingsClient({
                 <p className="text-rose-200">
                   This action is <strong>completely irreversible</strong>.
                 </p>
-                <div className="p-3 rounded-lg bg-zinc-900 border border-zinc-800 font-mono text-[11px] text-zinc-400">
+                <div className="p-2.5 rounded-lg bg-zinc-900 border border-zinc-800 font-mono text-[11px] text-zinc-400">
                   • Revokes Google OAuth permissions with Google<br />
                   • Deletes user profile & all database rows from Supabase<br />
                   • Destroys session cookies and signs you out
                 </div>
                 <p className="text-zinc-400">
-                  To permanently delete your account, type <strong className="text-rose-400 font-mono">DELETE</strong> below.
+                  Type <strong className="text-rose-400 font-mono">DELETE</strong> to confirm:
                 </p>
               </div>
 
@@ -801,14 +839,14 @@ export default function SettingsClient({
                 value={deleteConfirmText}
                 onChange={(e) => setDeleteConfirmText(e.target.value)}
                 placeholder="DELETE"
-                className="h-10 w-full rounded-lg border border-zinc-800 bg-zinc-900 px-3 font-mono text-sm text-rose-300 placeholder:text-zinc-600 focus:border-rose-500/50 focus:outline-none"
+                className="h-10 w-full rounded-lg border border-zinc-800 bg-zinc-900 px-3 font-mono text-sm text-rose-300 placeholder:text-zinc-600 focus:border-rose-500/50 focus:outline-none uppercase"
               />
 
-              <div className="flex items-center justify-end gap-2.5 pt-2">
+              <div className="flex items-center justify-end gap-2 pt-2">
                 <button
                   type="button"
                   onClick={() => setShowDeleteModal(false)}
-                  className="px-4 py-2 rounded-lg border border-zinc-800 text-xs font-semibold text-zinc-400 hover:text-white transition-colors"
+                  className="px-3.5 py-1.5 rounded-lg border border-zinc-800 text-xs font-semibold text-zinc-400 hover:text-white transition-colors cursor-pointer"
                 >
                   Cancel
                 </button>
@@ -816,7 +854,7 @@ export default function SettingsClient({
                   type="button"
                   onClick={handleTerminateAccount}
                   disabled={deleteConfirmText.trim().toUpperCase() !== 'DELETE' || isDeleting}
-                  className="flex items-center gap-2 px-4 py-2 rounded-lg bg-rose-600 text-xs font-bold text-white hover:bg-rose-500 disabled:opacity-40 transition-colors cursor-pointer"
+                  className="flex items-center gap-2 px-4 py-1.5 rounded-lg bg-rose-600 text-xs font-bold text-white hover:bg-rose-500 disabled:opacity-40 transition-colors cursor-pointer"
                 >
                   {isDeleting ? (
                     <>
@@ -834,20 +872,20 @@ export default function SettingsClient({
       </AnimatePresence>
 
       {/* Legal & Compliance Footer */}
-      <div className="pt-4 pb-12 flex flex-col sm:flex-row items-center justify-between gap-3 font-mono text-[11px] text-zinc-500 border-t border-zinc-850/80">
-        <span className="text-zinc-600 text-center sm:text-left">
+      <div className="pt-2 pb-8 flex flex-col sm:flex-row items-center justify-between gap-3 font-mono text-[11px] text-zinc-500 border-t border-white/[0.05]">
+        <span className="text-zinc-500 text-center sm:text-left">
           Where&apos;s My Offer<span className="text-emerald-400 font-extrabold ml-0.5">?</span> · Placement Radar
         </span>
-        <div className="flex items-center justify-center gap-2.5 sm:gap-4 whitespace-nowrap text-[11px]">
-          <Link href="/feedback" className="hover:text-zinc-300 transition-colors whitespace-nowrap">
+        <div className="flex items-center justify-center gap-3 sm:gap-4 whitespace-nowrap text-[11px]">
+          <Link href="/feedback" className="hover:text-zinc-300 transition-colors py-1">
             Feedback
           </Link>
           <span className="text-zinc-700">·</span>
-          <Link href="/privacy" className="hover:text-zinc-300 transition-colors whitespace-nowrap">
+          <Link href="/privacy" className="hover:text-zinc-300 transition-colors py-1">
             Privacy
           </Link>
           <span className="text-zinc-700">·</span>
-          <Link href="/terms" className="hover:text-zinc-300 transition-colors whitespace-nowrap">
+          <Link href="/terms" className="hover:text-zinc-300 transition-colors py-1">
             Terms
           </Link>
         </div>

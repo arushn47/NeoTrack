@@ -2,6 +2,7 @@ import { google } from 'googleapis';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { decrypt } from '@/lib/crypto/tokens';
 import { getNotificationPreferences } from '@/lib/notifications/preferences';
+import { isInactiveStatus } from '@/lib/stages';
 
 export interface SyncCalendarEventParams {
   userId: string;
@@ -333,7 +334,7 @@ export async function reconcileUserGoogleCalendar(userId: string): Promise<Recon
     const isManual = (evt as unknown as { manual_override?: boolean }).manual_override;
 
     // Filter out inactive/eliminated/withdrawn companies unless manually scheduled
-    if (['not_shortlisted', 'rejected', 'not_applied', 'withdrawn', 'declined'].includes(status) && !isManual) {
+    if (isInactiveStatus(status) && !isManual) {
       continue;
     }
 

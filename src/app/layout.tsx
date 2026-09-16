@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import { Outfit, JetBrains_Mono } from "next/font/google";
 import "./globals.css";
+import { Toaster } from "sonner";
 
 const outfit = Outfit({
   subsets: ["latin"],
@@ -165,6 +166,15 @@ export default function RootLayout({
         className={`${outfit.variable} ${jetbrainsMono.variable} font-sans antialiased bg-[#09090b] text-zinc-100`}
       >
         {children}
+        <Toaster
+          theme="dark"
+          position="top-right"
+          className="app-toaster"
+          richColors
+          duration={Infinity}
+          visibleToasts={4}
+          closeButton
+        />
       </body>
     </html>
   );

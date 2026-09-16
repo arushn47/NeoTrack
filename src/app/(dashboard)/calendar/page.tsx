@@ -1,6 +1,7 @@
 import type { Metadata } from 'next';
 import { requireSession } from '@/lib/auth';
 import { createAdminClient } from '@/lib/supabase/admin';
+import { isInactiveStatus } from '@/lib/stages';
 import CalendarClient, { type CalendarEvent } from './calendar-client';
 
 export const metadata: Metadata = {
@@ -90,7 +91,7 @@ export default async function CalendarPage() {
         }
       } else {
         // Exclude eliminated, opted-out, or not-applied companies unless manually added
-        if (['not_shortlisted', 'rejected', 'not_applied', 'withdrawn', 'declined'].includes(status) && !isManual) {
+        if (isInactiveStatus(status) && !isManual) {
           continue;
         }
 

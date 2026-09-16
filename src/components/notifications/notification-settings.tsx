@@ -14,49 +14,50 @@ import {
   CheckCircle2,
   AlertCircle,
   Smartphone,
-  ChevronRight,
-  ShieldCheck,
   Timer,
   Check,
+  Zap,
 } from 'lucide-react';
 import { usePushNotifications } from '@/hooks/use-push-notifications';
 import { cn } from '@/lib/utils';
 import type { NotificationPreferences } from '@/lib/notifications/preferences';
 import { DEFAULT_PREFERENCES } from '@/lib/notifications/preferences';
+import { appToast } from '@/lib/toast';
+import { Switch } from '@/components/ui/switch';
 
 const REMINDER_EVENT_OPTIONS = [
   {
     id: 'test',
-    label: 'Tests & Coding Assessments',
-    desc: 'Online exams, Hackerrank, Mettl, & Codility',
+    label: 'Tests & Assessments',
+    desc: 'Hackerrank, Mettl, Codility & exams',
     types: ['online_test', 'coding_test'],
   },
   {
     id: 'interview',
-    label: 'Technical & HR Interviews',
-    desc: 'Interview rounds, slots, and panel links',
+    label: 'Interviews & Rounds',
+    desc: 'Technical, HR & panel links',
     types: ['technical_interview', 'hr_interview', 'final_interview'],
   },
   {
     id: 'ppt',
-    label: 'Pre-Placement Talks (PPT)',
-    desc: 'Corporate presentations and briefing sessions',
+    label: 'Pre-Placement Talks',
+    desc: 'Corporate presentations & briefings',
     types: ['ppt'],
   },
   {
     id: 'deadline',
     label: 'Registration Deadlines',
-    desc: 'CDC portal and NeoPAT registration cut-offs',
+    desc: 'CDC portal & NeoPAT cut-offs',
     types: ['registration_deadline'],
   },
 ];
 
 const LEAD_TIME_OPTIONS = [
-  { minutes: 1440, label: '24 hours before' },
-  { minutes: 120, label: '2 hours before' },
-  { minutes: 60, label: '1 hour before' },
-  { minutes: 30, label: '30 minutes before' },
-  { minutes: 15, label: '15 minutes before' },
+  { minutes: 1440, label: '24h before' },
+  { minutes: 120, label: '2h before' },
+  { minutes: 60, label: '1h before' },
+  { minutes: 30, label: '30m before' },
+  { minutes: 15, label: '15m before' },
 ];
 
 export default function NotificationSettings() {
@@ -85,7 +86,7 @@ export default function NotificationSettings() {
     fetch('/api/notifications/preferences')
       .then((res) => res.json())
       .then((data) => {
-        if (data.preferences) {
+        if (data?.preferences) {
           setPreferences(data.preferences);
         }
       })
@@ -110,15 +111,11 @@ export default function NotificationSettings() {
     }
   };
 
-  const handleTogglePref = (key: keyof NotificationPreferences, currentValue: boolean) => {
-    handleUpdatePref({ [key]: !currentValue });
-  };
-
-  const handleTogglePush = async () => {
-    if (isSubscribed) {
+  const handleTogglePush = async (nextChecked: boolean) => {
+    if (!nextChecked && isSubscribed) {
       await unsubscribeFromPush();
       handleUpdatePref({ browserPushEnabled: false });
-    } else {
+    } else if (nextChecked && !isSubscribed) {
       const ok = await subscribeToPush();
       if (ok) {
         handleUpdatePref({ browserPushEnabled: true });
@@ -132,14 +129,29 @@ export default function NotificationSettings() {
     try {
       const res = await fetch('/api/notifications/test', { method: 'POST' });
       if (res.ok) {
+        const data = await res.json();
+        const pushDelivered = data.result?.pushSent;
+
+        appToast.shortlist("Where's My Offer? Notification Test", {
+          description: 'Your notification system is working perfectly!',
+          company: "Where's My Offer?",
+          action: {
+            label: 'Dismiss',
+            onClick: () => {},
+          },
+        });
+
         setTestFeedback({
           success: true,
-          message: 'Test notification sent! Check your notification bell and desktop alert.',
+          message: pushDelivered
+            ? 'Test notification sent! Dispatched to in-app bell & push device.'
+            : 'Test alert delivered to in-app bell (browser push is inactive on this device).',
         });
       } else {
         throw new Error('Test failed');
       }
     } catch {
+      appToast.error('Could not send test notification', 'Please check your connection and try again.');
       setTestFeedback({
         success: false,
         message: 'Could not send test notification.',
@@ -168,8 +180,7 @@ export default function NotificationSettings() {
     let nextTimes: number[];
     if (currentLeadTimes.includes(minutes)) {
       if (currentLeadTimes.length <= 1) {
-        // Keep at least one
-        return;
+        return; // Keep at least one
       }
       nextTimes = currentLeadTimes.filter((m) => m !== minutes);
     } else {
@@ -179,117 +190,104 @@ export default function NotificationSettings() {
   };
 
   return (
-    <section className="rounded-2xl border border-zinc-800 bg-[#101014] p-5 sm:p-6 space-y-6">
+    <section className="rounded-2xl border border-white/[0.07] bg-[#121217] p-4 sm:p-6 space-y-5 shadow-sm">
       {/* Header */}
       <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2.5">
-          <div className="flex h-8 w-8 items-center justify-center rounded-lg border border-emerald-500/25 bg-emerald-500/10">
+        <div className="flex items-center gap-3">
+          <div className="flex h-9 w-9 items-center justify-center rounded-xl border border-emerald-500/25 bg-emerald-500/10 shrink-0">
             <Bell className="h-4 w-4 text-emerald-400" />
           </div>
           <div>
-            <h2 className="font-display text-base font-bold tracking-tight text-white">
-              Notification & Reminder Preferences
+            <h2 className="font-display text-sm sm:text-base font-bold tracking-tight text-white">
+              Notifications & Radar Alerts
             </h2>
-            <p className="text-xs text-zinc-500 mt-0.5">
-              Customize real-time radar pings, push alerts, and event reminder intervals.
+            <p className="text-[11px] sm:text-xs text-zinc-400 mt-0.5">
+              Instant radar pings, push alerts & countdown reminders
             </p>
           </div>
         </div>
         {savingPrefs && (
-          <span className="text-xs text-zinc-400 flex items-center gap-1.5 font-mono">
-            <Loader2 className="w-3 h-3 animate-spin text-emerald-400" /> Saving…
+          <span className="text-[11px] text-emerald-400 flex items-center gap-1.5 font-mono">
+            <Loader2 className="w-3 h-3 animate-spin" /> Saving…
           </span>
         )}
       </div>
 
-      <div className="space-y-6">
-        {/* Browser Push Master Toggle */}
-        <div className="p-4 rounded-xl bg-zinc-900/40 border border-zinc-800/90 space-y-3">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-            <div className="space-y-0.5">
-              <div className="flex items-center gap-2">
+      <div className="space-y-4">
+        {/* Browser Push Master Card */}
+        <div className="rounded-xl border border-white/[0.06] bg-zinc-900/50 p-3.5 sm:p-4 space-y-3">
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex items-center gap-3 min-w-0">
+              <div className="h-9 w-9 rounded-xl bg-zinc-800/80 border border-zinc-700/60 flex items-center justify-center shrink-0">
                 <Smartphone className="w-4 h-4 text-emerald-400" />
-                <span className="text-sm font-semibold text-zinc-100">Browser Push Notifications</span>
               </div>
-              <p className="text-xs text-zinc-400">
-                Receive instant alerts for test schedules, shortlists, and reminders even when the tab is closed.
-              </p>
+              <div className="min-w-0">
+                <div className="flex items-center gap-2">
+                  <span className="text-xs sm:text-sm font-semibold text-zinc-100">
+                    Browser Push Alerts
+                  </span>
+                  {isSubscribed && (
+                    <span className="inline-flex items-center gap-1 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2 py-0.5 text-[9px] font-bold text-emerald-300">
+                      <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" /> Live
+                    </span>
+                  )}
+                </div>
+                <p className="text-[11px] text-zinc-400 mt-0.5 leading-snug truncate sm:whitespace-normal">
+                  Alerts for test schedules, shortlists & deadlines even when closed
+                </p>
+              </div>
             </div>
 
-            {isChecking ? (
-              <div className="flex items-center gap-2 shrink-0 py-1.5 px-3 rounded-lg border border-zinc-800 bg-zinc-900/60 text-xs text-zinc-500 font-mono">
-                <Loader2 className="w-3.5 h-3.5 animate-spin text-zinc-400" />
-                <span>Checking…</span>
-              </div>
-            ) : isSubscribed ? (
-              <div className="flex items-center gap-2 shrink-0">
-                <span className="flex items-center gap-1 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2.5 py-1 text-[11px] font-bold text-emerald-300">
-                  <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" /> Active
-                </span>
-                <button
-                  type="button"
-                  onClick={handleTogglePush}
-                  disabled={pushLoading}
-                  className="px-3 py-1.5 rounded-lg text-xs font-semibold border border-zinc-700 bg-zinc-800/80 text-zinc-300 hover:border-rose-500/40 hover:text-rose-300 hover:bg-rose-500/10 transition-all cursor-pointer"
-                >
-                  {pushLoading ? (
-                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                  ) : (
-                    'Turn Off / Disconnect'
-                  )}
-                </button>
-              </div>
-            ) : (
-              <button
-                type="button"
-                onClick={handleTogglePush}
-                disabled={pushLoading || !isSupported}
-                className="px-4 py-2 rounded-lg text-xs font-bold bg-emerald-500 text-zinc-950 hover:bg-emerald-400 transition-all flex items-center justify-center gap-1.5 cursor-pointer shrink-0"
-              >
-                {pushLoading ? (
-                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                ) : (
-                  'Enable Desktop Push'
-                )}
-              </button>
-            )}
+            <div className="shrink-0 flex items-center">
+              {isChecking ? (
+                <Loader2 className="w-4 h-4 animate-spin text-zinc-400" />
+              ) : (
+                <Switch
+                  checked={isSubscribed}
+                  onCheckedChange={handleTogglePush}
+                  disabled={pushLoading || (!isSupported && !isSubscribed)}
+                  aria-label="Toggle browser push notifications"
+                />
+              )}
+            </div>
           </div>
 
           {pushError && (
-            <div className="flex items-center gap-2 text-xs text-rose-400 bg-rose-500/10 border border-rose-500/20 p-2.5 rounded-lg">
+            <div className="flex items-center gap-2 text-[11px] text-rose-400 bg-rose-500/10 border border-rose-500/20 p-2.5 rounded-lg">
               <AlertCircle className="w-3.5 h-3.5 shrink-0" />
               <span>{pushError}</span>
             </div>
           )}
 
           {permission === 'denied' && (
-            <p className="text-[11px] text-amber-400/90">
-              ⚠️ Notifications are blocked in your browser. Click the lock icon in your URL address bar to allow notifications.
-            </p>
+            <div className="flex items-center gap-2 text-[11px] text-amber-400 bg-amber-500/10 border border-amber-500/20 p-2.5 rounded-lg">
+              <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+              <span>Notifications blocked in browser. Click lock icon in address bar to allow.</span>
+            </div>
           )}
 
-          {/* Test Notification Button */}
-          <div className="pt-2 border-t border-zinc-800/80 flex items-center justify-between">
-            <span className="text-xs text-zinc-500">Verify your push and bell setup:</span>
+          {/* Test Alert Action Row */}
+          <div className="pt-2 border-t border-white/[0.05] flex items-center justify-between gap-2">
+            <span className="text-[11px] text-zinc-500">Verify push & bell delivery:</span>
             <button
               type="button"
               onClick={handleSendTestNotification}
               disabled={testingPush}
-              className="flex items-center gap-1.5 text-xs text-zinc-300 hover:text-white bg-zinc-800/80 hover:bg-zinc-800 px-3 py-1.5 rounded-lg border border-zinc-700/60 transition-colors cursor-pointer"
+              className="flex items-center gap-1.5 text-[11px] font-semibold text-zinc-300 hover:text-white bg-zinc-800/80 hover:bg-zinc-800 active:scale-95 px-3 py-1.5 rounded-lg border border-zinc-700/60 transition-all cursor-pointer shrink-0"
             >
               {testingPush ? (
                 <Loader2 className="w-3 h-3 animate-spin text-emerald-400" />
               ) : (
                 <Send className="w-3 h-3 text-zinc-400" />
               )}
-              <span>Send Test Notification</span>
+              <span>Send Test Alert</span>
             </button>
           </div>
 
           {testFeedback && (
             <div
               className={cn(
-                'flex items-center gap-2 text-xs p-2.5 rounded-lg animate-fade-in',
+                'flex items-center gap-2 text-[11px] p-2.5 rounded-lg animate-fade-in',
                 testFeedback.success
                   ? 'text-emerald-300 bg-emerald-500/10 border border-emerald-500/20'
                   : 'text-rose-300 bg-rose-500/10 border border-rose-500/20'
@@ -306,86 +304,99 @@ export default function NotificationSettings() {
         </div>
 
         {/* Granular Notification Channels */}
-        <div className="space-y-3">
-          <div className="flex items-center justify-between">
-            <p className="text-xs font-semibold uppercase tracking-wider text-zinc-400">
-              Notify me when:
-            </p>
-            <span className="text-[11px] text-zinc-500">In-app bell & push</span>
+        <div className="space-y-2">
+          <div className="flex items-center justify-between px-0.5">
+            <span className="font-mono text-[10px] font-bold uppercase tracking-wider text-zinc-400">
+              Notification Channels
+            </span>
+            <span className="text-[10px] text-zinc-500 font-mono">In-App & Push</span>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
             {[
               {
                 key: 'notifyShortlist' as const,
                 label: 'Shortlists & Neo ID Matches',
-                desc: 'When your Roll / Neo ID is found in an Excel shortlist attachment',
+                desc: 'When your Roll / ID appears in an Excel shortlist attachment',
                 icon: Sparkles,
                 color: 'text-emerald-400',
+                bg: 'bg-emerald-500/10 border-emerald-500/20',
               },
               {
                 key: 'notifyTests' as const,
-                label: 'Tests & Assessments Scheduled',
-                desc: 'Online & coding test timings, slots, and platform links',
+                label: 'Assessments & Tests',
+                desc: 'Online & coding test timings, slots & platform links',
                 icon: FileText,
                 color: 'text-amber-400',
+                bg: 'bg-amber-500/10 border-amber-500/20',
               },
               {
                 key: 'notifyInterviews' as const,
-                label: 'Interviews Scheduled',
-                desc: 'Technical, HR, and final round slots & meeting links',
+                label: 'Interview Schedules',
+                desc: 'Technical, HR & final round slots with meeting links',
                 icon: Award,
                 color: 'text-purple-400',
+                bg: 'bg-purple-500/10 border-purple-500/20',
               },
               {
                 key: 'notifyPpt' as const,
                 label: 'Pre-Placement Talks (PPT)',
-                desc: 'Company presentations, orientations, and attendance requirements',
+                desc: 'Company presentations, orientations & briefings',
                 icon: Calendar,
                 color: 'text-sky-400',
+                bg: 'bg-sky-500/10 border-sky-500/20',
               },
               {
                 key: 'notifyStatusChange' as const,
-                label: 'Application Status Updates',
-                desc: 'Applied, Selected / Offer Won, or Withdrawn changes',
+                label: 'Status Changes & Offers',
+                desc: 'Offer won, shortlisted, applied or round transitions',
                 icon: CheckCircle2,
                 color: 'text-cyan-400',
+                bg: 'bg-cyan-500/10 border-cyan-500/20',
               },
               {
                 key: 'notifyNewJds' as const,
-                label: 'New Placement JDs & Drives',
-                desc: 'Newly announced hiring circulars and registration notices',
+                label: 'New Placement Circulars',
+                desc: 'Newly announced hiring drives from CDC & NeoPAT',
                 icon: Building2,
                 color: 'text-indigo-400',
+                bg: 'bg-indigo-500/10 border-indigo-500/20',
               },
-            ].map(({ key, label, desc, icon: Icon, color }) => {
+            ].map(({ key, label, desc, icon: Icon, color, bg }) => {
               const isChecked = !!preferences[key];
               return (
                 <div
                   key={key}
-                  onClick={() => handleTogglePref(key, isChecked)}
+                  onClick={() => handleUpdatePref({ [key]: !isChecked })}
                   className={cn(
-                    'flex items-start gap-3 p-3.5 rounded-xl border transition-all cursor-pointer select-none',
+                    'flex items-center justify-between gap-3 p-3 rounded-xl border transition-all cursor-pointer select-none active:scale-[0.99]',
                     isChecked
-                      ? 'bg-zinc-900/60 border-zinc-700/80 hover:border-emerald-500/40'
-                      : 'bg-zinc-900/20 border-zinc-800/40 opacity-50 hover:opacity-80'
+                      ? 'bg-zinc-900/70 border-white/[0.08] hover:border-emerald-500/40'
+                      : 'bg-zinc-900/20 border-white/[0.03] opacity-60 hover:opacity-85'
                   )}
                 >
-                  <div className="w-8 h-8 rounded-lg bg-zinc-800/80 border border-zinc-700/60 flex items-center justify-center shrink-0 mt-0.5">
-                    <Icon className={cn('w-4 h-4', color)} />
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    <div
+                      className={cn(
+                        'w-8 h-8 rounded-xl border flex items-center justify-center shrink-0',
+                        bg
+                      )}
+                    >
+                      <Icon className={cn('w-4 h-4', color)} />
+                    </div>
+                    <div className="min-w-0">
+                      <p className="text-xs font-semibold text-zinc-100 truncate">{label}</p>
+                      <p className="text-[10px] text-zinc-400 truncate mt-0.5">{desc}</p>
+                    </div>
                   </div>
 
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center justify-between gap-2">
-                      <p className="text-xs font-semibold text-zinc-100 truncate">{label}</p>
-                      <input
-                        type="checkbox"
-                        checked={isChecked}
-                        onChange={() => {}} // Controlled by parent div click
-                        className="rounded border-zinc-700 text-emerald-500 focus:ring-0 w-4 h-4 cursor-pointer accent-emerald-500"
-                      />
-                    </div>
-                    <p className="text-[11px] text-zinc-500 mt-0.5 leading-relaxed">{desc}</p>
+                  <div className="shrink-0" onClick={(e) => e.stopPropagation()}>
+                    <Switch
+                      size="sm"
+                      checked={isChecked}
+                      onCheckedChange={(val) => handleUpdatePref({ [key]: val })}
+                      aria-label={`Toggle ${label}`}
+                    />
                   </div>
                 </div>
               );
@@ -394,46 +405,40 @@ export default function NotificationSettings() {
         </div>
 
         {/* Customizable Reminders Section */}
-        <div className="p-4 sm:p-5 rounded-xl bg-zinc-900/40 border border-zinc-800/90 space-y-4">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2.5">
-              <div className="flex h-7 w-7 items-center justify-center rounded-lg border border-rose-500/25 bg-rose-500/10">
-                <Timer className="h-3.5 w-3.5 text-rose-400" />
+        <div className="rounded-xl border border-white/[0.06] bg-zinc-900/50 p-3.5 sm:p-4 space-y-3.5">
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex items-center gap-2.5 min-w-0">
+              <div className="flex h-8 w-8 items-center justify-center rounded-xl border border-rose-500/25 bg-rose-500/10 shrink-0">
+                <Timer className="h-4 w-4 text-rose-400" />
               </div>
-              <div>
-                <h3 className="text-sm font-semibold text-zinc-100">Event Reminders & Lead Times</h3>
-                <p className="text-[11px] text-zinc-500">
-                  Pick exactly which events trigger countdown reminders and when they ping you.
+              <div className="min-w-0">
+                <h3 className="text-xs sm:text-sm font-semibold text-zinc-100 truncate">
+                  Event Reminders & Lead Times
+                </h3>
+                <p className="text-[10px] sm:text-[11px] text-zinc-400 truncate">
+                  Automatic countdown alerts before scheduled placement rounds
                 </p>
               </div>
             </div>
 
-            {/* Master Reminder Toggle */}
-            <button
-              type="button"
-              onClick={() => handleTogglePref('notifyReminders', !!preferences.notifyReminders)}
-              className={cn(
-                'relative h-6 w-11 shrink-0 rounded-full border transition-colors duration-200 cursor-pointer',
-                preferences.notifyReminders ? 'border-emerald-500/50 bg-emerald-500/25' : 'border-zinc-700 bg-zinc-800'
-              )}
-            >
-              <span
-                className={cn(
-                  'absolute top-0.5 h-[18px] w-[18px] rounded-full transition-all duration-200',
-                  preferences.notifyReminders ? 'left-[22px] bg-emerald-400' : 'left-0.5 bg-zinc-500'
-                )}
+            <div className="shrink-0">
+              <Switch
+                size="sm"
+                checked={!!preferences.notifyReminders}
+                onCheckedChange={(val) => handleUpdatePref({ notifyReminders: val })}
+                aria-label="Toggle event reminders"
               />
-            </button>
+            </div>
           </div>
 
           {preferences.notifyReminders && (
-            <div className="space-y-4 pt-2 border-t border-zinc-800/70 animate-fade-in">
-              {/* Event Types to Remind For */}
+            <div className="space-y-3 pt-2.5 border-t border-white/[0.05] animate-fade-in">
+              {/* Event Types */}
               <div>
-                <p className="text-xs font-semibold text-zinc-300 mb-2.5">
-                  Send reminders for these events:
+                <p className="text-[11px] font-semibold text-zinc-300 mb-2">
+                  Remind for these rounds:
                 </p>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                <div className="grid grid-cols-2 gap-1.5">
                   {REMINDER_EVENT_OPTIONS.map((opt) => {
                     const isSelected = opt.types.every((t) => currentReminderTypes.includes(t));
                     return (
@@ -442,25 +447,25 @@ export default function NotificationSettings() {
                         type="button"
                         onClick={() => toggleReminderEventType(opt.types)}
                         className={cn(
-                          'flex items-center justify-between p-3 rounded-lg border text-left transition-all cursor-pointer select-none',
+                          'flex items-center justify-between p-2 sm:p-2.5 rounded-lg border text-left transition-all cursor-pointer select-none active:scale-[0.98]',
                           isSelected
-                            ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300'
-                            : 'bg-zinc-900/30 border-zinc-800 text-zinc-400 hover:text-zinc-200 hover:border-zinc-700'
+                            ? 'bg-emerald-500/10 border-emerald-500/35 text-emerald-300 shadow-sm'
+                            : 'bg-zinc-900/30 border-white/[0.04] text-zinc-400 hover:text-zinc-200 hover:border-zinc-700'
                         )}
                       >
-                        <div className="min-w-0 flex-1 pr-2">
-                          <p className="text-xs font-semibold">{opt.label}</p>
-                          <p className="text-[10px] text-zinc-500 truncate mt-0.5">{opt.desc}</p>
+                        <div className="min-w-0 flex-1 pr-1.5">
+                          <p className="text-[11px] font-semibold leading-tight truncate">{opt.label}</p>
+                          <p className="text-[9px] text-zinc-500 truncate mt-0.5">{opt.desc}</p>
                         </div>
                         <div
                           className={cn(
-                            'w-4 h-4 rounded flex items-center justify-center border shrink-0',
+                            'w-3.5 h-3.5 rounded flex items-center justify-center border shrink-0',
                             isSelected
                               ? 'bg-emerald-500 border-emerald-400 text-zinc-950'
                               : 'border-zinc-700 bg-zinc-800'
                           )}
                         >
-                          {isSelected && <Check className="w-3 h-3 stroke-[3]" />}
+                          {isSelected && <Check className="w-2.5 h-2.5 stroke-[3]" />}
                         </div>
                       </button>
                     );
@@ -470,10 +475,10 @@ export default function NotificationSettings() {
 
               {/* Lead Time Selection */}
               <div>
-                <p className="text-xs font-semibold text-zinc-300 mb-2">
-                  Reminder alerts schedule:
+                <p className="text-[11px] font-semibold text-zinc-300 mb-1.5">
+                  Alert schedule:
                 </p>
-                <div className="flex flex-wrap gap-2">
+                <div className="flex flex-wrap gap-1.5">
                   {LEAD_TIME_OPTIONS.map((lt) => {
                     const isSelected = currentLeadTimes.includes(lt.minutes);
                     return (
@@ -482,22 +487,19 @@ export default function NotificationSettings() {
                         type="button"
                         onClick={() => toggleLeadTime(lt.minutes)}
                         className={cn(
-                          'flex items-center gap-1.5 px-3 py-1.5 rounded-full border text-xs font-mono font-medium transition-all cursor-pointer',
+                          'flex items-center gap-1 px-2.5 py-1 rounded-full border text-[11px] font-mono transition-all cursor-pointer active:scale-95',
                           isSelected
-                            ? 'bg-rose-500/15 border-rose-500/40 text-rose-300'
+                            ? 'bg-rose-500/15 border-rose-500/40 text-rose-300 font-semibold shadow-sm'
                             : 'bg-zinc-800/40 border-zinc-800 text-zinc-500 hover:text-zinc-300 hover:border-zinc-700'
                         )}
                       >
-                        <Clock className="w-3 h-3 shrink-0" />
+                        <Clock className="w-2.5 h-2.5 shrink-0" />
                         <span>{lt.label}</span>
                         {isSelected && <span className="w-1.5 h-1.5 rounded-full bg-rose-400 ml-0.5" />}
                       </button>
                     );
                   })}
                 </div>
-                <p className="text-[11px] text-zinc-500 mt-2">
-                  Radar checks all active tests, rounds, and PPTs against these intervals.
-                </p>
               </div>
             </div>
           )}

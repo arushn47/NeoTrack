@@ -58,7 +58,7 @@ export default function SearchClient({ data }: SearchClientProps) {
   useEffect(() => {
     try {
       const urlQ = searchParams.get('q') || searchParams.get('search');
-      const savedQ = urlQ !== null ? urlQ : sessionStorage.getItem('neotrack_global_search');
+      const savedQ = urlQ !== null ? urlQ : sessionStorage.getItem('wmo_global_search');
       if (savedQ && !query) {
         setQuery(savedQ);
       }
@@ -70,9 +70,9 @@ export default function SearchClient({ data }: SearchClientProps) {
     const timer = setTimeout(() => {
       try {
         if (query.trim()) {
-          sessionStorage.setItem('neotrack_global_search', query.trim());
+          sessionStorage.setItem('wmo_global_search', query.trim());
         } else {
-          sessionStorage.removeItem('neotrack_global_search');
+          sessionStorage.removeItem('wmo_global_search');
         }
       } catch {}
 
@@ -97,7 +97,7 @@ export default function SearchClient({ data }: SearchClientProps) {
   const handleClear = () => {
     setQuery('');
     try {
-      sessionStorage.removeItem('neotrack_global_search');
+      sessionStorage.removeItem('wmo_global_search');
     } catch {}
     const params = new URLSearchParams(searchParams.toString());
     params.delete('q');

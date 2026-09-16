@@ -41,6 +41,7 @@ interface AnalyticsClientProps {
   companiesCount: number;
   emailsCount: number;
   matchesCount: number;
+  uniqueMatchesCount?: number;
   neoId?: string | null;
   campus?: string | null;
   branch?: string | null;
@@ -52,6 +53,7 @@ export default function AnalyticsClient({
   companiesCount,
   emailsCount,
   matchesCount,
+  uniqueMatchesCount,
   neoId,
   campus,
   branch,
@@ -70,7 +72,8 @@ export default function AnalyticsClient({
     regularCount,
     highestCtcNum,
     highestCtcFormatted,
-    avgSuperDreamCtc,
+    avgAppliedCtc,
+    appliedCtcCount,
   } = useMemo(() => {
     let applied = 0;
     let shortlisted = 0;
@@ -84,7 +87,7 @@ export default function AnalyticsClient({
     let dream = 0;
     let regular = 0;
 
-    const superDreamCtcs: number[] = [];
+    const appliedCtcs: number[] = [];
     let maxCtc = 0;
     let maxCtcStr = 'TBA';
 
@@ -165,23 +168,37 @@ export default function AnalyticsClient({
       if (isSelected) selected++;
       if (s === 'rejected' || s === 'not_shortlisted') rejected++;
 
-      // CTC extraction
+      // CTC extraction: handles both fixed ("14 LPA") and ranged ("6.25 - 21 LPA")
       const ctcStr = app.ctc || '';
-      const numMatch = ctcStr.match(/(\d+(?:\.\d+)?)\s*(?:lpa|lac|lakh)/i);
-      if (numMatch) {
-        const val = parseFloat(numMatch[1]);
+      const rangeMatch = ctcStr.match(
+        /(\d+(?:\.\d+)?)\s*(?:-|to|–|—)\s*(\d+(?:\.\d+)?)\s*(?:lpa|lac|lakh)?/i
+      );
+      const singleMatch = ctcStr.match(/(\d+(?:\.\d+)?)\s*(?:lpa|lac|lakh)/i);
+
+      if (rangeMatch) {
+        const minVal = parseFloat(rangeMatch[1]);
+        const maxVal = parseFloat(rangeMatch[2]);
+        // Use balanced midpoint for average calculation
+        appliedCtcs.push((minVal + maxVal) / 2);
+        // Track absolute ceiling for peak CTC
+        if (maxVal > maxCtc) {
+          maxCtc = maxVal;
+          maxCtcStr = `₹${maxVal} LPA`;
+        }
+        // Classify tier by ceiling
+        if (maxVal >= 10) superDream++;
+        else if (maxVal >= 6) dream++;
+        else regular++;
+      } else if (singleMatch) {
+        const val = parseFloat(singleMatch[1]);
+        appliedCtcs.push(val);
         if (val > maxCtc) {
           maxCtc = val;
           maxCtcStr = `₹${val} LPA`;
         }
-        if (val >= 10) {
-          superDream++;
-          superDreamCtcs.push(val);
-        } else if (val >= 6) {
-          dream++;
-        } else {
-          regular++;
-        }
+        if (val >= 10) superDream++;
+        else if (val >= 6) dream++;
+        else regular++;
       } else {
         const cat = (app.category || '').toLowerCase();
         if (cat.includes('super')) superDream++;
@@ -190,9 +207,9 @@ export default function AnalyticsClient({
       }
     });
 
-    const avgSD =
-      superDreamCtcs.length > 0
-        ? (superDreamCtcs.reduce((a, b) => a + b, 0) / superDreamCtcs.length).toFixed(1)
+    const avgApplied =
+      appliedCtcs.length > 0
+        ? (appliedCtcs.reduce((a, b) => a + b, 0) / appliedCtcs.length).toFixed(1)
         : null;
 
     return {
@@ -208,7 +225,8 @@ export default function AnalyticsClient({
       regularCount: regular,
       highestCtcNum: maxCtc,
       highestCtcFormatted: maxCtc > 0 ? maxCtcStr : '—',
-      avgSuperDreamCtc: avgSD ? `₹${avgSD} LPA` : '—',
+      avgAppliedCtc: avgApplied ? `₹${avgApplied} LPA` : '—',
+      appliedCtcCount: appliedCtcs.length,
     };
   }, [applications, events]);
 
@@ -296,7 +314,7 @@ export default function AnalyticsClient({
             {companiesCount || applications.length}
           </div>
           <div className="mt-1 font-mono text-[10px] sm:text-[11px] text-zinc-500 truncate">
-            Official CDC circulars
+            {appliedCount} applied · {Math.max(0, (companiesCount || applications.length) - appliedCount)} opted out
           </div>
         </motion.div>
 
@@ -304,16 +322,16 @@ export default function AnalyticsClient({
           initial={{ opacity: 0, y: 14 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.4, delay: 0.05 }}
-          className="rounded-2xl border border-violet-500/20 bg-violet-500/[0.05] p-5"
+          className="rounded-2xl border border-violet-500/20 bg-violet-500/[0.05] p-3.5 sm:p-5 min-w-0"
         >
-          <div className="font-mono text-[10px] uppercase tracking-widest text-violet-300">
+          <div className="font-mono text-[9px] sm:text-[10px] uppercase tracking-widest text-violet-300 truncate">
             Shortlist Rate
           </div>
-          <div className="font-tabular mt-2 font-display text-3xl font-extrabold text-white">
+          <div className="font-tabular mt-1.5 sm:mt-2 font-display text-2xl sm:text-3xl font-extrabold text-white">
             {shortlistRate}%
           </div>
-          <div className="mt-1 font-mono text-[11px] text-zinc-500">
-            Matched in Excel sheets
+          <div className="mt-1 font-mono text-[10px] sm:text-[11px] text-zinc-500 truncate">
+            {shortlistedCount} of {appliedCount} applied drives
           </div>
         </motion.div>
 
@@ -321,16 +339,16 @@ export default function AnalyticsClient({
           initial={{ opacity: 0, y: 14 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.4, delay: 0.1 }}
-          className="rounded-2xl border border-emerald-500/20 bg-emerald-500/[0.05] p-5"
+          className="rounded-2xl border border-emerald-500/20 bg-emerald-500/[0.05] p-3.5 sm:p-5 min-w-0"
         >
-          <div className="font-mono text-[10px] uppercase tracking-widest text-emerald-300">
-            Peak Package
+          <div className="font-mono text-[9px] sm:text-[10px] uppercase tracking-widest text-emerald-300 truncate">
+            Peak Applied CTC
           </div>
-          <div className="font-tabular mt-2 font-display text-3xl font-extrabold text-emerald-300">
+          <div className="font-tabular mt-1.5 sm:mt-2 font-display text-2xl sm:text-3xl font-extrabold text-emerald-300">
             {highestCtcFormatted}
           </div>
-          <div className="mt-1 font-mono text-[11px] text-zinc-500">
-            Top campus tier offer
+          <div className="mt-1 font-mono text-[10px] sm:text-[11px] text-zinc-500 truncate">
+            Highest among applied drives
           </div>
         </motion.div>
 
@@ -338,16 +356,16 @@ export default function AnalyticsClient({
           initial={{ opacity: 0, y: 14 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.4, delay: 0.15 }}
-          className="rounded-2xl border border-amber-500/20 bg-amber-500/[0.05] p-5"
+          className="rounded-2xl border border-amber-500/20 bg-amber-500/[0.05] p-3.5 sm:p-5 min-w-0"
         >
-          <div className="font-mono text-[10px] uppercase tracking-widest text-amber-300">
-            Avg Super Dream
+          <div className="font-mono text-[9px] sm:text-[10px] uppercase tracking-widest text-amber-300 truncate">
+            Avg Applied CTC
           </div>
-          <div className="font-tabular mt-2 font-display text-3xl font-extrabold text-white">
-            {avgSuperDreamCtc}
+          <div className="font-tabular mt-1.5 sm:mt-2 font-display text-2xl sm:text-3xl font-extrabold text-white">
+            {avgAppliedCtc}
           </div>
-          <div className="mt-1 font-mono text-[11px] text-zinc-500">
-            ≥ ₹10 LPA bracket
+          <div className="mt-1 font-mono text-[10px] sm:text-[11px] text-zinc-500 truncate">
+            Across {appliedCtcCount} applied drives with CTC
           </div>
         </motion.div>
       </div>
@@ -405,11 +423,11 @@ export default function AnalyticsClient({
           <div className="flex items-center gap-2">
             <Award className="h-4 w-4 text-violet-400" />
             <h2 className="font-display text-base font-bold text-white">
-              CTC Bracket Distribution
+              Applied CTC Distribution
             </h2>
           </div>
           <p className="mt-0.5 text-xs text-zinc-500">
-            Classification by campus hiring tier
+            Hiring tier breakdown across your {appliedCount} applied drives (excluding opted out)
           </p>
 
           <div className="mt-6 space-y-4">
@@ -424,7 +442,7 @@ export default function AnalyticsClient({
                 </span>
               </div>
               <div className="mt-2 text-xs text-zinc-400">
-                {Math.round((superDreamCount / totalCategorized) * 100)}% of campus hiring opportunities
+                {Math.round((superDreamCount / totalCategorized) * 100)}% of your applied drives
               </div>
             </div>
 
@@ -439,7 +457,7 @@ export default function AnalyticsClient({
                 </span>
               </div>
               <div className="mt-2 text-xs text-zinc-400">
-                {Math.round((dreamCount / totalCategorized) * 100)}% of campus hiring opportunities
+                {Math.round((dreamCount / totalCategorized) * 100)}% of your applied drives
               </div>
             </div>
 
@@ -454,7 +472,7 @@ export default function AnalyticsClient({
                 </span>
               </div>
               <div className="mt-2 text-xs text-zinc-400">
-                {Math.round((regularCount / totalCategorized) * 100)}% of campus hiring opportunities
+                {Math.round((regularCount / totalCategorized) * 100)}% of your applied drives
               </div>
             </div>
           </div>
@@ -465,7 +483,7 @@ export default function AnalyticsClient({
           initial={{ opacity: 0, y: 16 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.45, delay: 0.3 }}
-          className="rounded-2xl border border-zinc-800 bg-[#101014] p-6 flex flex-col justify-between"
+          className="rounded-2xl border border-zinc-800 bg-[#101014] p-4 sm:p-6 flex flex-col justify-between"
         >
           <div>
             <div className="flex items-center gap-2">
@@ -478,42 +496,51 @@ export default function AnalyticsClient({
               Live background scanner and parsing metrics
             </p>
 
-            <div className="mt-6 space-y-3">
-              <div className="flex items-center justify-between rounded-xl border border-zinc-800/80 bg-zinc-900/40 p-3">
-                <div className="flex items-center gap-2.5">
-                  <Mail className="h-4 w-4 text-sky-400" />
-                  <span className="text-xs text-zinc-300 font-medium">Emails & Circulars Parsed</span>
+            <div className="mt-5 sm:mt-6 space-y-3">
+              <div className="flex items-center justify-between gap-2 rounded-xl border border-zinc-800/80 bg-zinc-900/40 p-3">
+                <div className="flex items-center gap-2.5 min-w-0">
+                  <Mail className="h-4 w-4 text-sky-400 shrink-0" />
+                  <span className="text-xs text-zinc-300 font-medium truncate">Emails & Circulars</span>
                 </div>
-                <span className="font-mono text-xs font-bold text-zinc-100">{emailsCount || 48}</span>
+                <span className="font-mono text-xs font-bold text-zinc-100 shrink-0 whitespace-nowrap">{(emailsCount || 0).toLocaleString()}</span>
               </div>
 
-              <div className="flex items-center justify-between rounded-xl border border-zinc-800/80 bg-zinc-900/40 p-3">
-                <div className="flex items-center gap-2.5">
-                  <FileSpreadsheet className="h-4 w-4 text-violet-400" />
-                  <span className="text-xs text-zinc-300 font-medium">Shortlist Candidate Matches</span>
+              <div className="flex items-center justify-between gap-2 rounded-xl border border-zinc-800/80 bg-zinc-900/40 p-3">
+                <div className="flex items-center gap-2.5 min-w-0">
+                  <FileSpreadsheet className="h-4 w-4 text-violet-400 shrink-0" />
+                  <div className="min-w-0">
+                    <span className="text-xs text-zinc-300 font-medium block truncate">Shortlist Matches</span>
+                    <span className="text-[10px] font-mono text-zinc-500 block truncate">
+                      {matchesCount || 0} detections across {uniqueMatchesCount || 0} drives
+                    </span>
+                  </div>
                 </div>
-                <span className="font-mono text-xs font-bold text-violet-300">{matchesCount || 8}</span>
+                <div className="text-right shrink-0">
+                  <span className="font-mono text-xs font-bold text-violet-300">{uniqueMatchesCount || matchesCount} Drives</span>
+                </div>
               </div>
 
-              <div className="flex items-center justify-between rounded-xl border border-zinc-800/80 bg-zinc-900/40 p-3">
-                <div className="flex items-center gap-2.5">
-                  <ShieldCheck className="h-4 w-4 text-emerald-400" />
-                  <span className="text-xs text-zinc-300 font-medium">Background Cron Frequency</span>
+              <div className="flex items-center justify-between gap-2 rounded-xl border border-zinc-800/80 bg-zinc-900/40 p-3">
+                <div className="flex items-center gap-2.5 min-w-0">
+                  <ShieldCheck className="h-4 w-4 text-emerald-400 shrink-0" />
+                  <span className="text-xs text-zinc-300 font-medium truncate">Sync Frequency</span>
                 </div>
-                <span className="font-mono text-xs font-bold text-emerald-300">Every 15 Minutes</span>
+                <span className="rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2.5 py-0.5 font-mono text-[11px] font-bold text-emerald-300 shrink-0 whitespace-nowrap">
+                  Every 15 mins
+                </span>
               </div>
             </div>
           </div>
 
-          <div className="mt-6 rounded-xl border border-emerald-500/20 bg-emerald-500/[0.04] p-3.5 flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <span className="relative flex h-2 w-2">
+          <div className="mt-5 sm:mt-6 rounded-xl border border-emerald-500/20 bg-emerald-500/[0.04] p-3 sm:p-3.5 flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2 min-w-0">
+              <span className="relative flex h-2 w-2 shrink-0">
                 <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" />
                 <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-400" />
               </span>
-              <span className="text-xs font-semibold text-emerald-300">Dual Inbox Watch Active</span>
+              <span className="text-xs font-semibold text-emerald-300 truncate">Dual Inbox Watch Active</span>
             </div>
-            <span className="font-mono text-[10px] text-zinc-500">AES-256 Vault</span>
+            <span className="font-mono text-[10px] text-zinc-500 shrink-0 whitespace-nowrap">AES-256 Vault</span>
           </div>
         </motion.div>
       </div>

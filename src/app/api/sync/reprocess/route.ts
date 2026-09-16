@@ -38,7 +38,8 @@ export const maxDuration = 120;
  */
 export async function recalculateApplicationStatuses(
   userId: string,
-  onProgress?: (p: { step: number; totalSteps: number; message: string }) => void
+  onProgress?: (p: { step: number; totalSteps: number; message: string }) => void,
+  options?: { deepGSheetScan?: boolean }
 ): Promise<{ updatedCount: number; results: Array<{ company: string; status: string; role?: string | null; ctc?: string | null }> }> {
   const supabase = createAdminClient();
 
@@ -98,7 +99,7 @@ export async function recalculateApplicationStatuses(
 
   const { data: remainingCompanies } = await supabase
     .from('companies')
-    .select('id, name')
+    .select('id, name, drive_number')
     .eq('user_id', userId);
 
   if (!remainingCompanies || remainingCompanies.length === 0) return { updatedCount: 0, results: [] };
@@ -169,8 +170,7 @@ export async function recalculateApplicationStatuses(
         .map((cm) => (cm as unknown as { email_id: string }).email_id)
     );
 
-    // 0. Scan any Google Sheets pubhtml shortlists in company emails for candidate matches
-    const { extractGoogleSheetUrls, scanGoogleSheetForCandidate } = await import('@/lib/sync/gsheet-parser');
+    // 0. Scan any Google Sheets pubhtml shortlists in company emails for candidate matches (only when deep scan requested)
     const gsheetEventsForCompany: Array<{
       eventType: string;
       title: string;
@@ -181,56 +181,65 @@ export async function recalculateApplicationStatuses(
       hasExplicitTime: boolean;
     }> = [];
 
-    for (const email of companyEmails) {
-      const emailText = `${email.subject || ''}\n${email.body_snippet || ''}`;
-      const isRelevantCandidateEmail =
-        /shortlist|selection|selected|test|assessment|interview|score|rank|eligible|candidates|students/i.test(
-          emailText
-        );
-      if (!isRelevantCandidateEmail) continue;
+    if (options?.deepGSheetScan) {
+      const { extractGoogleSheetUrls, scanGoogleSheetForCandidate } = await import('@/lib/sync/gsheet-parser');
 
-      const gUrls = extractGoogleSheetUrls(emailText);
-      for (const gUrl of gUrls) {
-        const gMatch = await scanGoogleSheetForCandidate(gUrl, userEmail, userNeoId, userData?.name);
-        if (gMatch && gMatch.matched) {
-          matchedEmailIds.add(email.id);
-          const alreadyMatched = (candidateMatches || []).some(
-            (cm) => (cm as unknown as { email_id: string }).email_id === email.id
+      for (const email of companyEmails) {
+        const emailText = `${email.subject || ''}\n${email.body_snippet || ''}`;
+        const isRelevantCandidateEmail =
+          /shortlist|selection|selected|test|assessment|interview|score|rank|eligible|candidates|students/i.test(
+            emailText
           );
-          if (!alreadyMatched) {
-            await supabase.from('candidate_matches').insert({
-              user_id: userId,
-              email_id: email.id,
-              neo_id: userNeoId || userEmail,
-              match_type: 'xlsx_cell',
-              matched_value: gMatch.details,
-              confidence: 'high',
-            });
-          }
+        if (!isRelevantCandidateEmail) continue;
 
-          if (gMatch.eventDate) {
-            const isPpt = /ppt|pre[\s-]*placement/i.test(email.subject || '');
-            const isInterview = /interview/i.test(email.subject || '');
-            const eventType = isPpt ? 'ppt' : isInterview ? 'technical_interview' : 'online_test';
-            const title = isPpt
-              ? 'Pre-Placement Talk (PPT)'
-              : isInterview
-              ? 'Interview'
-              : `Online Assessment${gMatch.slot ? ` (${gMatch.slot})` : ''}`;
+        const alreadyMatched = (candidateMatches || []).some(
+          (cm) => (cm as unknown as { email_id: string }).email_id === email.id
+        );
+        if (alreadyMatched) continue;
 
-            const startTime = new Date(gMatch.eventDate);
-            startTime.setHours(gMatch.slot && /slot\s*2/i.test(gMatch.slot) ? 14 : 9, 0, 0, 0);
-            gsheetEventsForCompany.push({
-              eventType,
-              title,
-              startTime,
-              venue: 'Campus / Offline',
-              mode: 'online',
-              confidence: 'high',
-              hasExplicitTime: true,
-            });
+        const gUrls = extractGoogleSheetUrls(emailText);
+        for (const gUrl of gUrls) {
+          const gMatch = await scanGoogleSheetForCandidate(gUrl, userEmail, userNeoId, userData?.name);
+          if (gMatch && gMatch.matched) {
+            matchedEmailIds.add(email.id);
+            const matchExists = (candidateMatches || []).some(
+              (cm) => (cm as unknown as { email_id: string }).email_id === email.id
+            );
+            if (!matchExists) {
+              await supabase.from('candidate_matches').insert({
+                user_id: userId,
+                email_id: email.id,
+                neo_id: userNeoId || userEmail,
+                match_type: 'xlsx_cell',
+                matched_value: gMatch.details,
+                confidence: 'high',
+              });
+            }
+
+            if (gMatch.eventDate) {
+              const isPpt = /ppt|pre[\s-]*placement/i.test(email.subject || '');
+              const isInterview = /interview/i.test(email.subject || '');
+              const eventType = isPpt ? 'ppt' : isInterview ? 'technical_interview' : 'online_test';
+              const title = isPpt
+                ? 'Pre-Placement Talk (PPT)'
+                : isInterview
+                ? 'Interview'
+                : `Online Assessment${gMatch.slot ? ` (${gMatch.slot})` : ''}`;
+
+              const startTime = new Date(gMatch.eventDate);
+              startTime.setHours(gMatch.slot && /slot\s*2/i.test(gMatch.slot) ? 14 : 9, 0, 0, 0);
+              gsheetEventsForCompany.push({
+                eventType,
+                title,
+                startTime,
+                venue: 'Campus / Offline',
+                mode: 'online',
+                confidence: 'high',
+                hasExplicitTime: true,
+              });
+            }
+            break;
           }
-          break;
         }
       }
     }
@@ -238,6 +247,12 @@ export async function recalculateApplicationStatuses(
     const sortedCompanyEmails = [...companyEmails].sort(
       (a, b) => new Date(b.received_at || 0).getTime() - new Date(a.received_at || 0).getTime()
     );
+    const chronologicalCompanyEmails = [...companyEmails].sort(
+      (a, b) => new Date(a.received_at || 0).getTime() - new Date(b.received_at || 0).getTime()
+    );
+    const isPersonalNeoPatEmail = (e: { sender?: string | null }) =>
+      /noreply\.cdcinfo@vitstudent\.ac\.in/i.test(e.sender || '');
+    const collegeCompanyEmails = chronologicalCompanyEmails.filter((e) => !isPersonalNeoPatEmail(e));
 
     const isRegistrationCircular = (e: { subject?: string | null; body_snippet?: string | null }) => {
       const text = `${e.subject || ''}\n${e.body_snippet || ''}`;
@@ -250,7 +265,7 @@ export async function recalculateApplicationStatuses(
     };
 
     const mainCircularEmail =
-      sortedCompanyEmails.find((e) => {
+      collegeCompanyEmails.find((e) => {
         const text = `${e.subject || ''}\n${e.body_snippet || ''}`;
         return (
           /name\s+of\s+the\s+company/i.test(text) &&
@@ -258,15 +273,15 @@ export async function recalculateApplicationStatuses(
           /category/i.test(text)
         );
       }) ||
-      sortedCompanyEmails.find((e) =>
+      collegeCompanyEmails.find((e) =>
         /super\s*dream.*registration|dream.*registration|placement\s+registration|internship\s+registration|offer\s+registration/i.test(e.subject || '')
       ) ||
-      sortedCompanyEmails.find((e) =>
+      collegeCompanyEmails.find((e) =>
         /date\s+of\s+visit/i.test(e.body_snippet || '') || /registration/i.test(e.subject || '')
       ) ||
-      sortedCompanyEmails[0];
+      collegeCompanyEmails[0] || chronologicalCompanyEmails[0];
 
-    const registrationCirculars = companyEmails.filter(isRegistrationCircular);
+    const registrationCirculars = collegeCompanyEmails.filter(isRegistrationCircular);
     registrationCirculars.sort(
       (a, b) => new Date(a.received_at || 0).getTime() - new Date(b.received_at || 0).getTime()
     );
@@ -275,31 +290,60 @@ export async function recalculateApplicationStatuses(
       ? new Date(driveRegistrationEmail.received_at)
       : null;
 
-    const activeDriveEmails = sortedCompanyEmails;
+    const activeDriveEmails = chronologicalCompanyEmails.filter((e) =>
+      !driveStartDate || new Date(e.received_at || 0).getTime() >= driveStartDate.getTime()
+    );
+    const personalCompanyEmails = chronologicalCompanyEmails.filter(isPersonalNeoPatEmail);
+    activeDriveEmails.push(...personalCompanyEmails);
 
     const mainEmailText = `${mainCircularEmail.subject || ''}\n${mainCircularEmail.body_snippet || ''}`;
     const mainJobDetails = extractJobDetails(mainEmailText);
 
-    const jobDetailEligibleEmails = activeDriveEmails.filter((e) => {
-      const cls = e.classification || '';
-      if (['test', 'venue_update', 'shortlist', 'interview', 'withdrawal', 'decline'].includes(cls)) return false;
-      const subj = (e.subject || '').toLowerCase();
-      if (/online\s+test|coding\s+test|shortlist|interview\s+is\s+scheduled/i.test(subj)) return false;
-      return true;
-    });
-
-    const combinedEmailText = (jobDetailEligibleEmails.length > 0 ? jobDetailEligibleEmails : activeDriveEmails)
+    const combinedEmailText = activeDriveEmails
       .map((e) => `${e.subject || ''}\n${e.body_snippet || ''}`)
       .join('\n\n');
-    const fallbackJobDetails = extractJobDetails(combinedEmailText);
 
     const extractedJob = {
-      role: mainJobDetails.role || fallbackJobDetails.role,
-      category: mainJobDetails.category || fallbackJobDetails.category,
-      ctc: mainJobDetails.ctc || fallbackJobDetails.ctc,
-      stipend: mainJobDetails.stipend || fallbackJobDetails.stipend,
-      location: mainJobDetails.location || fallbackJobDetails.location,
+      role: mainJobDetails.role,
+      category: mainJobDetails.category,
+      ctc: mainJobDetails.ctc,
+      stipend: mainJobDetails.stipend,
+      location: mainJobDetails.location,
     };
+
+    // If critical job details (location, stipend, CTC) are missing because this company
+    // is a role-specific record (e.g. "Zluri SDET", "Apple SDET", "Apple SRE") whose circular
+    // was announced under the base brand ("Zluri", "Apple"), search user's emails for base brand circulars
+    const allowCrossEmailJobEnrichment = false;
+    if (allowCrossEmailJobEnrichment && (!extractedJob.location || !extractedJob.stipend || !extractedJob.ctc)) {
+      const nameLower = comp.name.toLowerCase();
+      const cleanTokens = nameLower
+        .replace(/\s*(?:SDET|SRE|Intern|Fulltime|FTE|Graduate|Engineer|Analyst|Consultant|LLP|Pvt\s*Ltd|Limited|Technologies|Solutions|Services).*$/i, '')
+        .split(/\s+/)
+        .filter((t: string) => t.length >= 3);
+      const normCompAlpha = comp.name.replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
+
+      const brandEmails = allEmails.filter((e) => {
+        if (driveStartDate && new Date(e.received_at || 0).getTime() < driveStartDate.getTime()) return false;
+        const subj = (e.subject || '').toLowerCase();
+        const normSubjAlpha = subj.replace(/[^a-zA-Z0-9]/g, '');
+        if (cleanTokens.length > 0 && cleanTokens.every((t: string) => subj.includes(t))) return true;
+        const acronym = comp.name.match(/\b([A-Z])/g)?.join('').toLowerCase();
+        if (acronym && acronym.length >= 3 && new RegExp(`\\b${acronym}\\b`, 'i').test(subj)) return true;
+        if (cleanTokens[0] && cleanTokens[0].length >= 4 && (subj.includes(cleanTokens[0]) || normSubjAlpha.includes(cleanTokens[0]))) return true;
+        if (normCompAlpha.length >= 4 && normSubjAlpha.includes(normCompAlpha)) return true;
+        return false;
+      });
+
+      if (brandEmails.length > 0) {
+        const brandText = brandEmails.map((e) => `${e.subject || ''}\n${e.body_snippet || ''}`).join('\n\n');
+        const brandDetails = extractJobDetails(brandText);
+        if (!extractedJob.location && brandDetails.location) extractedJob.location = brandDetails.location;
+        if (!extractedJob.stipend && brandDetails.stipend) extractedJob.stipend = brandDetails.stipend;
+        if (!extractedJob.ctc && brandDetails.ctc) extractedJob.ctc = brandDetails.ctc;
+        if (!extractedJob.role && brandDetails.role) extractedJob.role = brandDetails.role;
+      }
+    }
 
     const withdrawalEmails = companyEmails.filter((e) => {
       const full = `${e.subject || ''} ${e.body_snippet || ''}`.toLowerCase();
@@ -323,11 +367,14 @@ export async function recalculateApplicationStatuses(
       return Math.max(max, t);
     }, 0);
 
-    const registrationEmails = activeDriveEmails.filter((e) => {
+    const registrationEmails = companyEmails.filter((e) => {
       const subj = (e.subject || '').toLowerCase();
       const full = `${subj} ${e.body_snippet || ''}`.toLowerCase();
+      const isPersonalNeoPat = /noreply\.cdcinfo@vitstudent\.ac\.in/i.test(e.sender || '');
+      const driveMatches = !comp.name.match(/sdet|sre|sap|gds|aerospace/i) ||
+        !comp.drive_number || new RegExp(comp.drive_number.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i').test(`${e.subject || ''} ${e.body_snippet || ''}`);
       return (
-        e.classification === 'registration_confirmation' ||
+        (isPersonalNeoPat && driveMatches && e.classification === 'registration_confirmation') ||
         /confirmed:\s*your\s+registration/i.test(subj) ||
         /registration\s+(confirmed|successful|received)/i.test(full) ||
         /successfully\s+registered|thank\s+you\s+for\s+(registering|applying)/i.test(full)
@@ -356,10 +403,19 @@ export async function recalculateApplicationStatuses(
     );
 
     const nextRoundPattern =
-      /next\s+round|interview\s+(?:is\s+)?scheduled|technical\s+interview|hr\s+interview|final\s+interview|interview\s+shortlist|shortlist\s+for\s+interview|shortlisted\s+for\s+(?:the\s+)?interview/i;
-    const nextRoundEmails = activeDriveEmails.filter((e) =>
-      isAfterRegistration(e) && nextRoundPattern.test(e.subject || '')
-    );
+      /interview\s+(?:is\s+)?scheduled|technical\s+interview|hr\s+interview|final\s+interview|interview\s+shortlist|shortlist\s+for\s+interview|shortlisted\s+for\s+(?:the\s+)?interview/i;
+    const nextRoundEmails = activeDriveEmails.filter((e) => {
+      if (!isAfterRegistration(e)) return false;
+      const subj = e.subject || '';
+      const body = e.body_snippet || '';
+      const full = `${subj} ${body}`;
+      if (nextRoundPattern.test(subj)) return true;
+      if (/next\s+round/i.test(subj)) {
+        // Only classify as nextRound (interview) if it DOES NOT describe a test/assessment
+        return !/test|assessment|coding|exam|shl|mettl|hackerrank|aptitude/i.test(full);
+      }
+      return false;
+    });
 
     const isInterviewOrSelectionEmail = (e: { subject?: string | null; body_snippet?: string | null }) => {
       return nextRoundPattern.test(e.subject || '') || selectionListPattern.test(e.subject || '');
@@ -573,14 +629,30 @@ export async function recalculateApplicationStatuses(
     } else if (isMatchedInSelectionList) {
       computedStatus = 'selected';
     } else if (isMatchedInNextRound) {
-      if (selectionEmails.length > 0) {
+      const nextRoundMatchTime = Math.max(latestPositiveMatchEmailTime, latestGsheetTime);
+      const subsequentSelectionEmails = selectionEmails.filter((e) => {
+        const t = e.received_at ? new Date(e.received_at).getTime() : 0;
+        return t > (nextRoundMatchTime + 30 * 60 * 1000);
+      });
+      if (subsequentSelectionEmails.length > 0) {
         computedStatus = 'rejected';
       } else {
         computedStatus = 'interview_scheduled';
       }
     } else if (isMatchedInTest) {
-      if (selectionEmails.length > 0 || nextRoundEmails.length > 0) {
+      const testMatchTime = Math.max(latestPositiveMatchEmailTime, latestGsheetTime);
+      const hasUpcomingTestEvent = allExtractedEvents.some((e) => {
+        const isTest = ['online_test', 'coding_test'].includes(e.eventType);
+        return isTest && e.startTime && e.startTime.getTime() > Date.now();
+      });
+      const subsequentPostTestEmails = [...selectionEmails, ...nextRoundEmails].filter((e) => {
+        const t = e.received_at ? new Date(e.received_at).getTime() : 0;
+        return t > (testMatchTime + 30 * 60 * 1000);
+      });
+      if (!hasUpcomingTestEvent && subsequentPostTestEmails.length > 0) {
         computedStatus = 'rejected';
+      } else if (!hasUpcomingTestEvent) {
+        computedStatus = 'test_completed';
       } else {
         computedStatus = 'test_scheduled';
       }
@@ -619,9 +691,10 @@ export async function recalculateApplicationStatuses(
 
     const finalStatus = existingApp?.manual_override ? existingApp.status : computedStatus;
 
-    let finalRole = existingApp?.manual_override ? existingApp.role : (extractedJob.role || extractJobDetails(combinedEmailText).role);
+    let finalRole = existingApp?.manual_override ? existingApp.role : extractedJob.role;
     if (finalRole && (
       /\byou\s*(?:are|have|re)\b|dear\s|greetings|eligible|registr|for the candidate|reserve a position|expect them/i.test(finalRole) ||
+      /^(?:focuses on|includes|details\b|we would like|the role|job description)\b/i.test(finalRole.trim()) ||
       /^(?:super\s+dream|dream|regular)(?:\s+(?:internship|offer|placement|drive))?$/i.test(finalRole.trim())
     )) {
       finalRole = null;
@@ -1510,13 +1583,26 @@ export async function POST(req: Request) {
         }, 2000);
 
         try {
-          sendEvent('start', { message: 'Starting placement archive re-index…' });
-          const res = await performReprocess(userId!, (progress) => {
-            sendEvent('progress', progress);
+          sendEvent('start', { message: 'Analyzing placement archive & recalculating drives…' });
+          sendEvent('progress', { step: 1, totalSteps: 2, message: 'Recalculating pipeline statuses, stages & CTCs…' });
+
+          const statusResult = await recalculateApplicationStatuses(userId!, (progress) => {
+            sendEvent('progress', { step: 1, totalSteps: 2, message: progress.message });
           });
-          sendEvent('complete', res);
+
+          // Trigger calendar reconciliation in background so HTTP response returns instantly
+          import('@/lib/calendar/google-sync')
+            .then(({ reconcileUserGoogleCalendar }) => reconcileUserGoogleCalendar(userId!))
+            .catch((cErr) => console.warn('[Reprocess Route] Calendar reconcile warning:', cErr));
+
+          sendEvent('complete', {
+            success: true,
+            updatedApplications: statusResult.updatedCount,
+            neoPatDrivesCount: statusResult.results.length,
+            fixed: statusResult.updatedCount,
+          });
         } catch (err: any) {
-          sendEvent('error', { message: err instanceof Error ? err.message : 'Reprocess failed' });
+          sendEvent('error', { message: err instanceof Error ? err.message : 'Pipeline recalculation failed' });
         } finally {
           clearInterval(heartbeat);
           controller.close();
@@ -1534,50 +1620,28 @@ export async function POST(req: Request) {
   }
 
   try {
-    const res = await performReprocess(userId);
-    return NextResponse.json(res);
+    const statusResult = await recalculateApplicationStatuses(userId);
+
+    // Trigger calendar reconciliation in background
+    import('@/lib/calendar/google-sync')
+      .then(({ reconcileUserGoogleCalendar }) => reconcileUserGoogleCalendar(userId))
+      .catch((cErr) => console.warn('[Reprocess Route] Calendar reconcile warning:', cErr));
+
+    return NextResponse.json({
+      success: true,
+      updatedApplications: statusResult.updatedCount,
+      neoPatDrivesCount: statusResult.results.length,
+      fixed: statusResult.updatedCount,
+    });
   } catch (err) {
-    console.error('Reprocess failed:', err);
+    console.error('Recalculate failed:', err);
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : 'Reprocess failed' },
+      { error: err instanceof Error ? err.message : 'Pipeline recalculation failed' },
       { status: 500 }
     );
   }
 }
 
 export async function GET(req: Request) {
-  let userId: string | null = null;
-  const session = await getSession();
-  if (session) {
-    userId = session.userId;
-  } else {
-    const secret = process.env.CRON_SECRET;
-    if (secret) {
-      const url = new URL(req.url);
-      const authHeader = req.headers.get('authorization');
-      const querySecret = url.searchParams.get('secret') || url.searchParams.get('key');
-      const isAuthorized =
-        authHeader === `Bearer ${secret}` ||
-        authHeader === secret ||
-        querySecret === secret;
-      if (isAuthorized) {
-        userId = url.searchParams.get('userId') || '48380752-3627-4b81-b44a-4e158002902c';
-      }
-    }
-  }
-
-  if (!userId) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-  }
-
-  try {
-    const res = await performReprocess(userId);
-    return NextResponse.json(res);
-  } catch (err) {
-    console.error('Reprocess failed:', err);
-    return NextResponse.json(
-      { error: err instanceof Error ? err.message : 'Reprocess failed' },
-      { status: 500 }
-    );
-  }
+  return POST(req);
 }

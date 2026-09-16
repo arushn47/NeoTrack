@@ -21,29 +21,29 @@ export const STAGE_ACTIVE_STYLES: Record<
   }
 > = {
   0: { // Applied
-    circle: 'border-indigo-400 bg-indigo-500/25 text-indigo-100 ring-2 ring-indigo-400/50 shadow-[0_0_14px_rgba(99,102,241,0.5)]',
-    ripple: 'bg-indigo-400/40',
-    text: 'text-indigo-300 font-bold',
+    circle: 'border-emerald-400 bg-emerald-500/20 text-emerald-100 ring-2 ring-emerald-500/40 shadow-[0_0_12px_rgba(16,185,129,0.35)]',
+    ripple: 'bg-emerald-400/30',
+    text: 'text-emerald-300 font-semibold',
   },
   1: { // PPT
-    circle: 'border-sky-400 bg-sky-500/25 text-sky-100 ring-2 ring-sky-400/50 shadow-[0_0_14px_rgba(56,189,248,0.5)]',
-    ripple: 'bg-sky-400/40',
-    text: 'text-sky-300 font-bold',
+    circle: 'border-emerald-400 bg-emerald-500/20 text-emerald-100 ring-2 ring-emerald-500/40 shadow-[0_0_12px_rgba(16,185,129,0.35)]',
+    ripple: 'bg-emerald-400/30',
+    text: 'text-emerald-300 font-semibold',
   },
   2: { // Test
-    circle: 'border-amber-400 bg-amber-500/25 text-amber-100 ring-2 ring-amber-400/50 shadow-[0_0_14px_rgba(245,158,11,0.5)]',
-    ripple: 'bg-amber-400/40',
-    text: 'text-amber-300 font-bold',
+    circle: 'border-emerald-400 bg-emerald-500/20 text-emerald-100 ring-2 ring-emerald-500/40 shadow-[0_0_12px_rgba(16,185,129,0.35)]',
+    ripple: 'bg-emerald-400/30',
+    text: 'text-emerald-300 font-semibold',
   },
   3: { // Interview
-    circle: 'border-cyan-400 bg-cyan-500/25 text-cyan-100 ring-2 ring-cyan-400/50 shadow-[0_0_14px_rgba(6,182,212,0.5)]',
-    ripple: 'bg-cyan-400/40',
-    text: 'text-cyan-300 font-bold',
+    circle: 'border-emerald-400 bg-emerald-500/20 text-emerald-100 ring-2 ring-emerald-500/40 shadow-[0_0_12px_rgba(16,185,129,0.35)]',
+    ripple: 'bg-emerald-400/30',
+    text: 'text-emerald-300 font-semibold',
   },
   4: { // Offer
-    circle: 'border-emerald-400 bg-emerald-500/30 text-emerald-100 ring-2 ring-emerald-400/60 shadow-[0_0_16px_rgba(16,185,129,0.55)]',
-    ripple: 'bg-emerald-400/45',
-    text: 'text-emerald-300 font-bold',
+    circle: 'border-emerald-400 bg-emerald-500/25 text-emerald-100 ring-2 ring-emerald-500/50 shadow-[0_0_16px_rgba(16,185,129,0.5)]',
+    ripple: 'bg-emerald-400/40',
+    text: 'text-emerald-300 font-semibold',
   },
 };
 
@@ -91,7 +91,8 @@ export interface EffectiveStageResult {
 export function getEffectiveStage(
   status: string,
   latestEvent?: EventLike | null,
-  events?: EventLike[] | null
+  events?: EventLike[] | null,
+  notes?: string | null
 ): EffectiveStageResult {
   const s = (status || '').toLowerCase();
 
@@ -170,7 +171,11 @@ export function getEffectiveStage(
   const isTestCompleted = hasTest && testEvents.every(isEventPast);
   const isInterviewCompleted = hasInterview && intEvents.every(isEventPast);
 
-  // 1. Not Shortlisted: candidate applied but was not shortlisted for the test round
+  const notesText = notes || '';
+  const isNotesInterview = /interviewed|interview/i.test(notesText);
+  const isNotesTest = /test|oa|assessment/i.test(notesText);
+
+  // 1. Not Shortlisted: candidate applied but was screened out before test round (Pre-Test Screening)
   if (s === 'not_shortlisted') {
     return {
       stageIndex: 2,
@@ -187,53 +192,59 @@ export function getEffectiveStage(
     };
   }
 
-  // 2. Rejected / Eliminated: candidate wrote test or interviewed and was eliminated in that round
+  // 2. Eliminated in Interview Round (Interviewed · Not Selected)
+  if (s === 'rejected_interview' || (s === 'rejected' && (isNotesInterview || hasInterview))) {
+    return {
+      stageIndex: 4,
+      effectiveStatus: 'rejected_interview',
+      eliminatedStage: 4,
+      furthestPassedStage: 3, // Passed Applied (0), PPT (1), Test (2), and Interview (3)
+      statusSubtitle: 'Interviewed · Not Selected',
+      hasPpt,
+      hasTest,
+      hasInterview,
+      isTestCompleted,
+      isPptCompleted,
+      isInterviewCompleted,
+    };
+  }
+
+  // 3. Eliminated in Test Round (Post-Test)
+  if (
+    s === 'rejected_test' ||
+    s === 'test_eliminated' ||
+    (s === 'rejected' && (isNotesTest || hasTest || isTestCompleted))
+  ) {
+    return {
+      stageIndex: 3,
+      effectiveStatus: 'rejected_test',
+      eliminatedStage: 3,
+      furthestPassedStage: 2, // Passed Applied (0), PPT (1), and Test (2)
+      statusSubtitle: 'Eliminated in Test Round',
+      hasPpt,
+      hasTest,
+      hasInterview,
+      isTestCompleted,
+      isPptCompleted,
+      isInterviewCompleted,
+    };
+  }
+
+  // 4. Generic Rejected fallback (no notes, no events -> screened out before test)
   if (s === 'rejected') {
-    if (hasInterview) {
-      return {
-        stageIndex: 3,
-        effectiveStatus: 'rejected',
-        eliminatedStage: 3,
-        furthestPassedStage: 2, // Passed Applied, PPT, and Test
-        statusSubtitle: 'Interviewed · Not Selected',
-        hasPpt,
-        hasTest,
-        hasInterview,
-        isTestCompleted,
-        isPptCompleted,
-        isInterviewCompleted,
-      };
-    } else if (hasTest || isTestCompleted) {
-      // Actually wrote/participated in test and failed to qualify for next round
-      return {
-        stageIndex: 2,
-        effectiveStatus: 'rejected',
-        eliminatedStage: 2,
-        furthestPassedStage: hasPpt ? 1 : 0,
-        statusSubtitle: 'Eliminated in Test Round',
-        hasPpt,
-        hasTest,
-        hasInterview,
-        isTestCompleted,
-        isPptCompleted,
-        isInterviewCompleted,
-      };
-    } else {
-      // No test participation or test event — candidate was screened out / not shortlisted
-      return {
-        stageIndex: 2,
-        effectiveStatus: 'not_shortlisted',
-        eliminatedStage: 2,
-        furthestPassedStage: hasPpt ? 1 : 0,
-        statusSubtitle: 'Not Shortlisted for Test',
-        hasPpt,
-        hasTest,
-        hasInterview,
-        isTestCompleted,
-        isPptCompleted,
-        isInterviewCompleted,
-      };
-    }
+    return {
+      stageIndex: 2,
+      effectiveStatus: 'not_shortlisted',
+      eliminatedStage: 2,
+      furthestPassedStage: hasPpt ? 1 : 0,
+      statusSubtitle: 'Not Shortlisted for Test',
+      hasPpt,
+      hasTest,
+      hasInterview,
+      isTestCompleted,
+      isPptCompleted,
+      isInterviewCompleted,
+    };
   }
 
   // 3. Withdrawn / Declined
@@ -480,4 +491,38 @@ export function getStageStatusLabel(status: string, stageIndex: number): string 
     default:
       return 'Applied · In Screening';
   }
+}
+
+/**
+ * Checks if a status represents an eliminated / rejected candidate at any stage
+ * (screening, post-test, or post-interview).
+ */
+export function isEliminatedStatus(status?: string | null): boolean {
+  if (!status) return false;
+  const s = status.toLowerCase().trim();
+  return (
+    s === 'not_shortlisted' ||
+    s === 'rejected' ||
+    s === 'rejected_test' ||
+    s === 'rejected_interview' ||
+    s === 'test_eliminated' ||
+    s === 'interview_eliminated' ||
+    s.startsWith('rejected') ||
+    s.includes('eliminated')
+  );
+}
+
+/**
+ * Checks if a status represents an inactive application:
+ * eliminated, rejected, not applied/registered, withdrawn, or declined.
+ */
+export function isInactiveStatus(status?: string | null): boolean {
+  if (!status) return false;
+  const s = status.toLowerCase().trim();
+  return (
+    isEliminatedStatus(s) ||
+    s === 'not_applied' ||
+    s === 'withdrawn' ||
+    s === 'declined'
+  );
 }

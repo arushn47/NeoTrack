@@ -308,8 +308,9 @@ export default function StageProgressBar({
       break;
     case 'shortlisted':
     case 'test_scheduled':
+    case 'test_completed':
       currentStageIndex = 2;
-      if (isTestInPast) {
+      if (isTestInPast || status === 'test_completed') {
         stageStatusText = 'Test Completed · Awaiting Results';
       } else if (testStartTime) {
         const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];

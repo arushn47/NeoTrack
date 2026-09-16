@@ -146,7 +146,7 @@ export default function ChatAssistant() {
       <button
         onClick={() => setIsOpen(!isOpen)}
         className={cn(
-          'fixed bottom-20 right-4 lg:bottom-6 lg:right-6 z-40 p-3.5 rounded-2xl shadow-xl flex items-center justify-center transition-all duration-300 group cursor-pointer',
+          'fixed bottom-20 right-3.5 sm:right-4 lg:bottom-6 lg:right-6 z-40 p-2.5 sm:p-3.5 rounded-2xl shadow-xl flex items-center justify-center transition-all duration-300 group cursor-pointer',
           isOpen
             ? 'bg-bg-elevated border border-border-default text-text-primary scale-90'
             : 'bg-gradient-to-tr from-accent to-accent-hover text-white shadow-accent/25 hover:scale-105 hover:shadow-2xl'
@@ -154,10 +154,10 @@ export default function ChatAssistant() {
         aria-label="Open Placement Assistant"
       >
         {isOpen ? (
-          <X className="w-6 h-6" />
+          <X className="w-5 h-5 sm:w-6 sm:h-6" />
         ) : (
           <div className="relative">
-            <Bot className="w-6 h-6 group-hover:rotate-6 transition-transform" />
+            <Bot className="w-5 h-5 sm:w-6 sm:h-6 group-hover:rotate-6 transition-transform" />
             <span className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-emerald-400 rounded-full border-2 border-bg-surface ring-2 ring-emerald-400/30" />
           </div>
         )}

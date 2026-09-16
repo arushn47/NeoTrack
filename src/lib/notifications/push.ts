@@ -1,17 +1,29 @@
 import webpush from 'web-push';
 import { createAdminClient } from '@/lib/supabase/admin';
 
-// Initialize web-push with VAPID details if configured
-if (
-  process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY &&
-  process.env.VAPID_PRIVATE_KEY
-) {
-  webpush.setVapidDetails(
-    process.env.VAPID_SUBJECT || 'mailto:admin@neotrack.app',
-    process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY,
-    process.env.VAPID_PRIVATE_KEY
-  );
+/**
+ * Ensures web-push is properly initialized with VAPID credentials in serverless/runtime context.
+ */
+function ensureVapidDetails(): boolean {
+  const pubKey = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY;
+  const privKey = process.env.VAPID_PRIVATE_KEY;
+  const subject = process.env.VAPID_SUBJECT || 'https://www.wheresmyoffer.in';
+
+  if (!pubKey || !privKey) {
+    return false;
+  }
+
+  try {
+    webpush.setVapidDetails(subject, pubKey, privKey);
+    return true;
+  } catch (err) {
+    console.error('[Push] Failed to set VAPID details:', err);
+    return false;
+  }
 }
+
+// Initial top-level invocation if environment is ready
+ensureVapidDetails();
 
 export interface PushNotificationPayload {
   title: string;
@@ -39,11 +51,8 @@ export async function sendPushToUser(
   userId: string,
   payload: PushNotificationPayload
 ): Promise<{ sent: number; failed: number }> {
-  if (
-    !process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY ||
-    !process.env.VAPID_PRIVATE_KEY
-  ) {
-    console.warn('[Push] VAPID keys not configured. Skipping web push.');
+  if (!ensureVapidDetails()) {
+    console.warn('[Push] VAPID keys not configured or invalid. Skipping web push.');
     return { sent: 0, failed: 0 };
   }
 
@@ -59,12 +68,13 @@ export async function sendPushToUser(
     return { sent: 0, failed: 0 };
   }
 
+  // Note: Android requires raster PNG bitmaps (/icon-192.png). SVG icons are silently dropped by Android NotificationManager!
   const stringifiedPayload = JSON.stringify({
     title: payload.title,
     body: payload.body,
-    icon: payload.icon || '/icon.svg',
-    badge: payload.badge || '/icon.svg',
-    tag: payload.tag || 'neotrack-notification',
+    icon: payload.icon || '/icon-192.png',
+    badge: payload.badge || '/icon-192.png',
+    tag: payload.tag || `wmo-${Date.now()}`,
     data: payload.data || { url: '/' },
   });
 
@@ -86,6 +96,7 @@ export async function sendPushToUser(
       try {
         await webpush.sendNotification(pushSubscription, stringifiedPayload, {
           TTL: 86400, // 24 hours in seconds
+          urgency: 'high', // CRITICAL for Android FCM: wakes phone instantly even in battery saver / doze mode
         });
         sent++;
       } catch (err: unknown) {
@@ -110,3 +121,4 @@ export async function sendPushToUser(
 
   return { sent, failed };
 }
+

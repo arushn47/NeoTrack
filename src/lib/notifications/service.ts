@@ -358,3 +358,33 @@ export async function checkAndNotifyLiveEvents(userId: string) {
     console.warn('[Notification Service] checkAndNotifyLiveEvents error:', err.message);
   }
 }
+
+/**
+ * Broadcasts an in-app system update notification to all users with deterministic deduplication.
+ * Useful when engine rules or parsing improvements are deployed.
+ */
+export async function broadcastSystemNotification(params: {
+  title: string;
+  body: string;
+  link?: string;
+  versionKey: string;
+}): Promise<number> {
+  const supabase = createAdminClient();
+  const { data: users, error } = await supabase.from('users').select('id');
+  if (error || !users || users.length === 0) return 0;
+
+  let sent = 0;
+  for (const u of users) {
+    const res = await sendNotification({
+      userId: u.id,
+      type: 'general',
+      title: params.title,
+      body: params.body,
+      link: params.link || '/settings#engine-diagnostics',
+      dedupeKey: `${u.id}:system_update:${params.versionKey}`,
+    });
+    if (res.inAppCreated) sent++;
+  }
+  return sent;
+}
+

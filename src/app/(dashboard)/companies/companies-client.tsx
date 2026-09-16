@@ -24,7 +24,14 @@ import {
 } from 'lucide-react';
 import { cn, timeAgo, formatDate, formatStipend } from '@/lib/utils';
 import { StatusChip, CategoryBadge } from '@/components/ui/status-chip';
-import { StageStepper, getStageIndex, getEffectiveStage } from '@/components/companies/stage-stepper';
+import {
+  StageStepper,
+  getStageIndex,
+  getEffectiveStage,
+  isEliminatedStatus,
+  isInactiveStatus,
+} from '@/components/companies/stage-stepper';
+import { cleanLocationString } from '@/lib/sync/locations';
 
 export interface CompanyWithDetails {
   id: string;
@@ -88,12 +95,12 @@ const matchFilter = (status: string, filter: string) => {
   if (filter === 'all') return true;
   if (filter === 'active') {
     // Active = everything currently in progress (applied, scheduled, completed, shortlisted, offers)
-    // Only terminal rejections, non-registrations, and withdrawals are excluded
-    return !['not_shortlisted', 'rejected', 'not_applied', 'withdrawn', 'declined'].includes(s);
+    // Terminal rejections across ANY stage, non-registrations, and withdrawals are excluded
+    return !isInactiveStatus(s);
   }
   if (filter === 'shortlisted') {
-    // Only active shortlists for upcoming rounds, selections, or offers (NOT completed rounds awaiting results)
-    if (s.includes('completed')) return false;
+    // Only active shortlists for upcoming rounds, selections, or offers (NOT completed rounds awaiting results, and NOT eliminated)
+    if (s.includes('completed') || isEliminatedStatus(s)) return false;
     return [
       'shortlisted',
       'test_scheduled',
@@ -108,8 +115,8 @@ const matchFilter = (status: string, filter: string) => {
     ].includes(s);
   }
   if (filter === 'scheduled') {
-    // Only upcoming scheduled events (NOT completed events)
-    if (s.includes('completed')) return false;
+    // Only upcoming scheduled events (NOT completed events, NOT eliminated)
+    if (s.includes('completed') || isEliminatedStatus(s)) return false;
     return [
       'test_scheduled',
       'test_ongoing',
@@ -122,7 +129,10 @@ const matchFilter = (status: string, filter: string) => {
       'interview',
     ].includes(s);
   }
-  if (filter === 'not_shortlisted') return ['rejected', 'not_shortlisted'].includes(s);
+  if (filter === 'not_shortlisted') {
+    // All forms of elimination across all rounds (screening, test round, or interview round)
+    return isEliminatedStatus(s);
+  }
   if (filter === 'withdrawn') return ['withdrawn', 'declined'].includes(s);
   if (filter === 'not_applied') return s === 'not_applied';
   return true;
@@ -393,11 +403,10 @@ export default function CompaniesClient({
               key={f.id}
               data-testid={`filter-chip-${f.id}`}
               onClick={() => handleFilterChange(f.id)}
-              className={`group flex items-center gap-1.5 shrink-0 rounded-full border px-3.5 sm:px-4 py-1.5 sm:py-2 text-xs font-semibold transition-colors duration-200 cursor-pointer ${
-                filter === f.id
+              className={`group flex items-center gap-1.5 shrink-0 rounded-full border px-3.5 sm:px-4 py-1.5 sm:py-2 text-xs font-semibold transition-colors duration-200 cursor-pointer ${filter === f.id
                   ? 'border-emerald-500/40 bg-emerald-500/15 text-emerald-300'
                   : 'border-zinc-800 bg-zinc-900/50 text-zinc-500 hover:border-zinc-700 hover:text-zinc-300'
-              }`}
+                }`}
             >
               <span>{f.label}</span>
               <span
@@ -430,19 +439,30 @@ export default function CompaniesClient({
           const initials = c.name.slice(0, 2).toUpperCase();
           const hue = getHue(c.name);
 
-          // Mode & Travel: Standardized strictly to 5 options:
-          // 'Online', 'VIT Vellore', 'VIT Chennai', 'VIT AP', 'VIT Bhopal'
+          // Mode & Travel: Standardized to operational venues:
+          // 'Online', 'VIT Vellore', 'VIT Chennai', 'VIT AP', or home campus labs ('Vellore Labs', 'Bhopal Labs', etc.)
           const notesStr = (c.application?.notes || '').toLowerCase();
+          const homeLabs =
+            userCampus === 'VIT Vellore'
+              ? 'Vellore Labs'
+              : userCampus === 'VIT Chennai'
+                ? 'Chennai Labs'
+                : userCampus === 'VIT AP'
+                  ? 'AP Labs'
+                  : 'Bhopal Labs';
+
           const driveMode =
-            notesStr.includes('vellore')
-              ? 'VIT Vellore'
-              : notesStr.includes('chennai')
-              ? 'VIT Chennai'
-              : notesStr.includes('ap') || notesStr.includes('amaravati')
-              ? 'VIT AP'
-              : notesStr.includes('online') || notesStr.includes('virtual')
+            notesStr.includes('online') || notesStr.includes('virtual')
               ? 'Online'
-              : 'VIT Bhopal';
+              : notesStr.includes('vellore')
+                ? (userCampus === 'VIT Vellore' ? 'Vellore Labs' : 'VIT Vellore')
+                : notesStr.includes('chennai')
+                  ? (userCampus === 'VIT Chennai' ? 'Chennai Labs' : 'VIT Chennai')
+                  : notesStr.includes('ap') || notesStr.includes('amaravati')
+                    ? (userCampus === 'VIT AP' ? 'AP Labs' : 'VIT AP')
+                    : notesStr.includes('bhopal')
+                      ? (userCampus === 'VIT Bhopal' ? 'Bhopal Labs' : 'VIT Bhopal')
+                      : homeLabs;
 
           const stipendFormatted = formatStipend(c.application?.stipend);
           const ctcDisplay = c.application?.ctc
@@ -461,11 +481,10 @@ export default function CompaniesClient({
             >
               <Link
                 href={`/companies/${c.id}`}
-                className={`group flex flex-col justify-between h-full w-full min-w-0 max-w-full overflow-hidden rounded-xl border border-zinc-800 bg-[#101014] p-3.5 sm:p-4 text-left transition-colors duration-200 hover:border-zinc-600 ${
-                  status === 'selected' || status === 'offer'
+                className={`group flex flex-col justify-between h-full w-full min-w-0 max-w-full overflow-hidden rounded-xl border border-zinc-800 bg-[#101014] p-3.5 sm:p-4 text-left transition-colors duration-200 hover:border-zinc-600 ${status === 'selected' || status === 'offer'
                     ? 'border-emerald-500/30 shadow-[0_0_40px_rgba(16,185,129,0.08)]'
                     : ''
-                }`}
+                  }`}
               >
                 {/* Top Content Area */}
                 <div className="flex-1 flex flex-col min-w-0">
@@ -498,32 +517,74 @@ export default function CompaniesClient({
                     <span className="font-tabular font-mono text-xs sm:text-sm font-bold text-zinc-200 shrink-0">
                       {ctcDisplay}
                     </span>
-                    <span className="flex items-center gap-1 min-w-0 max-w-[130px] sm:max-w-none truncate shrink-0">
-                      <MapPin className="h-3 w-3 shrink-0 text-zinc-500" />
-                      <span className="truncate">{c.application?.location || 'Pan-India'}</span>
-                    </span>
+                    {/* Work Location: Neutral/Gray Pin + Text (Only show if specified) */}
                     {(() => {
-                      const isHomeCampus = driveMode === userCampus;
-                      const isTravelRequired = driveMode !== 'Online' && !isHomeCampus;
+                      const loc = cleanLocationString(c.application?.location);
+                      if (!loc || loc === 'Not Specified') return null;
+                      return (
+                        <span
+                          className="flex items-center gap-1 min-w-0 max-w-[135px] sm:max-w-none truncate shrink-0 text-zinc-400"
+                          title={`Work Location: ${loc}`}
+                        >
+                          <MapPin className="h-3.5 w-3.5 shrink-0 text-zinc-400" />
+                          <span className="truncate">{loc}</span>
+                        </span>
+                      );
+                    })()}
+                    {(() => {
+                      const isOnline = driveMode === 'Online';
+                      const isHomeLabs = driveMode.endsWith('Labs');
+                      const isVellore = driveMode === 'VIT Vellore';
+                      const isChennai = driveMode === 'VIT Chennai';
+                      const isAp = driveMode === 'VIT AP';
+
+                      const badgeConfig = isOnline
+                        ? {
+                          cls: 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300',
+                          icon: () => <Globe className="h-2.5 w-2.5 text-emerald-400 shrink-0" />,
+                          tooltip: 'Drive Mode: Online (Virtual from hostel)',
+                        }
+                        : isHomeLabs
+                          ? {
+                            cls: 'border-indigo-500/30 bg-indigo-500/15 text-indigo-300',
+                            icon: () => <Building2 className="h-2.5 w-2.5 text-indigo-400 shrink-0" />,
+                            tooltip: `Drive Mode: ${driveMode} (On-Campus Labs / Proctored)`,
+                          }
+                          : isVellore
+                            ? {
+                              cls: 'border-amber-500/30 bg-amber-500/15 text-amber-300',
+                              icon: () => <Plane className="h-2.5 w-2.5 text-amber-400 shrink-0" />,
+                              tooltip: 'Drive Mode: VIT Vellore (Inter-Campus Travel Required)',
+                            }
+                            : isChennai
+                              ? {
+                                cls: 'border-orange-500/30 bg-orange-500/15 text-orange-300',
+                                icon: () => <Plane className="h-2.5 w-2.5 text-orange-400 shrink-0" />,
+                                tooltip: 'Drive Mode: VIT Chennai (Inter-Campus Travel Required)',
+                              }
+                              : isAp
+                                ? {
+                                  cls: 'border-purple-500/30 bg-purple-500/15 text-purple-300',
+                                  icon: () => <Plane className="h-2.5 w-2.5 text-purple-400 shrink-0" />,
+                                  tooltip: 'Drive Mode: VIT AP (Inter-Campus Travel Required)',
+                                }
+                                : {
+                                  cls: 'border-cyan-500/30 bg-cyan-500/15 text-cyan-300',
+                                  icon: () => <Plane className="h-2.5 w-2.5 text-cyan-400 shrink-0" />,
+                                  tooltip: `Drive Mode: ${driveMode} (Inter-Campus Travel Required)`,
+                                };
+
+                      const RenderIcon = badgeConfig.icon;
+
                       return (
                         <span
                           className={cn(
-                            'flex items-center gap-1 shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium border transition-colors',
-                            isTravelRequired
-                              ? 'border-amber-500/30 bg-amber-500/10 text-amber-300'
-                              : driveMode === 'Online'
-                              ? 'border-cyan-500/30 bg-cyan-500/10 text-cyan-300'
-                              : 'border-indigo-500/30 bg-indigo-500/10 text-indigo-300'
+                            'flex items-center gap-1.5 shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium border transition-colors',
+                            badgeConfig.cls
                           )}
-                          title={`Drive Mode: ${driveMode}${isTravelRequired ? ' (Travel Required)' : isHomeCampus ? ' (Home Campus)' : ''}`}
+                          title={badgeConfig.tooltip}
                         >
-                          {isTravelRequired ? (
-                            <Plane className="h-2.5 w-2.5 text-amber-400 shrink-0" />
-                          ) : driveMode === 'Online' ? (
-                            <Globe className="h-2.5 w-2.5 text-cyan-400 shrink-0" />
-                          ) : (
-                            <Building2 className="h-2.5 w-2.5 text-indigo-400 shrink-0" />
-                          )}
+                          <RenderIcon />
                           <span>{driveMode}</span>
                         </span>
                       );
@@ -536,10 +597,10 @@ export default function CompaniesClient({
                       const titleText = isManual
                         ? `Manually updated via Placement Assistant: ${formatDate(c.application!.last_updated)}`
                         : c.latestEmailDate
-                        ? `Latest circular/email: ${formatDate(c.latestEmailDate)}`
-                        : c.application?.applied_at
-                        ? `Applied: ${formatDate(c.application.applied_at)}`
-                        : undefined;
+                          ? `Latest circular/email: ${formatDate(c.latestEmailDate)}`
+                          : c.application?.applied_at
+                            ? `Applied: ${formatDate(c.application.applied_at)}`
+                            : undefined;
 
                       return (
                         <span
@@ -563,18 +624,18 @@ export default function CompaniesClient({
                         {nextEv?.start_time &&
                           effectiveResult.eliminatedStage === -1 &&
                           !['not_shortlisted', 'rejected', 'withdrawn', 'declined', 'not_applied'].includes(status) && (
-                          <span
-                            suppressHydrationWarning
-                            className={cn(
-                              'font-mono text-[10px] flex items-center gap-1 font-semibold px-1.5 py-0.5 rounded border shrink-0',
-                              NEXT_EVENT_CLS[nextEv.event_type] || NEXT_EVENT_CLS.test
-                            )}
-                            title={nextEv.title || nextEv.event_type}
-                          >
-                            <Clock className="h-2.5 w-2.5 shrink-0" />
-                            <span>{formatEventTime(nextEv.start_time)}</span>
-                          </span>
-                        )}
+                            <span
+                              suppressHydrationWarning
+                              className={cn(
+                                'font-mono text-[10px] flex items-center gap-1 font-semibold px-1.5 py-0.5 rounded border shrink-0',
+                                NEXT_EVENT_CLS[nextEv.event_type] || NEXT_EVENT_CLS.test
+                              )}
+                              title={nextEv.title || nextEv.event_type}
+                            >
+                              <Clock className="h-2.5 w-2.5 shrink-0" />
+                              <span>{formatEventTime(nextEv.start_time)}</span>
+                            </span>
+                          )}
                         <span
                           className={cn(
                             'font-mono text-[10px] truncate',

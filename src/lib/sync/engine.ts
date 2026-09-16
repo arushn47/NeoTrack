@@ -874,34 +874,38 @@ export async function runSync(
   activeSyncMap.set(userId, latestProgress);
 
   let lastDbWriteTime = 0;
-  const persistProgressToDb = async (p: SyncProgress, force = false) => {
+  let dbWriteChain: Promise<void> = Promise.resolve();
+  const persistProgressToDb = (p: SyncProgress, force = false) => {
     activeSyncMap.set(userId, p);
     const now = Date.now();
-    if (!force && now - lastDbWriteTime < 1500) return;
+    if (!force && now - lastDbWriteTime < 1500) return Promise.resolve();
     lastDbWriteTime = now;
-    try {
-      await supabase.from('sync_state').upsert({
-        user_id: userId,
-        is_syncing: p.phase !== 'complete' && p.phase !== 'error',
-        phase: p.phase,
-        account_email: p.accountEmail,
-        account_type: p.accountType,
-        total_messages: p.totalMessages,
-        processed_messages: p.processedMessages,
-        new_emails: p.newEmails,
-        new_companies: p.newCompanies,
-        skipped_duplicates: p.skippedDuplicates,
-        current_subject: p.currentSubject || null,
-        is_initial_sync: isInitialSync,
-        current_page_index: p.currentPageIndex ?? 0,
-        total_pages: p.totalPagesCount ?? 1,
-        updated_at: new Date().toISOString(),
-        completed_at: p.phase === 'complete' ? new Date().toISOString() : null,
-        last_error: p.errors.length > 0 ? p.errors[p.errors.length - 1] : null,
-      });
-    } catch {
-      // Gracefully ignore if sync_state table not yet created
-    }
+    dbWriteChain = dbWriteChain.then(async () => {
+      try {
+        await supabase.from('sync_state').upsert({
+          user_id: userId,
+          is_syncing: p.phase !== 'complete' && p.phase !== 'error',
+          phase: p.phase,
+          account_email: p.accountEmail,
+          account_type: p.accountType,
+          total_messages: p.totalMessages,
+          processed_messages: p.processedMessages,
+          new_emails: p.newEmails,
+          new_companies: p.newCompanies,
+          skipped_duplicates: p.skippedDuplicates,
+          current_subject: p.currentSubject || null,
+          is_initial_sync: isInitialSync,
+          current_page_index: p.currentPageIndex ?? 0,
+          total_pages: p.totalPagesCount ?? 1,
+          updated_at: new Date().toISOString(),
+          completed_at: p.phase === 'complete' ? new Date().toISOString() : null,
+          last_error: p.errors.length > 0 ? p.errors[p.errors.length - 1] : null,
+        });
+      } catch {
+        // Gracefully ignore if sync_state table not yet created
+      }
+    });
+    return dbWriteChain;
   };
 
   const notifyProgress = (p: SyncProgress, forceDb = false) => {
@@ -1037,24 +1041,11 @@ export async function runSync(
 
           accountResult.emailsFetched = messageIds.length;
 
-          // Fast Pre-Check: Filter out emails already in DB
-          const { data: existingRows } = await supabase
-            .from('emails')
-            .select('gmail_message_id')
-            .eq('gmail_account_id', account.id);
+          let newMsgIds: string[] = [];
+          let skippedCount = 0;
 
-          const existingSet = new Set((existingRows || []).map((r) => r.gmail_message_id));
-          const newMsgIds = messageIds.filter((id) => !existingSet.has(id));
-          const skippedCount = messageIds.length - newMsgIds.length;
-
-          progress.skippedDuplicates += skippedCount;
-          result.skippedDuplicates += skippedCount;
-
-          if (newMsgIds.length > 0) {
-            pages = await planSyncPages(supabase, userId, account, newMsgIds);
-            pendingPages = pages.filter((p) => p.status !== 'complete');
-          } else {
-            // No new emails to process
+          if (messageIds.length === 0) {
+            // Zero-egress shortcut: no DB check needed when Gmail returned 0 candidate message IDs
             await supabase
               .from('gmail_accounts')
               .update({
@@ -1062,6 +1053,43 @@ export async function runSync(
                 last_history_id: nextHistoryId || account.last_history_id,
               })
               .eq('id', account.id);
+          } else {
+            // Fast Pre-Check: Filter out emails already in DB
+            let existingSet = new Set<string>();
+            if (messageIds.length <= 500) {
+              const { data: existingRows } = await supabase
+                .from('emails')
+                .select('gmail_message_id')
+                .eq('gmail_account_id', account.id)
+                .in('gmail_message_id', messageIds);
+              existingSet = new Set((existingRows || []).map((r) => r.gmail_message_id));
+            } else {
+              const { data: existingRows } = await supabase
+                .from('emails')
+                .select('gmail_message_id')
+                .eq('gmail_account_id', account.id);
+              existingSet = new Set((existingRows || []).map((r) => r.gmail_message_id));
+            }
+
+            newMsgIds = messageIds.filter((id) => !existingSet.has(id));
+            skippedCount = messageIds.length - newMsgIds.length;
+
+            progress.skippedDuplicates += skippedCount;
+            result.skippedDuplicates += skippedCount;
+
+            if (newMsgIds.length > 0) {
+              pages = await planSyncPages(supabase, userId, account, newMsgIds);
+              pendingPages = pages.filter((p) => p.status !== 'complete');
+            } else {
+              // No new emails to process
+              await supabase
+                .from('gmail_accounts')
+                .update({
+                  last_sync_at: new Date().toISOString(),
+                  last_history_id: nextHistoryId || account.last_history_id,
+                })
+                .eq('id', account.id);
+            }
           }
         }
 
@@ -1273,9 +1301,11 @@ export async function runSync(
     result.hasMorePagesPending = hasAnyPending;
 
   // 5. Circular reconciliation: reconcile unlinked college circulars against user companies
-  // IDLE & ARCHIVE GUARD: Only run reconciliation when ALL pages are complete and emails were processed.
-  // Running this during intermediate archive pages wastes 15 seconds per chunk!
-  if (!result.hasMorePagesPending && (result.totalEmailsProcessed > 0 || hadCompletedInitialPages)) {
+  // IDLE & ARCHIVE GUARD: ONLY run heavy post-sync steps (reconciliation, dedup, status recalc, calendar)
+  // when new emails were actually received or initial setup pages just completed.
+  // This prevents idle cron runs from downloading thousands of email rows every 15 minutes and exhausting database egress!
+  const hasNewData = (result.newEmails > 0 || result.newCompanies > 0 || hadCompletedInitialPages);
+  if (!result.hasMorePagesPending && hasNewData) {
     try {
       const { data: unlinkedEmails } = await supabase
         .from('emails')
@@ -1601,7 +1631,7 @@ export async function runSync(
     }
   } else {
     console.log(
-      `[SyncEngine] User ${userId} sync run idle: 0 emails processed across accounts. Skipped catalog fetch, reconciliation, and calendar sync.`
+      `[SyncEngine] User ${userId} sync run idle: 0 new emails/companies. Skipped circular reconciliation, dedup, status recalculation, and calendar sync (0 egress).`
     );
   }
 
@@ -1610,6 +1640,7 @@ export async function runSync(
   activeSyncLocks.delete(userId);
   activeSyncMap.delete(userId);
   try {
+    await dbWriteChain;
     const isError = result.errors.length > 0 && result.totalEmailsProcessed === 0;
     const isComplete = !result.hasMorePagesPending;
     await supabase.from('sync_state').upsert({
@@ -1669,11 +1700,30 @@ export function isFuzzyCompanyMatch(compName: string, targetName: string): boole
     return false;
   }
 
+  // Track Token Guard: If either company has a specific technical track token (SAP, GDS, SDET, SRE, Aerospace),
+  // they MUST both have the SAME track token to match. A specialized track never merges with another track or bare brand.
+  const TRACK_TOKENS = ['sdet', 'sre', 'sap', 'gds', 'aerospace'];
+  for (const track of TRACK_TOKENS) {
+    const cHasTrack = new RegExp(`\\b${track}\\b`, 'i').test(cLower);
+    const tHasTrack = new RegExp(`\\b${track}\\b`, 'i').test(tLower);
+    if (cHasTrack !== tHasTrack) {
+      return false;
+    }
+  }
+
   // Normalize known typos
   cLower = cLower.replace(/\bunthikable\b/g, 'unthinkable');
   tLower = tLower.replace(/\bunthikable\b/g, 'unthinkable');
 
   if (cLower === tLower) return true;
+
+  // --- Step 0.5: Collapsed alphanumeric match ---
+  // Matches "Valuelabs" ↔ "Value Labs", "SquadStack" ↔ "Squad Stack", "BlackRock" ↔ "Black Rock"
+  const cAlpha = cLower.replace(/[^a-z0-9]/g, '');
+  const tAlpha = tLower.replace(/[^a-z0-9]/g, '');
+  if (cAlpha.length >= 3 && tAlpha.length >= 3 && cAlpha === tAlpha) {
+    return true;
+  }
 
   // --- Step 1: Normalized-key match ---
   // Strips legal words, removes spaces/punctuation, then compares.

@@ -1,6 +1,7 @@
 import type { ParsedEmail } from '@/lib/gmail/client';
 import { extractEvents, extractJobDetails, type ExtractedEvent } from '@/lib/sync/events';
 import { createAdminClient } from '@/lib/supabase/admin';
+import { isInactiveStatus } from '@/lib/stages';
 
 /**
  * Converts HTML email content to clean plain text so table cells, divs, and paragraphs
@@ -332,7 +333,7 @@ export async function processEmailForEventsAndStatus(
     for (const event of extractedEvents) {
       // RULE: For tests, interviews, and PPTs: ONLY add to user's schedule if candidate is shortlisted or actively participating!
       const currentAppStatus = existingApp?.status || 'not_applied';
-      const isEliminated = ['not_shortlisted', 'rejected', 'withdrawn', 'declined'].includes(currentAppStatus);
+      const isEliminated = isInactiveStatus(currentAppStatus);
       const isTestOrInterview = ['online_test', 'coding_test', 'technical_interview', 'hr_interview', 'final_interview'].includes(event.eventType);
 
       if (isEliminated && !isNeoMatched) {
@@ -558,13 +559,19 @@ export async function processEmailForEventsAndStatus(
       emailClass === 'result' &&
       /not\s+selected|regret|unfortunately|could\s+not\s+be\s+selected/i.test(subjLower + ' ' + fullText);
 
+    const isTestCompletedShortlist =
+      /test\s+shortlisted|shortlisted\s+based\s+on\s+(?:the\s+)?test|assessment\s+shortlisted|already\s+completed\s+(?:the\s+)?(?:assessment|test)|location\s+preference/i.test(subjLower + ' ' + fullText);
+
     if (isRejectionLanguage) {
       newStatus = 'rejected';
     } else if (/final\s*selection|offer\s*(?:letter|release)|congratulations.*(?:final|offer)/i.test(subjLower) || (/selection\s*list/i.test(subjLower) && !/interview|ppt|test/i.test(subjLower))) {
       newStatus = 'selected';
-    } else if (/interview|next\s+round/i.test(subjLower)) {
+    } else if (/interview/i.test(subjLower) || (/next\s+round/i.test(subjLower) && !/test|assessment|coding|exam|shl|mettl|hackerrank|aptitude/i.test(subjLower + ' ' + fullText))) {
       newStatus = 'interview_scheduled';
-    } else if (/online\s+test|coding\s+test|assessment/i.test(subjLower) || (matchDetail?.includes('Google Sheet') && !/ppt|pre[\s-]*placement/i.test(subjLower))) {
+    } else if (isTestCompletedShortlist) {
+      // The test round is already complete! Candidate completed the test and is in the post-test form / preference stage.
+      newStatus = 'test_completed';
+    } else if (/online\s+test|coding\s+test|assessment|test/i.test(subjLower) || /next\s+round/i.test(subjLower) || (matchDetail?.includes('Google Sheet') && !/ppt|pre[\s-]*placement/i.test(subjLower))) {
       newStatus = 'test_scheduled';
     } else if (/ppt|pre[\s-]*placement/i.test(subjLower)) {
       newStatus = 'ppt_scheduled';
@@ -605,24 +612,50 @@ export async function processEmailForEventsAndStatus(
       const isPostTestRound =
         emailClass === 'interview' ||
         /interview\s+(?:is\s+)?scheduled|technical\s+interview|hr\s+interview|final\s+interview/i.test(subjLower) ||
-        /next\s+round/i.test(subjLower) ||
+        (/next\s+round/i.test(subjLower) && !/test|assessment|coding|exam|shl|mettl|hackerrank|aptitude/i.test(fullText)) ||
         /selection\s+list|final\s+shortlist|congratulations.*(?:selection\s+list|selects)/i.test(subjLower) ||
         /interview\s+shortlist|shortlist\s+for\s+interview|next\s+round\s+shortlist|shortlisted\s+for\s+next\s+round/i.test(fullText);
 
       if (isPostTestRound) {
         // Check if user had an actual confirmed shortlist match in the database
         const { data: compMatches } = await supabase
-          .from('matches')
-          .select('id')
+          .from('candidate_matches')
+          .select('id, email_id, emails(received_at)')
           .eq('user_id', userId)
-          .eq('company_id', companyId)
-          .limit(1);
+          .eq('company_id', companyId);
 
         const hasConfirmedMatch = compMatches && compMatches.length > 0;
 
-        if (hasConfirmedMatch && ['test_scheduled', 'interview_scheduled'].includes(currentStatus)) {
+        // Check if there is an upcoming test event for this company that hasn't happened yet
+        const { data: upcomingEvents } = await supabase
+          .from('events')
+          .select('start_time, event_type')
+          .eq('user_id', userId)
+          .eq('company_id', companyId)
+          .in('event_type', ['online_test', 'coding_test']);
+
+        const hasFutureTestEvent = upcomingEvents?.some((ev) => {
+          if (!ev.start_time) return false;
+          return new Date(ev.start_time).getTime() > Date.now();
+        });
+
+        // A candidate can ONLY be rejected if:
+        // 1. They were in a previous stage (test_scheduled / interview_scheduled)
+        // 2. They don't have a test scheduled in the future!
+        // 3. The current email was received AFTER their test shortlist match email
+        const latestMatchTime = compMatches?.reduce((max, m: any) => {
+          const t = m.emails?.received_at ? new Date(m.emails.received_at).getTime() : 0;
+          return Math.max(max, t);
+        }, 0) || 0;
+
+        const isEmailAfterTestMatch = !latestMatchTime || emailReceivedTime >= (latestMatchTime - 5 * 60 * 1000);
+
+        if (hasConfirmedMatch && ['test_scheduled', 'interview_scheduled'].includes(currentStatus) && !hasFutureTestEvent && isEmailAfterTestMatch) {
           // User was in the test/interview and was eliminated in a subsequent round
           newStatus = 'rejected';
+        } else if (hasConfirmedMatch && hasFutureTestEvent) {
+          // Candidate still has an upcoming test scheduled!
+          newStatus = 'test_scheduled';
         } else {
           newStatus = 'not_shortlisted';
         }

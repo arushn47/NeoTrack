@@ -21,7 +21,7 @@ export default async function AnalyticsPage() {
     { data: applications },
     { data: events },
     { data: companies },
-    { data: emails },
+    { count: emailsCount },
     { data: candidateMatches },
     { data: userProfile },
     { data: accounts },
@@ -41,11 +41,11 @@ export default async function AnalyticsPage() {
       .eq('user_id', session.userId),
     supabase
       .from('emails')
-      .select('id, classification')
+      .select('id', { count: 'exact', head: true })
       .eq('user_id', session.userId),
     supabase
       .from('candidate_matches')
-      .select('id')
+      .select('id, email_id')
       .eq('user_id', session.userId),
     supabase
       .from('users')
@@ -58,6 +58,22 @@ export default async function AnalyticsPage() {
       .eq('user_id', session.userId),
   ]);
 
+  // Resolve unique shortlisted company count
+  let uniqueMatchesCount = 0;
+  if (candidateMatches && candidateMatches.length > 0) {
+    const matchedEmailIds = candidateMatches.map((m) => m.email_id).filter(Boolean);
+    if (matchedEmailIds.length > 0) {
+      const { data: matchedEmails } = await supabase
+        .from('emails')
+        .select('company_id')
+        .in('id', matchedEmailIds);
+      const uniqueCompanyIds = new Set(
+        (matchedEmails || []).map((e) => e.company_id).filter(Boolean)
+      );
+      uniqueMatchesCount = uniqueCompanyIds.size;
+    }
+  }
+
   const collegeEmail = accounts?.find((a) => a.account_type === 'college')?.email;
   const personalEmail = accounts?.find((a) => a.account_type === 'personal')?.email || session.email;
   const campus = detectCampus(collegeEmail || personalEmail);
@@ -69,8 +85,9 @@ export default async function AnalyticsPage() {
         applications={applications || []}
         events={events || []}
         companiesCount={companies?.length || 0}
-        emailsCount={emails?.length || 0}
+        emailsCount={emailsCount || 0}
         matchesCount={candidateMatches?.length || 0}
+        uniqueMatchesCount={uniqueMatchesCount}
         neoId={userProfile?.neo_id || null}
         campus={campus}
         branch={branch}
